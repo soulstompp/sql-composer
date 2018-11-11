@@ -1,0 +1,1 @@
+SELECT foo_id, bar FROM foo WHERE foo.bar = :varname:;

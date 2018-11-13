@@ -10,22 +10,27 @@ use std::path::Path;
 #[derive(Debug, Default, PartialEq)]
 pub struct SQLStatement {
     template: String,
-    chunks: Vec<SQL>
+    pub chunks: Vec<SQL>
 }
 
 impl SQLStatement {
+    fn from_str(q: &str) -> Self {
+        let (remaining, stmt) = parse_template(&q.as_bytes()).unwrap();
+        stmt
+    }
+
     fn from_path(f: &Path) -> ::std::io::Result<SQLStatement> {
         let mut f = File::open(f).unwrap();
         let mut s = String::new();
 
         f.read_to_string(&mut s);
 
-        let (remaining, stmt) = template(&s.as_bytes()).unwrap();
+        let (remaining, stmt) = parse_template(&s.as_bytes()).unwrap();
 
         Ok(stmt)
     }
 
-    fn from_utf8(vec: &[u8]) -> ::std::io::Result<SQLStatement> {
+    fn from_utf8_path_name(vec: &[u8]) -> ::std::io::Result<SQLStatement> {
         //TODO: don't unwrap here
         let s = &std::str::from_utf8(vec).unwrap();
         let p = Path::new(s);
@@ -110,14 +115,23 @@ impl fmt::Display for SQLText {
 
 #[derive(Debug, PartialEq)]
 pub struct SQLBinding {
-    name: String
+    pub name: String,
+    pub quoted: bool
 }
 
 impl SQLBinding {
     fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
         let s = String::from_utf8(vec.to_vec())?;
 
-        Ok(Self{name: s})
+        println!("found unquoted bounded!");
+        Ok(Self{ name: s, quoted: false })
+    }
+
+    fn from_quoted_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
+        let s = String::from_utf8(vec.to_vec())?;
+
+        println!("found quoted bounded!");
+        Ok(Self{ name: s, quoted: true })
     }
 }
 
@@ -127,19 +141,20 @@ impl fmt::Display for SQLBinding {
     }
 }
 
-named!(_template<Vec<SQL>>,
+named!(_parse_template<Vec<SQL>>,
        many1!(
         alt_complete!(
-            do_parse!(e: sql_end >> (SQL::Ending(e)))
-            | do_parse!(i: include >> (SQL::SubStatement(i)))
-            | do_parse!(b: bindvar >> (SQL::Binding(b)))
-            | do_parse!(s: sql >> (SQL::Text(s)))
+            do_parse!(e: parse_sql_end >> (SQL::Ending(e)))
+            | do_parse!(i: parse_include >> (SQL::SubStatement(i)))
+            | do_parse!(q: parse_quoted_bindvar >> (SQL::Binding(q)))
+            | do_parse!(b: parse_bindvar >> (SQL::Binding(b)))
+            | do_parse!(s: parse_sql >> (SQL::Text(s)))
         )
     )
 );
 
-fn template(input: &[u8]) -> IResult<&[u8], SQLStatement> {
-    let res = _template(input);
+pub fn parse_template(input: &[u8]) -> IResult<&[u8], SQLStatement> {
+    let res = _parse_template(input);
 
     res.and_then(|(remaining, chunks)| {
         Ok((remaining, SQLStatement {
@@ -149,18 +164,29 @@ fn template(input: &[u8]) -> IResult<&[u8], SQLStatement> {
     })
 }
 
-named!(include<SQLStatement>,
+named!(parse_include<SQLStatement>,
    map_res!(
        delimited!(
            tag_s!("::"),
            take_until_s!("::"),
            tag_s!("::")
        ),
-       SQLStatement::from_utf8
+       SQLStatement::from_utf8_path_name
    )
 );
 
-named!(bindvar<SQLBinding>,
+named!(parse_quoted_bindvar<SQLBinding>,
+   map_res!(
+       delimited!(
+           tag_s!("':"),
+           take_until_s!(":"),
+           tag_s!(":'")
+       ),
+       SQLBinding::from_quoted_utf8
+   )
+);
+
+named!(parse_bindvar<SQLBinding>,
    map_res!(
        delimited!(
            tag_s!(":"),
@@ -171,17 +197,20 @@ named!(bindvar<SQLBinding>,
    )
 );
 
-named!(sql<SQLText>,
+named!(parse_sql<SQLText>,
    map_res!(
        alt_complete!(
-             take_until_s!(":")
+             take_until_s!("::")
+           | take_until_s!("':")
+           | take_until_s!(":")
            | take_until_s!(";")
+           | take!(1)
        ),
        SQLText::from_utf8
    )
 );
 
-named!(sql_end<SQLEnding>,
+named!(parse_sql_end<SQLEnding>,
    map_res!(
        tag_s!(";"),
        SQLEnding::from_utf8
@@ -191,7 +220,7 @@ named!(sql_end<SQLEnding>,
 #[cfg(test)]
 mod tests {
     use nom::IResult;
-    use super::{ bindvar, sql, sql_end, include, template, SQLStatement, SQLBinding, SQLEnding, SQLText, SQL };
+    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_include, parse_template, SQLStatement, SQLBinding, SQLEnding, SQLText, SQL };
     use std::str;
     use std::path::Path;
 
@@ -201,7 +230,9 @@ mod tests {
             chunks: vec![
                 SQL::Text(SQLText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                 SQL::Binding(SQLBinding::from_utf8(b"varname").unwrap()),
-                SQL::Ending(SQLEnding::from_utf8(b";").unwrap())
+                SQL::Ending(SQLEnding::from_utf8(b";").unwrap()),
+                SQL::Text(SQLText::from_utf8(b"\n").unwrap())
+
             ]
         }
     }
@@ -217,31 +248,33 @@ mod tests {
                         SQL::Text(SQLText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                         SQL::Binding(SQLBinding::from_utf8(b"varname").unwrap()),
                         SQL::Ending(SQLEnding::from_utf8(b";").unwrap()),
+                        SQL::Text(SQLText::from_utf8(b"\n").unwrap()),
                     ]
                 }),
                 SQL::Text(SQLText::from_utf8(b"\n)").unwrap()),
                 SQL::Ending(SQLEnding::from_utf8(b";").unwrap()),
+                SQL::Text(SQLText::from_utf8(b"\n").unwrap()),
             ]
         }
     }
 
     #[test]
-    fn parse_bindvar() {
+    fn test_parse_bindvar() {
         let input = b":varname:blah blah blah";
 
-        let out = bindvar(input);
+        let out = parse_bindvar(input);
 
-        let expected = Ok((&b"blah blah blah"[..], SQLBinding{ name: "varname".into() }));
+        let expected = Ok((&b"blah blah blah"[..], SQLBinding{ name: "varname".into(), quoted: false  }));
         assert_eq!(out, expected);
     }
 
     #[test]
-    fn parse_sql_end() {
+    fn test_parse_sql_end() {
         let input = b";blah blah blah";
 
         let expected = Ok((&b"blah blah blah"[..], SQLEnding{ value: ";".into() }));
 
-        let out = sql_end(input);
+        let out = parse_sql_end(input);
 
         assert_eq!(out, expected);
 
@@ -251,17 +284,17 @@ mod tests {
     fn parse_sql_until_path() {
         let input = b"select * from foo where foo.bar = :varname:;";
 
-        let out = sql(input);
+        let out = parse_sql(input);
 
         let expected = Ok((&b":varname:;"[..], SQLText{ value: "select * from foo where foo.bar = ".into() } ));
         assert_eq!(out, expected);
     }
 
     #[test]
-    fn parse_include() {
+    fn test_parse_include() {
         let input = b"::src/tests/simple-template.tql::blah blah blah";
 
-        let out = include(input);
+        let out = parse_include(input);
 
         let expected = Ok((&b"blah blah blah"[..],
                            simple_template_stmt() ));
@@ -269,10 +302,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_simple_template() {
+    fn test_parse_simple_template() {
         let input = "SELECT * FROM (::src/tests/simple-template.tql::) WHERE name = ':bindvar:';";
 
-        let out = template(input.as_bytes());
+        let out = parse_template(input.as_bytes());
 
         let expected = Ok((&b""[..],
                            SQLStatement{
@@ -280,9 +313,8 @@ mod tests {
                                chunks: vec![
                                  SQL::Text(SQLText::from_utf8(b"SELECT * FROM (").unwrap()),
                                  SQL::SubStatement(simple_template_stmt()),
-                                 SQL::Text(SQLText::from_utf8(b") WHERE name = '").unwrap()),
-                                 SQL::Binding(SQLBinding::from_utf8(b"bindvar").unwrap()),
-                                 SQL::Text(SQLText::from_utf8(b"'").unwrap()),
+                                 SQL::Text(SQLText::from_utf8(b") WHERE name = ").unwrap()),
+                                 SQL::Binding(SQLBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                  SQL::Ending(SQLEnding::from_utf8(b";").unwrap())
                                ]
                            }
@@ -292,10 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_include_template() {
+    fn test_parse_include_template() {
         let input = "SELECT * FROM (::src/tests/include-template.tql::) WHERE name = ':bindvar:';";
 
-        let out = template(input.as_bytes());
+        let out = parse_template(input.as_bytes());
 
         let expected:Result<(&[u8], SQLStatement), nom::Err<&[u8]>> = Ok((&b""[..],
                            SQLStatement{
@@ -303,9 +335,8 @@ mod tests {
                                chunks: vec![
                                  SQL::Text(SQLText::from_utf8(b"SELECT * FROM (").unwrap()),
                                  SQL::SubStatement(include_template_stmt()),
-                                 SQL::Text(SQLText::from_utf8(b") WHERE name = '").unwrap()),
-                                 SQL::Binding(SQLBinding::from_utf8(b"bindvar").unwrap()),
-                                 SQL::Text(SQLText::from_utf8(b"'").unwrap()),
+                                 SQL::Text(SQLText::from_utf8(b") WHERE name = ").unwrap()),
+                                 SQL::Binding(SQLBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                  SQL::Ending(SQLEnding::from_utf8(b";").unwrap())
                                ]
                            }
@@ -315,11 +346,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_file_template() {
+    fn test_parse_file_template() {
         let stmt = SQLStatement::from_path(Path::new("src/tests/simple-template.tql")).unwrap();                                                                                                                  //TODO: this shouldn't have the extra \n at the end?
         let expected = simple_template_stmt();
 
-        println!("found stmt: {:?}", stmt);
+        //println!("found stmt: {:?}", stmt);
 
         assert_eq!(stmt, expected);
     }

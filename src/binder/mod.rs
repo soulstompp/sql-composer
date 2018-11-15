@@ -1,4 +1,5 @@
 pub mod rusqlite;
+pub mod postgres;
 
 use std::collections::HashMap;
 pub use super::parser::{SQLStatement, SQL, parse_template};

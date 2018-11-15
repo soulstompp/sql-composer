@@ -1,7 +1,9 @@
 #[macro_use]
 extern crate nom;
-extern crate rusqlite;
 extern crate time;
+
+extern crate rusqlite;
+extern crate postgres;
 
 use std::str;
 

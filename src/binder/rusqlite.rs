@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use rusqlite::{Connection, NO_PARAMS};
 use rusqlite::types::ToSql;
 
-use super::{Binder, BinderConfig, parse_template};
+use super::{Binder, BinderConfig};
 
 struct RusqliteBinder<'a> {
     config: BinderConfig,
-    values: HashMap<String, Vec<&'a rusqlite::types::ToSql>>
+    values: HashMap<String, Vec<&'a ToSql>>
 }
 
 impl<'a> RusqliteBinder<'a> {
@@ -17,20 +16,20 @@ impl<'a> RusqliteBinder<'a> {
          values: HashMap::new()
         }
     }
-
 }
 
-impl <'a>Binder<Vec<&'a (dyn rusqlite::types::ToSql + 'a)>> for RusqliteBinder<'a> {
+impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for RusqliteBinder<'a> {
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
         }
     }
-    fn bind_var(u: usize, name: String) -> String {
+
+    fn bind_var(&self, u: usize, _name: String) -> String {
         format!("?{}", u)
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn rusqlite::types::ToSql + 'a)> {
+    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn ToSql + 'a)> {
         let mut acc = vec![];
 
         for n in names {
@@ -50,11 +49,12 @@ impl <'a>Binder<Vec<&'a (dyn rusqlite::types::ToSql + 'a)>> for RusqliteBinder<'
 
 #[cfg(test)]
 mod tests {
-    use super::{Binder, BinderConfig, Connection, NO_PARAMS, RusqliteBinder, parse_template};
+    use super::{Binder, RusqliteBinder};
+    use super::super::parse_template;
+
     use std::collections::HashMap;
     use time::Timespec;
-    use rusqlite::types::ToSql;
-    use std::cmp::PartialEq;
+    use rusqlite::{Connection, NO_PARAMS};
 
     #[derive(Debug, PartialEq)]
     struct Person {
@@ -93,6 +93,8 @@ mod tests {
 
         let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:name:, :time_created:, :data:)").unwrap();
 
+        assert_eq!(remaining, b"", "nothing remaining");
+
         let mut bv = RusqliteBinder::new();
 
         bv.values.insert("name".into(), vec![&person.name]);
@@ -101,11 +103,7 @@ mod tests {
 
         let (bound_sql, bindings) = bv.bind(insert_stmt);
 
-        println!("bound sql: {}", bound_sql);
-
         let expected_bound_sql = "INSERT INTO person (name, time_created, data) VALUES (?1, ?2, ?3)";
-
-        let expected_bind_values = &[&person.name as &ToSql, &person.time_created, &person.data];
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
@@ -117,7 +115,7 @@ mod tests {
         let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':name:' AND time_created = ':time_created:' AND name = ':name:' AND time_created = ':time_created:'").unwrap();
 
 
-        println!("select: {}", select_stmt);
+        assert_eq!(remaining, b"", "nothing remaining");
 
         let (bound_sql, bindings) = bv.bind(select_stmt);
 

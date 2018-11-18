@@ -25,7 +25,7 @@ impl <'a>Binder<Vec<&'a (dyn ToValue + 'a)>> for MysqlBinder<'a> {
         }
     }
 
-    fn bind_var(_u: usize, _name: String) -> String {
+    fn bind_var(&self, _u: usize, _name: String) -> String {
         format!("?")
     }
 
@@ -96,7 +96,6 @@ mod tests {
 
         let (bound_sql, bindings) = bv.bind(insert_stmt);
 
-        println!("bound sql: {}", bound_sql);
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES (?, ?)";
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
@@ -109,8 +108,6 @@ mod tests {
         let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':name:' AND name = ':name:'").unwrap();
 
         assert_eq!(remaining, b"", "select stmt nothing remaining");
-
-        println!("select: {}", select_stmt);
 
         let (bound_sql, bindings) = bv.bind(select_stmt);
 

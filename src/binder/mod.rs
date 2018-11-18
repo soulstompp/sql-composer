@@ -2,7 +2,6 @@ pub mod rusqlite;
 pub mod postgres;
 pub mod mysql;
 
-use std::collections::HashMap;
 pub use super::parser::{SQLStatement, SQL, parse_template};
 
 pub struct BinderConfig {

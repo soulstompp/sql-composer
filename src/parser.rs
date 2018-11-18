@@ -1,7 +1,6 @@
 use std::str;
 
 use nom::IResult;
-use std::io;
 use std::io::prelude::*;
 use std::fs::File;
 use std::fmt;
@@ -16,6 +15,11 @@ pub struct SQLStatement {
 impl SQLStatement {
     fn from_str(q: &str) -> Self {
         let (remaining, stmt) = parse_template(&q.as_bytes()).unwrap();
+
+        if remaining.len() > 0 {
+            panic!("found extra information: {}", String::from_utf8(remaining.to_vec()).unwrap());
+        }
+
         stmt
     }
 
@@ -23,9 +27,9 @@ impl SQLStatement {
         let mut f = File::open(f).unwrap();
         let mut s = String::new();
 
-        f.read_to_string(&mut s);
+        let _res = f.read_to_string(&mut s);
 
-        let (remaining, stmt) = parse_template(&s.as_bytes()).unwrap();
+        let (_remaining, stmt) = parse_template(&s.as_bytes()).unwrap();
 
         Ok(stmt)
     }
@@ -123,14 +127,12 @@ impl SQLBinding {
     fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
         let s = String::from_utf8(vec.to_vec())?;
 
-        println!("found unquoted bounded!");
         Ok(Self{ name: s, quoted: false })
     }
 
     fn from_quoted_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
         let s = String::from_utf8(vec.to_vec())?;
 
-        println!("found quoted bounded!");
         Ok(Self{ name: s, quoted: true })
     }
 }
@@ -219,9 +221,7 @@ named!(parse_sql_end<SQLEnding>,
 
 #[cfg(test)]
 mod tests {
-    use nom::IResult;
     use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_include, parse_template, SQLStatement, SQLBinding, SQLEnding, SQLText, SQL };
-    use std::str;
     use std::path::Path;
 
     fn simple_template_stmt() -> SQLStatement {
@@ -349,8 +349,6 @@ mod tests {
     fn test_parse_file_template() {
         let stmt = SQLStatement::from_path(Path::new("src/tests/simple-template.tql")).unwrap();                                                                                                                  //TODO: this shouldn't have the extra \n at the end?
         let expected = simple_template_stmt();
-
-        //println!("found stmt: {:?}", stmt);
 
         assert_eq!(stmt, expected);
     }

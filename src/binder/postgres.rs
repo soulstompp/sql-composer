@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use postgres::{Connection, TlsMode};
 use postgres::types::ToSql;
 
-use super::{Binder, BinderConfig, parse_template};
+use super::{Binder, BinderConfig};
 
 struct PostgresBinder<'a> {
     config: BinderConfig,
-    values: HashMap<String, Vec<&'a postgres::types::ToSql>>
+    values: HashMap<String, Vec<&'a ToSql>>
 }
 
 impl<'a> PostgresBinder<'a> {
@@ -20,18 +19,18 @@ impl<'a> PostgresBinder<'a> {
 
 }
 
-impl <'a>Binder<Vec<&'a (dyn postgres::types::ToSql + 'a)>> for PostgresBinder<'a> {
+impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for PostgresBinder<'a> {
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
         }
     }
 
-    fn bind_var(u: usize, name: String) -> String {
+    fn bind_var(&self, u: usize, _name: String) -> String {
         format!("${}", u)
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn postgres::types::ToSql + 'a)> {
+    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn ToSql + 'a)> {
         let mut acc = vec![];
 
         for n in names {
@@ -51,11 +50,9 @@ impl <'a>Binder<Vec<&'a (dyn postgres::types::ToSql + 'a)>> for PostgresBinder<'
 
 #[cfg(test)]
 mod tests {
-    use super::{Binder, BinderConfig, Connection, TlsMode, PostgresBinder, parse_template};
-    use std::collections::HashMap;
-    use time::Timespec;
-    use postgres::types::ToSql;
-    use std::cmp::PartialEq;
+    use super::{Binder, PostgresBinder};
+    use ::parser::parse_template;
+    use postgres::{Connection, TlsMode};
 
     #[derive(Debug, PartialEq)]
     struct Person {
@@ -89,6 +86,8 @@ mod tests {
 
         let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, data) VALUES (:name:, :data:)").unwrap();
 
+        assert_eq!(remaining, b"", "insert stmt nothing remaining");
+
         let mut bv = PostgresBinder::new();
 
         bv.values.insert("name".into(), vec![&person.name]);
@@ -96,11 +95,7 @@ mod tests {
 
         let (bound_sql, bindings) = bv.bind(insert_stmt);
 
-        println!("bound sql: {}", bound_sql);
-
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ($1, $2)";
-
-        let expected_bind_values = &[&person.name as &ToSql, &person.data];
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
@@ -111,8 +106,7 @@ mod tests {
 
         let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':name:' AND name = ':name:'").unwrap();
 
-
-        println!("select: {}", select_stmt);
+        assert_eq!(remaining, b"", "select stmt nothing remaining");
 
         let (bound_sql, bindings) = bv.bind(select_stmt);
 
@@ -120,7 +114,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
 
-        let mut stmt = conn.prepare(&bound_sql).unwrap();
+        let stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut people:Vec<Person> = vec![];
 

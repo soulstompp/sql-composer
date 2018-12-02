@@ -18,7 +18,9 @@ impl <'a>MysqlBinder<'a> {
     }
 }
 
-impl <'a>Binder<Vec<&'a (dyn ToValue + 'a)>> for MysqlBinder<'a> {
+impl <'a>Binder for MysqlBinder<'a> {
+    type Value = &'a (dyn ToValue + 'a);
+
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
@@ -29,7 +31,7 @@ impl <'a>Binder<Vec<&'a (dyn ToValue + 'a)>> for MysqlBinder<'a> {
         format!("?")
     }
 
-    fn values<'b>(&self, names: Vec<String>) -> Vec<&'a (dyn ToValue + 'a)> {
+    fn values<'b>(&self, names: Vec<String>) -> Vec<Self::Value> {
         let mut acc = vec![];
 
         for n in names {

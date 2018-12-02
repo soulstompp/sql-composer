@@ -10,8 +10,10 @@ pub struct BinderConfig {
     start: usize,
 }
 
-pub trait Binder<T> : Sized {
-    fn bind(&self, s: SqlStatement) -> (String, T) {
+pub trait Binder : Sized {
+    type Value;
+
+    fn bind(&self, s: SqlStatement) -> (String, Vec<Self::Value>) {
         let mut sql = String::new();
 
         let mut i = 0usize;
@@ -35,7 +37,7 @@ pub trait Binder<T> : Sized {
 
     fn bind_var(&self, u: usize, name: String) -> String;
 
-    fn values(&self, Vec<String>) -> T;
+    fn values(&self, Vec<String>) -> Vec<Self::Value>;
 
     fn config() -> BinderConfig;
 }

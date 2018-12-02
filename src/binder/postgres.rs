@@ -19,7 +19,9 @@ impl<'a> PostgresBinder<'a> {
 
 }
 
-impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for PostgresBinder<'a> {
+impl <'a>Binder for PostgresBinder<'a> {
+    type Value = &'a (dyn ToSql + 'a);
+
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
@@ -30,7 +32,7 @@ impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for PostgresBinder<'a> {
         format!("${}", u)
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn ToSql + 'a)> {
+    fn values(&self, names: Vec<String>) -> Vec<Self::Value> {
         let mut acc = vec![];
 
         for n in names {

@@ -22,7 +22,9 @@ impl<'a> DirectBinder<'a> {
     }
 }
 
-impl <'a>Binder<Vec<&'a str>> for DirectBinder<'a> {
+impl <'a>Binder for DirectBinder<'a> {
+    type Value = &'a str;
+
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
@@ -49,7 +51,7 @@ impl <'a>Binder<Vec<&'a str>> for DirectBinder<'a> {
         s
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<&'a str> {
+    fn values(&self, names: Vec<String>) -> Vec<Self::Value> {
         vec![]
     }
 }

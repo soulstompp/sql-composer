@@ -18,7 +18,8 @@ impl<'a> RusqliteBinder<'a> {
     }
 }
 
-impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for RusqliteBinder<'a> {
+impl <'a>Binder for RusqliteBinder<'a> {
+    type Value = &'a (dyn ToSql + 'a);
     fn config() -> BinderConfig {
         BinderConfig {
             start: 0
@@ -29,7 +30,7 @@ impl <'a>Binder<Vec<&'a (dyn ToSql + 'a)>> for RusqliteBinder<'a> {
         format!("?{}", u)
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<&'a (dyn ToSql + 'a)> {
+    fn values(&self, names: Vec<String>) -> Vec<Self::Value> {
         let mut acc = vec![];
 
         for n in names {

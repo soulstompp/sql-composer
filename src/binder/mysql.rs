@@ -27,25 +27,32 @@ impl <'a>Binder for MysqlBinder<'a> {
         }
     }
 
-    fn bind_var(&self, _u: usize, _name: String) -> String {
+    fn bind_var_tag(&self, _u: usize, _name: String) -> String {
         format!("?")
     }
 
-    fn values<'b>(&self, names: Vec<String>) -> Vec<Self::Value> {
-        let mut acc = vec![];
+    fn bind_values<'b>(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
+        let mut sql = String::new();
+        let mut new_values = vec![];
 
-        for n in names {
-            match self.values.get(&n) {
-                Some(v) => {
-                    for iv in v.iter() {
-                        acc.push(*iv);
+        let i = offset;
+
+        match self.values.get(&name) {
+            Some(v) => {
+                for iv in v.iter() {
+                    if new_values.len() > 0 {
+                        sql.push_str("'");
                     }
-                },
-                None => panic!("no value for binding: {}", n)
-            }
-        }
 
-        acc
+                    sql.push_str(&self.bind_var_tag(new_values.len() + offset, name.to_string()));
+
+                    new_values.push(*iv);
+                }
+            },
+            None => panic!("no value for binding: {}", i)
+        };
+
+        (sql, new_values)
     }
 }
 

@@ -32,7 +32,7 @@ impl <'a>Binder for DirectBinder<'a> {
     }
 
     //TODO: error handling
-    fn bind_var(&self, _u: usize, name: String) -> String {
+    fn bind_var_tag(&self, _u: usize, name: String) -> String {
         let mut s = String::new();
 
         if let Some(values) = self.values.get(&name) {
@@ -51,8 +51,8 @@ impl <'a>Binder for DirectBinder<'a> {
         s
     }
 
-    fn values(&self, names: Vec<String>) -> Vec<Self::Value> {
-        vec![]
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
+        (self.bind_var_tag(offset, name), vec![])
     }
 }
 

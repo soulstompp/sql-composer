@@ -16,28 +16,48 @@ pub trait Binder : Sized {
     fn bind(&self, s: SqlStatement) -> (String, Vec<Self::Value>) {
         let mut sql = String::new();
 
-        let mut i = 0usize;
-        let mut names:Vec<String> = vec![];
-
-        for c in s.chunks {
-            match c {
-                Sql::Text(t) => sql.push_str(&t.to_string()),
-                Sql::Binding(b) => {
-                    i += 1;
-                    names.push(b.name.to_string());
-                    sql.push_str(&self.bind_var(i, b.name.to_string()));
-                },
-                Sql::SubStatement(s) => sql.push_str(&s.to_string()),
-                Sql::Ending(e) => sql.push_str(&e.to_string())
-            };
-        }
-
-        (sql, self.values(names))
+        self.bind_statement(s, 0usize)
     }
 
-    fn bind_var(&self, u: usize, name: String) -> String;
+    fn bind_statement(&self, s: SqlStatement, offset: usize) -> (String, Vec<Self::Value>) {
+        let mut i = offset;
 
-    fn values(&self, Vec<String>) -> Vec<Self::Value>;
+        let mut sql = String::new();
+
+        let mut values:Vec<Self::Value> = vec![];
+
+        for c in s.chunks {
+            i += 1;
+
+            let (sub_sql, sub_values) = match c {
+                Sql::Text(t) => {
+                    (t.to_string(), vec![])
+                },
+                Sql::Binding(b) => {
+                    self.bind_values(b.name, i)
+                },
+                Sql::SubStatement(s) => {
+                    (s.to_string(), vec![])
+                }
+                Sql::Ending(e) =>
+                    (e.to_string(), vec![])
+            };
+
+            sql.push_str(&sub_sql);
+
+            for sv in sub_values {
+                values.push(sv);
+            }
+
+            i = values.len() + offset;
+        };
+
+        (sql, values)
+    }
+
+    fn bind_var_tag(&self, u: usize, name: String) -> String;
+
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>);
 
     fn config() -> BinderConfig;
 }

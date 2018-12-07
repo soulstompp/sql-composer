@@ -1,0 +1,1 @@
+SELECT :a: AS col_1, :b: AS col_2, :c: AS col_3, :d: AS col_4;

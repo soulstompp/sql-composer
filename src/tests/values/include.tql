@@ -1,0 +1,1 @@
+SELECT :e: AS col_1, :d: AS col_2, :b: AS col_3, :a: AS col_4 UNION ::src/tests/values/simple.tql::;

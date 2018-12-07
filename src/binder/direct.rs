@@ -54,6 +54,14 @@ impl <'a>Binder for DirectBinder<'a> {
     fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
         (self.bind_var_tag(offset, name), vec![])
     }
+
+    fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {
+        None
+    }
+
+    fn insert_value(&mut self, name: String, values: Vec<Self::Value>) -> () {
+        //self.values.insert(name, values);
+    }
 }
 
 #[cfg(test)]
@@ -84,7 +92,7 @@ mod tests {
             data: None,
         };
 
-        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:name:, :time_created:, :data:)").unwrap();
+        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:name:, :time_created:, :data:);").unwrap();
 
         assert_eq!(remaining, b"", "nothing remaining");
 
@@ -98,18 +106,18 @@ mod tests {
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
-        let expected_bound_sql = format!("INSERT INTO person (name, time_created, data) VALUES ('{}', '{}', {})", "Steven", now_value, "NULL");
+        let expected_bound_sql = format!("INSERT INTO person (name, time_created, data) VALUES ('{}', '{}', {});", "Steven", now_value, "NULL");
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':name:' AND time_created = ':time_created:' AND name = ':name:' AND time_created = ':time_created:'").unwrap();
+        let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':name:' AND time_created = ':time_created:' AND name = ':name:' AND time_created = ':time_created:';").unwrap();
 
 
         assert_eq!(remaining, b"", "nothing remaining");
 
         let (bound_sql, bindings) = bv.bind(select_stmt);
 
-        let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}'", &person.name, now_value, &person.name, now_value);
+        let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
     }

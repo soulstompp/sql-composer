@@ -107,6 +107,12 @@ impl ToValue for String {
     }
 }
 
+impl ToValue for &str {
+    fn to_value(&self) -> Result<Value, ()> {
+        Ok(Value::Text(self.to_string()))
+    }
+}
+
 impl ToValue for Vec<u8> {
     fn to_value(&self) -> Result<Value, ()> {
         Ok(Value::Blob(self.to_vec()))

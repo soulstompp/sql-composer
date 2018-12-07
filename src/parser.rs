@@ -13,7 +13,7 @@ pub struct SqlStatement {
 }
 
 impl SqlStatement {
-    fn from_str(q: &str) -> Self {
+    pub fn from_str(q: &str) -> Self {
         let (remaining, stmt) = parse_template(&q.as_bytes()).unwrap();
 
         if remaining.len() > 0 {
@@ -23,7 +23,7 @@ impl SqlStatement {
         stmt
     }
 
-    fn from_path(f: &Path) -> ::std::io::Result<SqlStatement> {
+    pub fn from_path(f: &Path) -> ::std::io::Result<SqlStatement> {
         let mut f = File::open(f).unwrap();
         let mut s = String::new();
 
@@ -34,7 +34,7 @@ impl SqlStatement {
         Ok(stmt)
     }
 
-    fn from_utf8_path_name(vec: &[u8]) -> ::std::io::Result<SqlStatement> {
+    pub fn from_utf8_path_name(vec: &[u8]) -> ::std::io::Result<SqlStatement> {
         //TODO: don't unwrap here
         let s = &std::str::from_utf8(vec).unwrap();
         let p = Path::new(s);
@@ -202,16 +202,11 @@ named!(parse_bindvar<SqlBinding>,
 
 named!(parse_sql<SqlText>,
    map_res!(
-       alt_complete!(
-             take_until_s!("::")
-           | take_until_s!("':")
-           | take_until_s!(":")
-           | take_until_s!(";")
-           | take!(1)
-       ),
+       take_until_either!(":;'"),
        SqlText::from_utf8
    )
 );
+
 
 named!(parse_sql_end<SqlEnding>,
    map_res!(
@@ -232,8 +227,6 @@ mod tests {
                 Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                 Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                Sql::Text(SqlText::from_utf8(b"\n").unwrap())
-
             ]
         }
     }
@@ -249,12 +242,10 @@ mod tests {
                         Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                         Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
                         Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                        Sql::Text(SqlText::from_utf8(b"\n").unwrap()),
                     ]
                 }),
                 Sql::Text(SqlText::from_utf8(b"\n)").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                Sql::Text(SqlText::from_utf8(b"\n").unwrap()),
             ]
         }
     }
@@ -350,6 +341,14 @@ mod tests {
     fn test_parse_file_template() {
         let stmt = SqlStatement::from_path(Path::new("src/tests/simple-template.tql")).unwrap();                                                                                                                  //TODO: this shouldn't have the extra \n at the end?
         let expected = simple_template_stmt();
+
+        assert_eq!(stmt, expected);
+    }
+
+    #[test]
+    fn test_parse_file_inclusive_template() {
+        let stmt = SqlStatement::from_path(Path::new("src/tests/include-template.tql")).unwrap();                                                                                                                  //TODO: this shouldn't have the extra \n at the end?
+        let expected = include_template_stmt();
 
         assert_eq!(stmt, expected);
     }

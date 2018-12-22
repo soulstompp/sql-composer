@@ -2,16 +2,16 @@ use std::collections::HashMap;
 
 use mysql::prelude::ToValue;
 
-use super::{Binder, BinderConfig};
+use super::{Expander, ExpanderConfig};
 
 use std::rc::Rc;
 
-struct MysqlBinder<'a> {
-    config: BinderConfig,
+struct MysqlExpander<'a> {
+    config: ExpanderConfig,
     values: HashMap<String, Vec<Rc<&'a ToValue>>>,
 }
 
-impl <'a>MysqlBinder<'a> {
+impl <'a>MysqlExpander<'a> {
     fn new() -> Self {
         Self{
          config: Self::config(),
@@ -20,11 +20,11 @@ impl <'a>MysqlBinder<'a> {
     }
 }
 
-impl <'a>Binder for MysqlBinder<'a> {
+impl <'a>Expander for MysqlExpander<'a> {
     type Value = &'a (dyn ToValue + 'a);
 
-    fn config() -> BinderConfig {
-        BinderConfig {
+    fn config() -> ExpanderConfig {
+        ExpanderConfig {
             start: 0
         }
     }
@@ -98,7 +98,7 @@ impl <'a>Binder for MysqlBinder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Binder, MysqlBinder};
+    use super::{Expander, MysqlExpander};
     use ::parser::{SqlStatement, parse_template};
     use mysql::prelude::*;
     use mysql::{Pool, from_row, Row};
@@ -140,16 +140,16 @@ mod tests {
             data: None,
         };
 
-        let mut bv = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, data) VALUES (:name:, :data:);", None).unwrap();
+        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));", None).unwrap();
 
         assert_eq!(remaining, b"", "insert stmt nothing remaining");
 
-        bv.values.insert("name".into(), vec![Rc::new(&person.name)]);
-        bv.values.insert("data".into(), vec![Rc::new(&person.data)]);
+        expander.values.insert("name".into(), vec![Rc::new(&person.name)]);
+        expander.values.insert("data".into(), vec![Rc::new(&person.data)]);
 
-        let (bound_sql, bindings) = bv.bind(&insert_stmt);
+        let (bound_sql, bindings) = expander.expand(&insert_stmt);
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES (?, ?);";
 
@@ -165,11 +165,11 @@ mod tests {
             &rebindings.as_slice(),
         );
 
-        let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':name:' AND name = ':name:';", None).unwrap();
+        let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';", None).unwrap();
 
         assert_eq!(remaining, b"", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = bv.bind(&select_stmt);
+        let (bound_sql, bindings) = expander.expand(&select_stmt);
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = ? AND name = ?;";
 
@@ -222,12 +222,12 @@ mod tests {
 
         let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
 
         let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>> = vec![BTreeMap::new()];
 
@@ -236,8 +236,8 @@ mod tests {
         mock_values[0].insert("col_3".into(), Rc::new(&"c_value"));
         mock_values[0].insert("col_4".into(), Rc::new(&"d_value"));
 
-        let (bound_sql, bindings) = binder.bind(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = binder.mock_bind(&stmt, &mock_values, &HashMap::new(), 0);
+        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
 
         mock_bound_sql.push(';');
 
@@ -276,13 +276,13 @@ mod tests {
 
         let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        binder.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
 
         let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>> = vec![];
 
@@ -298,8 +298,8 @@ mod tests {
         mock_values[1].insert("col_3".into(), Rc::new(&"c_value"));
         mock_values[1].insert("col_4".into(), Rc::new(&"d_value"));
 
-        let (bound_sql, bindings) = binder.bind(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = binder.mock_bind(&stmt, &mock_values, &HashMap::new(), 0);
+        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
 
         mock_bound_sql.push(';');
 
@@ -341,14 +341,14 @@ mod tests {
 
         let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        binder.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        binder.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
 
         let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>> = vec![];
 
@@ -370,8 +370,8 @@ mod tests {
         mock_values[2].insert("col_3".into(), Rc::new(&"c_value"));
         mock_values[2].insert("col_4".into(), Rc::new(&"d_value"));
 
-        let (bound_sql, bindings) = binder.bind(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = binder.mock_bind(&stmt, &mock_values, &HashMap::new(), 1);
+        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 1);
 
         mock_bound_sql.push(';');
 
@@ -387,6 +387,8 @@ mod tests {
         for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
+
+        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
 
         let mut mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -409,7 +411,6 @@ mod tests {
             mock_values.push(c);
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
     }
 
@@ -417,7 +418,7 @@ mod tests {
     fn test_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (::src/tests/values/double-include.tql::) AS main WHERE col_1 in (:col_1_values:) AND col_3 IN (:col_3_values:);", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -426,20 +427,22 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        binder.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        binder.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        binder.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
-        binder.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
 
-        let (bound_sql, bindings) = binder.bind(&stmt);
+        let (bound_sql, bindings) = expander.expand(&stmt);
 
         println!("bound_sql: {}", bound_sql);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -454,7 +457,6 @@ mod tests {
             values.push(get_row_values(row.unwrap()));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
 
@@ -462,7 +464,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (::src/tests/values/double-include.tql::) AS main WHERE col_1 in (:col_1_values:) AND col_3 IN (:col_3_values:);", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -471,16 +473,16 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        binder.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        binder.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        binder.values.insert("col_1_values".into(), vec![Rc::new(&"ee_value"), Rc::new(&"d_value")]);
-        binder.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"b_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"ee_value"), Rc::new(&"d_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"b_value")]);
 
         let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
 
@@ -494,7 +496,9 @@ mod tests {
             mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
         }
 
-        let (bound_sql, bindings) = binder.mock_bind(&stmt, &vec![], &path_mock_values, 0);
+        let (bound_sql, bindings) = expander.mock_expand(&stmt, &vec![], &path_mock_values, 0);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -509,7 +513,6 @@ mod tests {
             values.push(get_row_values(row.unwrap()));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
 
@@ -517,7 +520,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (::src/tests/values/double-include.tql::) AS main WHERE col_1 in (:col_1_values:) AND col_3 IN (:col_3_values:);", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -527,16 +530,16 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut binder = MysqlBinder::new();
+        let mut expander = MysqlExpander::new();
 
-        binder.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        binder.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        binder.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        binder.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        binder.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        binder.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        binder.values.insert("col_1_values".into(), vec![Rc::new(&"dd_value"), Rc::new(&"aa_value")]);
-        binder.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"cc_value")]);
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"dd_value"), Rc::new(&"aa_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"cc_value")]);
 
         let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
 
@@ -562,7 +565,9 @@ mod tests {
             mock_path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
         }
 
-        let (bound_sql, bindings) = binder.mock_bind(&stmt, &vec![], &path_mock_values, 0);
+        let (bound_sql, bindings) = expander.mock_expand(&stmt, &vec![], &path_mock_values, 0);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -577,7 +582,6 @@ mod tests {
             values.push(get_row_values(row.unwrap()));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
 }

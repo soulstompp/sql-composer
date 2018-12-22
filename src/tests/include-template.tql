@@ -1,4 +1,4 @@
 SELECT COUNT(foo_id)
 FROM (
-  ::src/tests/simple-template.tql::
+  :expand(<src/tests/simple-template.tql>)
 );

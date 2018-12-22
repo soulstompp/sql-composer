@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{Binder, BinderConfig};
+use super::{Expander, ExpanderConfig};
 
 use ::parser::SqlText;
 
@@ -10,12 +10,12 @@ use std::rc::Rc;
 
 use chrono::prelude::*;
 
-struct DirectBinder<'a> {
-    config: BinderConfig,
+struct DirectExpander<'a> {
+    config: ExpanderConfig,
     values: HashMap<String, Vec<&'a ToValue>>
 }
 
-impl<'a> DirectBinder<'a> {
+impl<'a> DirectExpander<'a> {
     fn new() -> Self {
         Self{
          config: Self::config(),
@@ -24,11 +24,11 @@ impl<'a> DirectBinder<'a> {
     }
 }
 
-impl <'a>Binder for DirectBinder<'a> {
+impl <'a>Expander for DirectExpander<'a> {
     type Value = &'a str;
 
-    fn config() -> BinderConfig {
-        BinderConfig {
+    fn config() -> ExpanderConfig {
+        ExpanderConfig {
             start: 0
         }
     }
@@ -68,7 +68,7 @@ impl <'a>Binder for DirectBinder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Binder, DirectBinder, Value, ToValue};
+    use super::{Expander, DirectExpander, Value, ToValue};
     use super::super::parse_template;
 
     use std::collections::HashMap;
@@ -94,17 +94,17 @@ mod tests {
             data: None,
         };
 
-        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:name:, :time_created:, :data:);", None).unwrap();
+        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let mut bv = DirectBinder::new();
+        let mut expander = DirectExpander::new();
 
-        bv.values.insert("name".into(), vec![&person.name]);
-        bv.values.insert("time_created".into(), vec![&person.time_created]);
-        bv.values.insert("data".into(), vec![&person.data]);
+        expander.values.insert("name".into(), vec![&person.name]);
+        expander.values.insert("time_created".into(), vec![&person.time_created]);
+        expander.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = bv.bind(&insert_stmt);
+        let (bound_sql, bindings) = expander.expand(&insert_stmt);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -112,12 +112,12 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':name:' AND time_created = ':time_created:' AND name = ':name:' AND time_created = ':time_created:';", None).unwrap();
+        let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';", None).unwrap();
 
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let (bound_sql, bindings) = bv.bind(&select_stmt);
+        let (bound_sql, bindings) = expander.expand(&select_stmt);
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

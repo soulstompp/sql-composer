@@ -149,7 +149,7 @@ named!(_parse_template<Vec<Sql>>,
        many1!(
         alt_complete!(
             do_parse!(e: parse_sql_end >> (Sql::Ending(e)))
-            | do_parse!(i: parse_include >> (Sql::SubStatement(i)))
+            | do_parse!(i: parse_expand >> (Sql::SubStatement(i)))
             | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
             | do_parse!(s: parse_sql >> (Sql::Text(s)))
@@ -170,12 +170,12 @@ pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], Sql
     })
 }
 
-named!(parse_include<SqlStatement>,
+named!(parse_expand<SqlStatement>,
    map_res!(
        delimited!(
-           tag_s!("::"),
-           take_until_s!("::"),
-           tag_s!("::")
+           tag_s!(":expand(<"),
+           take_until_s!(">"),
+           tag_s!(">)")
        ),
        SqlStatement::from_utf8_path_name
    )
@@ -184,9 +184,9 @@ named!(parse_include<SqlStatement>,
 named!(parse_quoted_bindvar<SqlBinding>,
    map_res!(
        delimited!(
-           tag_s!("':"),
-           take_until_s!(":"),
-           tag_s!(":'")
+           tag_s!("':bind("),
+           take_until_s!(")"),
+           tag_s!(")'")
        ),
        SqlBinding::from_quoted_utf8
    )
@@ -195,9 +195,9 @@ named!(parse_quoted_bindvar<SqlBinding>,
 named!(parse_bindvar<SqlBinding>,
    map_res!(
        delimited!(
-           tag_s!(":"),
-           take_until_s!(":"),
-           tag_s!(":")
+           tag_s!(":bind("),
+           take_until_s!(")"),
+           tag_s!(")")
        ),
        SqlBinding::from_utf8
    )
@@ -220,12 +220,12 @@ named!(parse_sql_end<SqlEnding>,
 
 #[cfg(test)]
 mod tests {
-    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_include, parse_template, SqlStatement, SqlBinding, SqlEnding, SqlText, Sql };
+    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_expand, parse_template, SqlStatement, SqlBinding, SqlEnding, SqlText, Sql };
     use std::path::{Path, PathBuf};
 
     fn simple_template_stmt() -> SqlStatement {
         SqlStatement{
-            template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :varname:;\n".into(),
+            template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n".into(),
             path: Some(PathBuf::from("src/tests/simple-template.tql")),
             chunks: vec![
                 Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
@@ -238,12 +238,12 @@ mod tests {
 
     fn include_template_stmt() -> SqlStatement {
         SqlStatement{
-            template: "SELECT COUNT(foo_id)\nFROM (\n  ::src/tests/simple-template.tql::\n);\n".into(),
+            template: "SELECT COUNT(foo_id)\nFROM (\n  :expand(<src/tests/simple-template.tql>)\n);\n".into(),
             path: Some(PathBuf::from("src/tests/include-template.tql")),
             chunks: vec![
                 Sql::Text(SqlText::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
                 Sql::SubStatement(SqlStatement{
-                    template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :varname:;\n".into(),
+                    template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n".into(),
                     path: Some(PathBuf::from("src/tests/simple-template.tql")),
                     chunks: vec![
                         Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_parse_bindvar() {
-        let input = b":varname:blah blah blah";
+        let input = b":bind(varname)blah blah blah";
 
         let out = parse_bindvar(input);
 
@@ -283,19 +283,19 @@ mod tests {
 
     #[test]
     fn parse_sql_until_path() {
-        let input = b"select * from foo where foo.bar = :varname:;";
+        let input = b"select * from foo where foo.bar = :bind(varname);";
 
         let out = parse_sql(input);
 
-        let expected = Ok((&b":varname:;"[..], SqlText{ value: "select * from foo where foo.bar = ".into(), ..Default::default() } ));
+        let expected = Ok((&b":bind(varname);"[..], SqlText{ value: "select * from foo where foo.bar = ".into(), ..Default::default() } ));
         assert_eq!(out, expected);
     }
 
     #[test]
     fn test_parse_include() {
-        let input = b"::src/tests/simple-template.tql::blah blah blah";
+        let input = b":expand(<src/tests/simple-template.tql>)blah blah blah";
 
-        let out = parse_include(input);
+        let out = parse_expand(input);
 
         let expected = Ok((&b"blah blah blah"[..],
                            simple_template_stmt() ));
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_template() {
-        let input = "SELECT * FROM (::src/tests/simple-template.tql::) WHERE name = ':bindvar:';";
+        let input = "SELECT * FROM (:expand(<src/tests/simple-template.tql>)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_parse_include_template() {
-        let input = "SELECT * FROM (::src/tests/include-template.tql::) WHERE name = ':bindvar:';";
+        let input = "SELECT * FROM (:expand(<src/tests/include-template.tql>)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 

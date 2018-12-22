@@ -11,20 +11,20 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub struct BinderConfig {
+pub struct ExpanderConfig {
     start: usize,
 }
 
-pub trait Binder : Sized {
+pub trait Expander : Sized {
     type Value;
 
-    fn bind(&self, s: &SqlStatement) -> (String, Vec<Rc<Self::Value>>) {
+    fn expand(&self, s: &SqlStatement) -> (String, Vec<Rc<Self::Value>>) {
         let mut sql = String::new();
 
-        self.bind_statement(s, &Vec::new(), &HashMap::new(), 1usize, false)
+        self.expand_statement(s, &Vec::new(), &HashMap::new(), 1usize, false)
     }
 
-    fn bind_statement(&self, s: &SqlStatement, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
+    fn expand_statement(&self, s: &SqlStatement, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
 
         let mut i = offset;
 
@@ -44,11 +44,11 @@ pub trait Binder : Sized {
                     match &ss.path {
                         Some(path) => {
                             match child_mock_values.get(path) {
-                                Some(e) => self.mock_bind(&ss, e, &HashMap::new(), i),
-                                None => self.bind_statement(&ss, &mock_values, &child_mock_values, i, true),
+                                Some(e) => self.mock_expand(&ss, e, &HashMap::new(), i),
+                                None => self.expand_statement(&ss, &mock_values, &child_mock_values, i, true),
                             }
                         }
-                        None => self.bind_statement(&ss, &mock_values, &child_mock_values, i, true)
+                        None => self.expand_statement(&ss, &mock_values, &child_mock_values, i, true)
                     }
                 },
                 Sql::Ending(e) => {
@@ -73,7 +73,7 @@ pub trait Binder : Sized {
         (sql, values)
     }
 
-    fn mock_bind(&self, stmt: &SqlStatement, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
+    fn mock_expand(&self, stmt: &SqlStatement, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
         let mut sql = String::new();
         let mut values:Vec<Rc<Self::Value>> = vec![];
 
@@ -89,7 +89,7 @@ pub trait Binder : Sized {
 
         if (mock_values.is_empty()) {
             println!("empty, binding statement");
-            return self.bind_statement(&stmt, mock_values, child_mock_values, i, false);
+            return self.expand_statement(&stmt, mock_values, child_mock_values, i, false);
         }
         else {
             println!("non-empty, binding union statement directly");
@@ -140,5 +140,5 @@ pub trait Binder : Sized {
 
     fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> ();
 
-    fn config() -> BinderConfig;
+    fn config() -> ExpanderConfig;
 }

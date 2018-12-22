@@ -8,5 +8,5 @@ extern crate postgres;
 extern crate mysql;
 
 mod parser;
-mod binder;
+mod expander;
 mod types;

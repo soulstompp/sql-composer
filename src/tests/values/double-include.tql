@@ -1,1 +1,1 @@
-SELECT :d: AS col_1, :f: AS col_2, :b: AS col_3, :a: AS col_4 UNION ALL ::src/tests/values/include.tql::;
+SELECT :bind(d) AS col_1, :bind(f) AS col_2, :bind(b) AS col_3, :bind(a) AS col_4 UNION ALL :expand(<src/tests/values/include.tql>);

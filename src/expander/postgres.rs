@@ -6,7 +6,7 @@ use postgres::types::ToSql;
 
 use std::rc::Rc;
 
-use ::parser::{SqlStatement, parse_template};
+use crate::parser::{SqlComposition, parse_template};
 use super::{Expander, ExpanderConfig};
 
 struct PostgresExpander<'a> {
@@ -84,7 +84,7 @@ impl <'a>Expander for PostgresExpander<'a> {
 mod tests {
     use super::{Expander, PostgresExpander};
 
-    use ::parser::{SqlStatement, parse_template};
+    use crate::parser::{SqlComposition, parse_template};
 
     use postgres::{Connection, TlsMode};
     use postgres::rows::{Row, Rows};
@@ -200,7 +200,7 @@ mod tests {
     fn test_bind_simple_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
         let mut expander = PostgresExpander::new();
 
@@ -255,7 +255,7 @@ mod tests {
     fn test_bind_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
         let mut expander = PostgresExpander::new();
 
@@ -320,7 +320,7 @@ mod tests {
     fn test_bind_double_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
         let mut expander = PostgresExpander::new();
 
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(bound_sql, expected_sql, "preparable statements match");
         assert_eq!(values, expected_values, "expected values");
     }
-    
+
     #[test]
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
@@ -485,7 +485,7 @@ mod tests {
         for row in &prep_stmt.query(&rebindings).unwrap() {
             values.push(get_row_values(row));
         }
-        
+
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
@@ -525,13 +525,13 @@ mod tests {
             mock_path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
             mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
             mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
-            
+
             mock_path_entry.push(BTreeMap::new());
             mock_path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
             mock_path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
             mock_path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
             mock_path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
-            
+
             mock_path_entry.push(BTreeMap::new());
             mock_path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
             mock_path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
@@ -553,7 +553,7 @@ mod tests {
         for row in &prep_stmt.query(&rebindings).unwrap() {
             values.push(get_row_values(row));
         }
-        
+
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }

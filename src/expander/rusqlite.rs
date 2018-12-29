@@ -70,7 +70,7 @@ impl <'a>Expander for RusqliteExpander<'a> {
 mod tests {
     use super::{Expander, RusqliteExpander};
 
-    use ::parser::{SqlStatement, parse_template};
+    use crate::parser::{SqlComposition, parse_template};
 
     use time::Timespec;
     use rusqlite::{Connection, NO_PARAMS};
@@ -196,7 +196,7 @@ mod tests {
     fn test_bind_simple_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
         let mut expander = RusqliteExpander::new();
 
@@ -264,7 +264,7 @@ mod tests {
     fn test_bind_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
         let mut expander = RusqliteExpander::new();
 
@@ -343,7 +343,7 @@ mod tests {
     fn test_bind_double_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
         let mut expander = RusqliteExpander::new();
 
@@ -476,7 +476,7 @@ mod tests {
         assert_eq!(bound_sql, expected_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
-    
+
     #[test]
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
@@ -536,7 +536,7 @@ mod tests {
         for row in rows {
             values.push(row.unwrap());
         }
-        
+
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
     }
@@ -576,13 +576,13 @@ mod tests {
             mock_path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
             mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
             mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
-            
+
             mock_path_entry.push(BTreeMap::new());
             mock_path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
             mock_path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
             mock_path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
             mock_path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
-            
+
             mock_path_entry.push(BTreeMap::new());
             mock_path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
             mock_path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));

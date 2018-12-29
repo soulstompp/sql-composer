@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use super::{Expander, ExpanderConfig};
 
-use ::parser::SqlText;
+use crate::parser::SqlText;
 
-use ::types::value::{Value, ToValue};
+use crate::types::value::{Value, ToValue};
 
 use std::rc::Rc;
 

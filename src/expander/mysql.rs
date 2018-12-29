@@ -99,7 +99,7 @@ impl <'a>Expander for MysqlExpander<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Expander, MysqlExpander};
-    use ::parser::{SqlStatement, parse_template};
+    use crate::parser::{SqlComposition, parse_template};
     use mysql::prelude::*;
     use mysql::{Pool, from_row, Row};
 
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(found.data, person.data, "person's data");
     }
 
-    fn parse(input: &str) -> SqlStatement {
+    fn parse(input: &str) -> SqlComposition {
         let (remaining, stmt) = parse_template(input.as_bytes(), None).unwrap();
 
         stmt
@@ -220,7 +220,7 @@ mod tests {
     fn test_bind_simple_template() {
         let pool = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
         let mut expander = MysqlExpander::new();
 
@@ -274,7 +274,7 @@ mod tests {
     fn test_bind_include_template() {
         let pool = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
         let mut expander = MysqlExpander::new();
 
@@ -339,7 +339,7 @@ mod tests {
     fn test_bind_double_include_template() {
         let pool = setup_db();
 
-        let stmt = SqlStatement::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
         let mut expander = MysqlExpander::new();
 

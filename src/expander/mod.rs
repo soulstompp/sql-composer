@@ -106,7 +106,7 @@ pub trait Expander : Sized {
             return Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child));
         }
 
-        match &composition.name {
+        match &composition.command {
             Some(s) => {
                 match s.as_str() {
                     "count" => {
@@ -116,7 +116,9 @@ pub trait Expander : Sized {
 
                         let columns = composition.column_list().unwrap();
 
-                        stmt.push_text(&columns);
+                        if let Some(c) = columns {
+                            stmt.push_text(&c);
+                        }
 
                         stmt.push_text(")");
 

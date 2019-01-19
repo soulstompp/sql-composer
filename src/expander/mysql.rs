@@ -461,6 +461,53 @@ mod tests {
     }
 
     #[test]
+    fn test_count_command() {
+        let pool = setup_db();
+
+        let (remaining, stmt) = parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
+
+        println!("made it through parse");
+        let expected_bound_sql = "SELECT COUNT(*) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main";
+
+        let mut expander = MysqlExpander::new();
+
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+
+        let (bound_sql, bindings) = expander.expand(&stmt);
+
+        println!("bound_sql: {}", bound_sql);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+
+        let mut values:Vec<Vec<usize>> = vec![];
+
+        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
+            acc.push(*Rc::deref(x));
+            acc
+        });
+
+        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+            let count = from_row::<(usize)>(row.unwrap());
+            values.push(vec![count]);
+        }
+
+        let expected_values:Vec<Vec<usize>> = vec![
+            vec![3],
+        ];
+
+        assert_eq!(values, expected_values, "exected values");
+    }
+
+    #[test]
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 

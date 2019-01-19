@@ -7,7 +7,7 @@ use std::fs::File;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct SqlStatementAlias {
     name: Option<String>,
     path: Option<PathBuf>,
@@ -49,6 +49,14 @@ impl SqlStatementAlias {
         }
     }
 
+    pub fn from_path(p: &Path) -> Self {
+        Self {
+            path: Some(p.into()),
+            name: None
+        }
+
+    }
+
     pub fn path(&self) -> Option<PathBuf> {
         if let Some(p) = &self.path {
             return Some(p.to_path_buf());
@@ -66,16 +74,17 @@ impl SqlStatementAlias {
 //            :count([distinct] [column1, column2 of] t1.sql)
 //            :checksum([column1, column3 of] t2.sql)
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlComposition {
     pub command: Option<String>,
     distinct: bool,
     all: bool,
     columns: Option<Vec<String>>,
-    of: Vec<SqlStatementAlias>,
+    pub of: Vec<SqlStatementAlias>,
     pub stmt: Option<SqlStatement>,
-    pub aliases: HashMap<SqlStatementAlias, SqlStatement>,
+    pub aliases: HashMap<SqlStatementAlias, SqlComposition>,
     pub path: Option<PathBuf>,
+    pub sql: Vec<Sql>,
 }
 
 
@@ -133,7 +142,63 @@ impl SqlComposition {
             },
             None => Ok(None)
         }
+    }
 
+    fn push_sql(&mut self, c: Sql) -> () {
+        self.sql.push(c)
+    }
+
+    fn update_aliases(&mut self) -> ::std::io::Result<()> {
+        for alias in &self.of {
+            let p = alias.path().unwrap();
+
+            self.aliases.entry(alias.clone()).or_insert(SqlComposition::from_path(&p)?);
+        }
+
+        Ok(())
+    }
+
+    fn insert_alias(&mut self, p: &Path) -> ::std::io::Result<()> {
+        let alias = SqlStatementAlias::from_path(p);
+        self.aliases.entry(alias).or_insert(SqlComposition::from_path(&p)?);
+
+        Ok(())
+    }
+
+    //TODO: error if path already set to Some(...)
+    fn set_path(&mut self, new: &Path) -> Result<(), ()>{
+        match &self.path {
+            Some(current) => Err(()),
+            None => {
+                self.path = Some(new.into());
+                Ok(())
+            }
+        }
+    }
+
+    pub fn push_sub_comp(&mut self, value: SqlComposition) {
+        self.push_sql(Sql::Composition((value, vec![])));
+    }
+
+    pub fn push_text(&mut self, value: &str) {
+        self.push_sql(Sql::Text(SqlText{
+            value: value.into(),
+            quoted: false
+        }))
+    }
+
+    pub fn push_quoted_text(&mut self, value: &str) {
+        self.push_sql(Sql::Text(SqlText{
+            value: value.into(),
+            quoted: true
+        }))
+    }
+
+    pub fn end(&mut self, value: &str) {
+        //TODO: check if this has already ended
+        self.push_sql(Sql::Ending(SqlEnding{
+            value: value.into()
+        }));
     }
 }
 
@@ -160,7 +225,7 @@ impl fmt::Display for SqlComposition {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlStatement {
     template: String,
     pub chunks: Vec<Sql>,
@@ -211,12 +276,12 @@ impl fmt::Display for SqlStatement {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Sql {
   Text(SqlText),
   Binding(SqlBinding),
   SubStatement(SqlComposition),
-  Composition(SqlComposition),
+  Composition((SqlComposition, Vec<SqlStatementAlias>)),
   Ending(SqlEnding)
 }
 
@@ -226,7 +291,7 @@ impl fmt::Display for Sql {
           Sql::Text(t) => write!(f, "{}", t)?,
           Sql::Binding(b) => write!(f, "{}", b)?,
           Sql::SubStatement(s) => write!(f, "{}", s)?,
-          Sql::Composition(w) => write!(f, "{}", w)?,
+          Sql::Composition(w) => write!(f, "{:?}", w)?,
           Sql::Ending(e) => write!(f, "{}", e)?
       }
 
@@ -234,7 +299,7 @@ impl fmt::Display for Sql {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SqlEnding {
     value: String
 }
@@ -253,7 +318,7 @@ impl fmt::Display for SqlEnding {
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct SqlText {
     value: String,
     quoted: bool
@@ -273,7 +338,7 @@ impl fmt::Display for SqlText {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SqlBinding {
     pub name: String,
     pub quoted: bool
@@ -299,52 +364,55 @@ impl fmt::Display for SqlBinding {
     }
 }
 
-
 named!(opt_multispace<&[u8], Option<&[u8]>>,
     opt!(complete!(multispace))
 );
 
-named!(_parse_template<(Vec<Sql>, HashMap<SqlStatementAlias, SqlComposition>)>,
+named!(_parse_template<SqlComposition>,
     fold_many1!(
         alt_complete!(
-            do_parse!(e: parse_sql_end >> (Sql::Ending(e), vec![]))
+            do_parse!(e: parse_sql_end >> (Sql::Ending(e)))
             //TODO: collect aliases properly
-            | do_parse!(i: parse_expand >> (Sql::SubStatement(i), vec![]))
-            | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q), vec![]))
-            | do_parse!(b: parse_bindvar >> (Sql::Binding(b), vec![]))
+            | do_parse!(i: parse_expand >> (Sql::SubStatement(i)))
+            | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
+            | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
             //TODO: collect aliases properly
-            | do_parse!(w: parse_expander_macro >> (Sql::Composition(w), vec![]))
-            | do_parse!(s: parse_sql >> (Sql::Text(s), vec![]))
+            | do_parse!(sc: parse_expander_macro >> (Sql::Composition((sc.0, sc.1))))
+            | do_parse!(s: parse_sql >> (Sql::Text(s)))
         ),
-        (vec![], HashMap::new()), |mut acc: (Vec<Sql>, HashMap<SqlStatementAlias, SqlComposition>), item: (Sql, Vec<SqlStatementAlias>)| {
-            let (item_sql, item_aliases) = item;
+        SqlComposition::default(), |mut acc: SqlComposition, item: Sql| {
+            let item_sql = item;
 
-            acc.0.push(item_sql);
+            if acc.sql.len() == 0 {
+                if let Sql::Composition((sc, aliases)) = item_sql {
+                    acc = sc;
 
-            for alias in item_aliases {
-                let stmt_path = alias.path().unwrap();
+                    for alias in aliases {
+                        let stmt_path = alias.path().unwrap();
 
-                let alias_entry = acc.1.entry(alias).or_insert(SqlComposition::from_path(&stmt_path).unwrap());
+                        acc.insert_alias(&stmt_path).unwrap();
+                    }
+
+                    return acc;
+                }
             }
+
+            acc.push_sql(item_sql);
 
             acc
         }
-    )
+     )
 );
 
 pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], SqlComposition> {
     let res = _parse_template(input);
 
-    res.and_then(|(remaining, (chunks, aliases))| {
-        Ok((remaining, (SqlComposition {
-            path: path,
-            stmt: Some(SqlStatement {
-                template: String::from_utf8(input.to_vec()).unwrap(),
-                chunks: chunks,
-                ..Default::default()
-            }),
-            ..Default::default()
-        })))
+    res.and_then(|(remaining, mut comp)| {
+        if let Some(p) = path {
+            comp.set_path(&p);
+        }
+
+        Ok((remaining, comp))
     })
 }
 
@@ -384,7 +452,7 @@ named!(parse_macro_name<&[u8]>,
    )
 );
 
-named!(parse_expander_macro<&[u8], SqlComposition>,
+named!(parse_expander_macro<&[u8], (SqlComposition, Vec<SqlStatementAlias>)>,
        complete!(do_parse!(
                command: parse_macro_name >>
                distinct: opt!(tag_no_case!("distinct")) >>
@@ -399,19 +467,27 @@ named!(parse_expander_macro<&[u8], SqlComposition>,
                opt_multispace >>
                of: do_parse!(
                        of: of_list >>
-                       (of)
+                       ({
+                           println!("of: {:?}", of);
+                           of
+                       })
                ) >>
                tag!(")") >>
                ({
                  println!("we made it!");
 
-                 SqlComposition {
+                 let mut sc = SqlComposition {
+                     command: Some(String::from_utf8(command.to_vec()).unwrap()),
                      distinct: distinct.is_some(),
                      all: all.is_some(),
-                     columns: columns,
-                     of: of,
+                     columns,
+                     of,
                      ..Default::default()
-                 }
+                 };
+
+                 sc.update_aliases();
+
+                 (sc, vec![])
                })
        ))
 );
@@ -445,7 +521,6 @@ named!(column_list<Vec<String>>,
                         )
                 )
             ),
-            //TODO: this should probably allow opt_multispace
             do_parse!(
                 opt_multispace >>
                 tag_no_case!("of") >>
@@ -492,8 +567,6 @@ named!(of_list<Vec<SqlStatementAlias>>,
         )
     )
 );
-
-
 
 named!(_parse_macro_include_alias<&[u8]>,
     take_while!(|u| {
@@ -549,19 +622,17 @@ named!(parse_sql_end<SqlEnding>,
 mod tests {
     use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_expand, parse_template, SqlStatementAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
     use std::path::{Path, PathBuf};
+    use std::collections::HashMap;
 
     fn simple_template_stmt() -> SqlComposition {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/simple-template.tql")),
-            stmt: Some(SqlStatement{
-                template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n".into(),
-                chunks: vec![
-                    Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
-                    Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
-                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                ],
-                ..Default::default()
-            }),
+            stmt: None,
+            sql: vec![
+                Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
+                Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
+                Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
+            ],
             ..Default::default()
         }
     }
@@ -569,28 +640,22 @@ mod tests {
     fn include_template_stmt() -> SqlComposition {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/include-template.tql")),
-            stmt: Some(SqlStatement{
-                template: "SELECT COUNT(foo_id)\nFROM (\n  :expand(<src/tests/simple-template.tql>)\n);\n".into(),
-                chunks: vec![
-                    Sql::Text(SqlText::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
-                    Sql::SubStatement(SqlComposition{
-                        path: Some(PathBuf::from("src/tests/simple-template.tql")),
-                        stmt: Some(SqlStatement{
-                            template: "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n".into(),
-                            chunks: vec![
-                                Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
-                                Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
-                                Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                            ],
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }),
-                    Sql::Text(SqlText::from_utf8(b"\n)").unwrap()),
-                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                ],
-                ..Default::default()
-            }),
+            stmt: None,
+            sql: vec![
+                Sql::Text(SqlText::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
+                Sql::SubStatement(SqlComposition{
+                    path: Some(PathBuf::from("src/tests/simple-template.tql")),
+                    stmt: None,
+                    sql: vec![
+                        Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
+                        Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
+                        Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
+                    ],
+                    ..Default::default()
+                }),
+                Sql::Text(SqlText::from_utf8(b"\n)").unwrap()),
+                Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
+            ],
             ..Default::default()
         }
     }
@@ -646,17 +711,14 @@ mod tests {
 
         let expected = Ok((&b""[..],
                            SqlComposition {
-                               stmt: Some(SqlStatement{
-                                   template: input.to_string(),
-                                   chunks: vec![
-                                       Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
-                                       Sql::SubStatement(simple_template_stmt()),
-                                       Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
-                                       Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
-                                       Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
-                                   ],
-                                   ..Default::default()
-                               }),
+                               stmt: None,
+                               sql: vec![
+                                   Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
+                                   Sql::SubStatement(simple_template_stmt()),
+                                   Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
+                                   Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
+                                   Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
+                               ],
                                ..Default::default()
                            }
                           ));
@@ -672,17 +734,14 @@ mod tests {
 
         let expected:Result<(&[u8], SqlComposition), nom::Err<&[u8]>> = Ok((&b""[..],
                            SqlComposition {
-                               stmt: Some(SqlStatement{
-                                   template: input.to_string(),
-                                   chunks: vec![
-                                       Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
-                                       Sql::SubStatement(include_template_stmt()),
-                                       Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
-                                       Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
-                                       Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
-                                   ],
-                                   ..Default::default()
-                               }),
+                               stmt: None,
+                               sql: vec![
+                                   Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
+                                   Sql::SubStatement(include_template_stmt()),
+                                   Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
+                                   Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
+                                   Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
+                               ],
                                ..Default::default()
                            }
                           ));
@@ -712,7 +771,8 @@ mod tests {
 
         let comp = parse_expander_macro(sql_str);
 
-        let expected = Ok((&b";"[..], SqlComposition{
+        let expected = Ok((&b";"[..], (SqlComposition{
+            command: Some("count".into()),
             path: None,
             distinct: true,
             columns: Some(vec!["col1".into(), "col2".into()]),
@@ -725,8 +785,9 @@ mod tests {
                     name: None,
                     path: Some("src/tests/include-template.tql".into())
                 }],
+            aliases: build_include_alias_hash(),
             ..Default::default()
-        }));
+        }, vec![])));
 
         assert_eq!(comp, expected);
     }
@@ -737,16 +798,44 @@ mod tests {
 
         let comp = SqlComposition::from_str(sql_str);
 
-        let expected = SqlComposition{
+        println!("final comp: {}", comp);
+
+
+        let mut expected = SqlComposition{
+            command: Some("count".into()),
             path: None,
             of: vec![
                 SqlStatementAlias {
                     name: None,
                     path: Some("src/tests/simple-template.tql".into())
                 }],
+            aliases: build_simple_alias_hash(),
+            sql: vec![
+                Sql::Ending(SqlEnding{ value: ";".into() })
+            ],
             ..Default::default()
         };
 
         assert_eq!(comp, expected);
+    }
+
+    fn build_simple_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+        let mut acc = HashMap::new();
+
+        let p = PathBuf::from("src/tests/simple-template.tql");
+
+        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+
+        acc
+    }
+
+    fn build_include_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+        let mut acc = build_simple_alias_hash();
+
+        let p = PathBuf::from("src/tests/include-template.tql");
+
+        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+
+        acc
     }
 }

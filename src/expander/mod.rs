@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-pub use super::parser::{SqlStatement, SqlComposition, Sql, parse_template};
+pub use super::parser::{SqlStatement, SqlStatementAlias, SqlComposition, Sql, parse_template};
 use std::path::PathBuf;
 use std::any::Any;
 use std::cell::RefCell;
@@ -41,7 +41,14 @@ pub trait Expander : Sized {
 
         match &sc.stmt {
             Some(s) => {
-                for c in &s.chunks {
+                panic!("statement already cached!")
+            }
+            None => {
+                if sc.command.is_some() {
+                    return self.expand_wrapper(&sc, &mock_values, &child_mock_values, i, true);
+                }
+
+                for c in &sc.sql {
                     let (sub_sql, sub_values) = match c {
                         Sql::Text(t) => {
                             (t.to_string(), vec![])
@@ -52,6 +59,9 @@ pub trait Expander : Sized {
                         Sql::SubStatement(ss) => {
                             match &ss.stmt {
                                 Some(ss_stmt) => {
+                                    panic!("stmt already cached!");
+                                },
+                                None => {
                                     match &ss.path {
                                         Some(path) => {
                                             match child_mock_values.get(path) {
@@ -62,12 +72,9 @@ pub trait Expander : Sized {
                                         None => self.expand_statement(&ss, &mock_values, &child_mock_values, i, true)
                                     }
                                 },
-                                None => {
-                                    panic!("missing a stmt!");
-                                }
                             }
                         },
-                        Sql::Composition(sw) => {
+                        Sql::Composition((sw, aliases)) => {
                             self.expand_wrapper(&sw, &mock_values, &child_mock_values, i, true)
                         },
                         Sql::Ending(e) => {
@@ -89,20 +96,23 @@ pub trait Expander : Sized {
                     i = values.len() + offset;
                 }
             },
-            None => panic!("missing statement!")
         }
 
         (sql, values)
     }
 
     fn expand_wrapper<'c> (&self, wrapper: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
-        self._expand_default_wrapper(wrapper, mock_values, child_mock_values, offset, child).unwrap()
+        //println!("expanding (wrapper) composition: {:?}", wrapper);
+        self._expand_default_wrapper(wrapper, mock_values, child_mock_values, offset, child).expect("_expand_default_wrapper failed")
     }
 
     fn _expand_default_wrapper(&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
         //TODO: only count certain columns, expand the
         //
+        //println!("expanding (default wrapper) composition: {:?}", composition);
+
         if composition.stmt.is_some() {
+            println!("we already had a stmt!");
             return Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child));
         }
 
@@ -110,23 +120,40 @@ pub trait Expander : Sized {
             Some(s) => {
                 match s.as_str() {
                     "count" => {
-                        let mut stmt = SqlStatement::new("".into());
+                        let mut out = SqlComposition::default();
 
-                        stmt.push_text("SELECT COUNT(");
+            //println!("expanding :count()");
+                        out.push_text("SELECT COUNT(");
 
                         let columns = composition.column_list().unwrap();
 
                         if let Some(c) = columns {
-                            stmt.push_text(&c);
+                            out.push_text(&c);
+                        }
+                        else {
+                            out.push_text("*");
                         }
 
-                        stmt.push_text(")");
+                        out.push_text(") FROM ");
 
-                        stmt.end(";");
+                        for alias in composition.of.iter() {
+                            out.push_text("(");
+                            match composition.aliases.get(&alias)  {
+                                Some(sc) =>  {
+                                    out.push_sub_comp(sc.clone());
+                                },
+                                None => {
+                                    panic!("no alias found with alias: {:?}", alias);
+                                }
+                            }
 
-                        let c = SqlComposition::new(stmt);
+                            out.push_text(") AS count_main");
+                        }
 
-                        Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child))
+
+                        out.end(";");
+
+                        Ok(self.expand_statement(&out, mock_values, child_mock_values, offset, child))
                     },
                     // Handle this better
                     _ => panic!("unknown call")
@@ -134,7 +161,7 @@ pub trait Expander : Sized {
             },
             None => {
                 //TODO: better error
-                Err(())
+                Ok(self.expand_statement(&composition, mock_values, child_mock_values, offset, child))
             }
         }
     }

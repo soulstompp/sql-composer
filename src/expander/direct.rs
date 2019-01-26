@@ -123,4 +123,10 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
     }
+
+    #[test]
+    fn test_union_command() {
+
+    }
+
 }

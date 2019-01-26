@@ -1,1 +1,1 @@
-SELECT :bind(e) AS col_1, :bind(d) AS col_2, :bind(b) AS col_3, :bind(a) AS col_4 UNION ALL :expand(<src/tests/values/simple.tql>);
+SELECT :bind(e) AS col_1, :bind(d) AS col_2, :bind(b) AS col_3, :bind(a) AS col_4 UNION ALL :expand(src/tests/values/simple.tql);

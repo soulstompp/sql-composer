@@ -69,10 +69,12 @@ impl SqlStatementAlias {
 
 //command - :(command [distinct, all] [column1, column2] of t1.tql, t2.tql)
 //-----------------------------------------------------------------------------
-// examples - :union([all] [column1, column2 of] t1.sql, t2.tql)
-//            :expand([column1, column2 of] t1.sql [alias t3])
-//            :count([distinct] [column1, column2 of] t1.sql)
-//            :checksum([column1, column3 of] t2.sql)
+// examples - :union([all] [distinct] [column1, column2 of] t1.sql [as ut1], t2.tql as [ut2])
+//            :distinct([distinct] [column1, column2 of] t1.sql [as ut1], t2.tql [as ut2])
+//            :except([distinct] [column1, column2 of] t1.sql [as ut1], t2.tql [as ut1])
+//            :expand([column1, column2 of] t1.sql [as ut1] [alias t3])
+//            :count([distinct] [column1, column2 of] t1.sql [as ut1])
+//            :checksum([column1, column3 of] t2.sql [as ut1])
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlComposition {
@@ -280,7 +282,6 @@ impl fmt::Display for SqlStatement {
 pub enum Sql {
   Text(SqlText),
   Binding(SqlBinding),
-  SubStatement(SqlComposition),
   Composition((SqlComposition, Vec<SqlStatementAlias>)),
   Ending(SqlEnding)
 }
@@ -290,7 +291,6 @@ impl fmt::Display for Sql {
       match self {
           Sql::Text(t) => write!(f, "{}", t)?,
           Sql::Binding(b) => write!(f, "{}", b)?,
-          Sql::SubStatement(s) => write!(f, "{}", s)?,
           Sql::Composition(w) => write!(f, "{:?}", w)?,
           Sql::Ending(e) => write!(f, "{}", e)?
       }
@@ -373,31 +373,33 @@ named!(_parse_template<SqlComposition>,
         alt_complete!(
             do_parse!(e: parse_sql_end >> (Sql::Ending(e)))
             //TODO: collect aliases properly
-            | do_parse!(i: parse_expand >> (Sql::SubStatement(i)))
             | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
-            //TODO: collect aliases properly
             | do_parse!(sc: parse_expander_macro >> (Sql::Composition((sc.0, sc.1))))
             | do_parse!(s: parse_sql >> (Sql::Text(s)))
         ),
         SqlComposition::default(), |mut acc: SqlComposition, item: Sql| {
             let item_sql = item;
 
-            if acc.sql.len() == 0 {
-                if let Sql::Composition((sc, aliases)) = item_sql {
-                    acc = sc;
-
-                    for alias in aliases {
+            match item_sql {
+                Sql::Composition((mut sc, aliases)) => {
+                    for alias in &aliases {
                         let stmt_path = alias.path().unwrap();
 
-                        acc.insert_alias(&stmt_path).unwrap();
+                        sc.insert_alias(&stmt_path).unwrap();
                     }
 
-                    return acc;
+                    if acc.sql.len() == 0 {
+                        return sc;
+                    }
+
+
+                    acc.push_sql(Sql::Composition((sc, aliases)));
+                },
+                _ => {
+                    acc.push_sql(item_sql);
                 }
             }
-
-            acc.push_sql(item_sql);
 
             acc
         }
@@ -620,11 +622,58 @@ named!(parse_sql_end<SqlEnding>,
 
 #[cfg(test)]
 mod tests {
-    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_expand, parse_template, SqlStatementAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
+    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, SqlStatementAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
     use std::path::{Path, PathBuf};
     use std::collections::HashMap;
 
-    fn simple_template_stmt() -> SqlComposition {
+    fn simple_aliases() -> Vec<SqlStatementAlias> {
+        vec![
+            SqlStatementAlias {
+                name: None,
+                path: Some("src/tests/simple-template.tql".into())
+            }]
+    }
+
+    fn include_aliases() -> Vec<SqlStatementAlias> {
+        vec![
+            SqlStatementAlias {
+                name: None,
+                path: Some("src/tests/include-template.tql".into())
+            }]
+
+    }
+
+    fn simple_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+        let mut acc = HashMap::new();
+
+        let p = PathBuf::from("src/tests/simple-template.tql");
+
+        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+
+        acc
+    }
+
+    fn include_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+        let mut acc = simple_alias_hash();
+
+        let p = PathBuf::from("src/tests/include-template.tql");
+
+        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+
+        acc
+    }
+
+    fn include_shallow_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+        let mut acc = HashMap::new();
+
+        let p = PathBuf::from("src/tests/include-template.tql");
+
+        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+
+        acc
+    }
+
+    fn simple_template_comp() -> SqlComposition {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/simple-template.tql")),
             stmt: None,
@@ -637,25 +686,35 @@ mod tests {
         }
     }
 
-    fn include_template_stmt() -> SqlComposition {
+    fn include_template_comp() -> SqlComposition {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/include-template.tql")),
-            stmt: None,
             sql: vec![
                 Sql::Text(SqlText::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
-                Sql::SubStatement(SqlComposition{
-                    path: Some(PathBuf::from("src/tests/simple-template.tql")),
-                    stmt: None,
-                    sql: vec![
-                        Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
-                        Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
-                        Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
-                    ],
-                    ..Default::default()
-                }),
+                Sql::Composition((simple_template_expand_comp(), vec![])),
                 Sql::Text(SqlText::from_utf8(b"\n)").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
             ],
+            ..Default::default()
+        }
+    }
+
+    fn simple_template_expand_comp() -> SqlComposition {
+        SqlComposition{
+            command: Some("expand".into()),
+            stmt: None,
+            of: simple_aliases(),
+            aliases: simple_alias_hash(),
+            ..Default::default()
+        }
+    }
+
+    fn include_template_expand_comp() -> SqlComposition {
+        SqlComposition{
+            command: Some("expand".into()),
+            stmt: None,
+            of: include_aliases(),
+            aliases: include_shallow_alias_hash(),
             ..Default::default()
         }
     }
@@ -693,19 +752,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_include() {
-        let input = b":expand(<src/tests/simple-template.tql>)blah blah blah";
-
-        let out = parse_expand(input);
-
-        let expected = Ok((&b"blah blah blah"[..],
-                           simple_template_stmt() ));
-        assert_eq!(out, expected);
-    }
-
-    #[test]
     fn test_parse_simple_template() {
-        let input = "SELECT * FROM (:expand(<src/tests/simple-template.tql>)) WHERE name = ':bind(bindvar)';";
+        let input = "SELECT * FROM (:expand(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 
@@ -714,7 +762,7 @@ mod tests {
                                stmt: None,
                                sql: vec![
                                    Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
-                                   Sql::SubStatement(simple_template_stmt()),
+                                   Sql::Composition((simple_template_expand_comp(), vec![])),
                                    Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
                                    Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
@@ -728,7 +776,7 @@ mod tests {
 
     #[test]
     fn test_parse_include_template() {
-        let input = "SELECT * FROM (:expand(<src/tests/include-template.tql>)) WHERE name = ':bind(bindvar)';";
+        let input = "SELECT * FROM (:expand(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 
@@ -737,7 +785,7 @@ mod tests {
                                stmt: None,
                                sql: vec![
                                    Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
-                                   Sql::SubStatement(include_template_stmt()),
+                                   Sql::Composition((include_template_expand_comp(), vec![])),
                                    Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
                                    Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
@@ -752,7 +800,7 @@ mod tests {
     #[test]
     fn test_parse_file_template() {
         let stmt = SqlComposition::from_path(Path::new("src/tests/simple-template.tql")).unwrap();
-        let expected = simple_template_stmt();
+        let expected = simple_template_comp();
 
         assert_eq!(stmt, expected);
     }
@@ -760,7 +808,7 @@ mod tests {
     #[test]
     fn test_parse_file_inclusive_template() {
         let stmt = SqlComposition::from_path(Path::new("src/tests/include-template.tql")).unwrap();
-        let expected = include_template_stmt();
+        let expected = include_template_comp();
 
         assert_eq!(stmt, expected);
     }
@@ -785,7 +833,7 @@ mod tests {
                     name: None,
                     path: Some("src/tests/include-template.tql".into())
                 }],
-            aliases: build_include_alias_hash(),
+            aliases: include_alias_hash(),
             ..Default::default()
         }, vec![])));
 
@@ -800,7 +848,6 @@ mod tests {
 
         println!("final comp: {}", comp);
 
-
         let mut expected = SqlComposition{
             command: Some("count".into()),
             path: None,
@@ -809,7 +856,7 @@ mod tests {
                     name: None,
                     path: Some("src/tests/simple-template.tql".into())
                 }],
-            aliases: build_simple_alias_hash(),
+            aliases: simple_alias_hash(),
             sql: vec![
                 Sql::Ending(SqlEnding{ value: ";".into() })
             ],
@@ -819,23 +866,4 @@ mod tests {
         assert_eq!(comp, expected);
     }
 
-    fn build_simple_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
-        let mut acc = HashMap::new();
-
-        let p = PathBuf::from("src/tests/simple-template.tql");
-
-        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
-
-        acc
-    }
-
-    fn build_include_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
-        let mut acc = build_simple_alias_hash();
-
-        let p = PathBuf::from("src/tests/include-template.tql");
-
-        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
-
-        acc
-    }
 }

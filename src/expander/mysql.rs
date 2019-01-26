@@ -418,7 +418,7 @@ mod tests {
     fn test_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -511,7 +511,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -543,7 +543,7 @@ mod tests {
             mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
         }
 
-        let (bound_sql, bindings) = expander.mock_expand(&stmt, &vec![], &path_mock_values, 0);
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -567,7 +567,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(<src/tests/values/double-include.tql>)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -612,7 +612,7 @@ mod tests {
             mock_path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
         }
 
-        let (bound_sql, bindings) = expander.mock_expand(&stmt, &vec![], &path_mock_values, 0);
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 

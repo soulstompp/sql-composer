@@ -32,7 +32,6 @@ pub trait Expander : Sized {
     }
 
     fn expand_statement(&self, sc: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
-
         let mut i = offset;
 
         let mut sql = String::new();
@@ -56,26 +55,15 @@ pub trait Expander : Sized {
                         Sql::Binding(b) => {
                             self.bind_values(b.name.to_string(), i)
                         },
-                        Sql::SubStatement(ss) => {
+                        Sql::Composition((ss, aliases)) => {
                             match &ss.stmt {
                                 Some(ss_stmt) => {
                                     panic!("stmt already cached!");
                                 },
                                 None => {
-                                    match &ss.path {
-                                        Some(path) => {
-                                            match child_mock_values.get(path) {
-                                                Some(e) => self.mock_expand(&ss, e, &HashMap::new(), i),
-                                                None => self.expand_statement(&ss, &mock_values, &child_mock_values, i, true),
-                                            }
-                                        }
-                                        None => self.expand_statement(&ss, &mock_values, &child_mock_values, i, true)
-                                    }
+                                    self.expand_statement(&ss, &mock_values, &child_mock_values, i, true)
                                 },
                             }
-                        },
-                        Sql::Composition((sw, aliases)) => {
-                            self.expand_wrapper(&sw, &mock_values, &child_mock_values, i, true)
                         },
                         Sql::Ending(e) => {
                             if child {
@@ -102,17 +90,12 @@ pub trait Expander : Sized {
     }
 
     fn expand_wrapper<'c> (&self, wrapper: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
-        //println!("expanding (wrapper) composition: {:?}", wrapper);
         self._expand_default_wrapper(wrapper, mock_values, child_mock_values, offset, child).expect("_expand_default_wrapper failed")
     }
 
     fn _expand_default_wrapper(&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
-        //TODO: only count certain columns, expand the
-        //
-        //println!("expanding (default wrapper) composition: {:?}", composition);
-
         if composition.stmt.is_some() {
-            println!("we already had a stmt!");
+            panic!("we already had a stmt!");
             return Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child));
         }
 
@@ -122,7 +105,6 @@ pub trait Expander : Sized {
                     "count" => {
                         let mut out = SqlComposition::default();
 
-            //println!("expanding :count()");
                         out.push_text("SELECT COUNT(");
 
                         let columns = composition.column_list().unwrap();
@@ -155,12 +137,37 @@ pub trait Expander : Sized {
 
                         Ok(self.expand_statement(&out, mock_values, child_mock_values, offset, child))
                     },
-                    // Handle this better
+                    "expand" => {
+                        let mut out = composition.clone();
+
+                        out.command = None;
+
+                        match &out.stmt {
+                            Some(out_stmt) => {
+                                panic!("stmt already cached!");
+                            },
+                            None => {
+                                match &out.of[0].path() {
+                                    Some(path) => {
+                                        match child_mock_values.get(path) {
+                                            Some(e) => {
+                                                println!("mocking child at {:?}", path);
+
+                                                Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, &HashMap::new(), offset))
+                                            },
+                                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), &mock_values, &child_mock_values, offset, child)),
+                                        }
+                                    }
+                                    None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), &mock_values, &child_mock_values, offset, child)),
+                                }
+                            },
+                        }
+                    },
+                    // TODO: handle this error better
                     _ => panic!("unknown call")
                 }
             },
             None => {
-                //TODO: better error
                 Ok(self.expand_statement(&composition, mock_values, child_mock_values, offset, child))
             }
         }
@@ -175,14 +182,13 @@ pub trait Expander : Sized {
         let mut c = 0;
 
         if i == 0 {
-            i = 1;
+            i = 1
         }
 
         let mut expected_columns:Option<u8> = None;
 
         if (mock_values.is_empty()) {
-            println!("empty, binding statement");
-            return self.expand_statement(&stmt, mock_values, child_mock_values, i, false);
+            panic!("empty, can't bind statement");
         }
         else {
             println!("non-empty, binding union statement directly");

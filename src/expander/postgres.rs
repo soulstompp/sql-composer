@@ -434,6 +434,102 @@ mod tests {
     }
 
     #[test]
+    fn test_count_command() {
+        let conn = setup_db();
+
+        let (remaining, stmt) = parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
+
+        println!("made it through parse");
+        let expected_bound_sql = "SELECT COUNT(*) FROM (SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4) AS count_main";
+
+        let mut expander = PostgresExpander::new();
+
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+
+        let (bound_sql, bindings) = expander.expand(&stmt);
+
+        println!("bound_sql: {}", bound_sql);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+
+        let mut values:Vec<Vec<Option<i64>>> = vec![];
+
+        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
+            acc.push(*Rc::deref(x));
+            acc
+        });
+
+        for row in &prep_stmt.query(&rebindings).unwrap() {
+            values.push(vec![row.get(0)]);
+        }
+
+        let expected_values:Vec<Vec<Option<i64>>> = vec![
+            vec![Some(3)],
+        ];
+
+        assert_eq!(values, expected_values, "exected values");
+    }
+
+    #[test]
+    fn test_union_command() {
+        let conn = setup_db();
+
+        let (remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
+
+        println!("made it through parse");
+        let expected_bound_sql = "SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 UNION SELECT $13 AS col_1, $14 AS col_2, $15 AS col_3, $16 AS col_4 UNION ALL SELECT $17 AS col_1, $18 AS col_2, $19 AS col_3, $20 AS col_4 UNION SELECT $21 AS col_1, $22 AS col_2, $23 AS col_3, $24 AS col_4 UNION ALL SELECT $25 AS col_1, $26 AS col_2, $27 AS col_3, $28 AS col_4 UNION ALL SELECT $29 AS col_1, $30 AS col_2, $31 AS col_3, $32 AS col_4";
+
+        let mut expander = PostgresExpander::new();
+
+        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
+        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
+        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
+        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
+        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+
+        let (bound_sql, bindings) = expander.expand(&stmt);
+
+        println!("bound_sql: {}", bound_sql);
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+
+        let mut values:Vec<Vec<String>> = vec![];
+
+        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
+            acc.push(*Rc::deref(x));
+            acc
+        });
+
+        for row in &prep_stmt.query(&rebindings).unwrap() {
+            values.push(get_row_values(row));
+        }
+
+        let expected_values = vec![
+            vec!["e_value", "d_value", "b_value", "a_value"],
+            vec!["d_value", "f_value", "b_value", "a_value"],
+            vec!["a_value", "b_value", "c_value", "d_value"],
+            vec!["e_value", "d_value", "b_value", "a_value"],
+            vec!["a_value", "b_value", "c_value", "d_value"],
+        ];
+
+        assert_eq!(values, expected_values, "exected values");
+    }
+
+    #[test]
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
 

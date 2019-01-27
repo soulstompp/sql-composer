@@ -114,7 +114,6 @@ mod tests {
 
         let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';", None).unwrap();
 
-
         assert_eq!(remaining, b"", "nothing remaining");
 
         let (bound_sql, bindings) = expander.expand(&select_stmt);

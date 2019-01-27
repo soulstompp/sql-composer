@@ -26,8 +26,6 @@ pub trait Expander : Sized {
     type Value;
 
     fn expand(&self, s: &SqlComposition) -> (String, Vec<Rc<Self::Value>>) {
-        let mut sql = String::new();
-
         self.expand_statement(s, &Vec::new(), &HashMap::new(), 1usize, false)
     }
 
@@ -44,7 +42,7 @@ pub trait Expander : Sized {
             }
             None => {
                 if sc.command.is_some() {
-                    return self.expand_wrapper(&sc, &mock_values, &child_mock_values, i, true);
+                    return self.expand_wrapper(&sc, &mock_values, &child_mock_values, i, true).unwrap();
                 }
 
                 for c in &sc.sql {
@@ -89,11 +87,7 @@ pub trait Expander : Sized {
         (sql, values)
     }
 
-    fn expand_wrapper<'c> (&self, wrapper: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
-        self._expand_default_wrapper(wrapper, mock_values, child_mock_values, offset, child).expect("_expand_default_wrapper failed")
-    }
-
-    fn _expand_default_wrapper(&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
+    fn expand_wrapper<'c> (&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
         if composition.stmt.is_some() {
             panic!("we already had a stmt!");
             return Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child));
@@ -101,7 +95,7 @@ pub trait Expander : Sized {
 
         match &composition.command {
             Some(s) => {
-                match s.as_str() {
+                match s.to_lowercase().as_str() {
                     "count" => {
                         let mut out = SqlComposition::default();
 
@@ -163,6 +157,9 @@ pub trait Expander : Sized {
                             },
                         }
                     },
+                    "union" => {
+                        self.union_expand(composition, mock_values, child_mock_values, offset, child)
+                    },
                     // TODO: handle this error better
                     _ => panic!("unknown call")
                 }
@@ -171,6 +168,40 @@ pub trait Expander : Sized {
                 Ok(self.expand_statement(&composition, mock_values, child_mock_values, offset, child))
             }
         }
+    }
+
+    fn union_expand(&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
+        let mut out = SqlComposition::default();
+
+        // columns in this case would mean an expand on each side of the union literal
+        let columns = composition.column_list().unwrap();
+
+        let mut i = 0usize;
+
+        if composition.of.len() < 2 {
+            panic!("union requires 2 of arguments");
+        }
+
+        for alias in composition.of.iter() {
+            if i > 0 {
+                out.push_text(" UNION ");
+            }
+
+            match composition.aliases.get(&alias)  {
+                Some(sc) =>  {
+                    out.push_sub_comp(sc.clone());
+                },
+                None => {
+                    panic!("no alias found with alias: {:?}", alias);
+                }
+            }
+
+            i += 1;
+        }
+
+        out.end(";");
+
+        Ok(self.expand_statement(&out, mock_values, child_mock_values, offset, child))
     }
 
     fn mock_expand(&self, stmt: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize) -> (String, Vec<Rc<Self::Value>>) {

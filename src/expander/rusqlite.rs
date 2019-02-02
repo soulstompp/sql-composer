@@ -1,21 +1,26 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 use rusqlite::types::ToSql;
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
-use super::{Expander, ExpanderConfig};
+use super::{Expander, ExpanderConfig, SqlStatementAlias};
 
+#[derive(Default)]
 struct RusqliteExpander<'a> {
     config: ExpanderConfig,
-    values: HashMap<String, Vec<Rc<&'a ToSql>>>
+    values: HashMap<String, Vec<Rc<&'a ToSql>>>,
+    root_mock_values: Vec<BTreeMap<String, Rc<&'a ToSql>>>,
+    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, Rc<&'a ToSql>>>>,
 }
 
 impl<'a> RusqliteExpander<'a> {
     fn new() -> Self {
         Self{
          config: Self::config(),
-         values: HashMap::new()
+         values: HashMap::new(),
+         ..Default::default()
         }
     }
 }
@@ -64,6 +69,21 @@ impl <'a>Expander for RusqliteExpander<'a> {
     fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> () {
         self.values.insert(name, values);
     }
+
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>> {
+        &self.root_mock_values
+    }
+
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>> {
+        &self.mock_values
+    }
+
+    /*
+    fn get_mock_values(&self, name: String) -> Option<&BTreeMap<String, Self::Value>> {
+        self.values.get(&name)
+    }
+    */
+
 }
 
 #[cfg(test)]
@@ -212,7 +232,7 @@ mod tests {
         mock_values[0].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -288,7 +308,7 @@ mod tests {
         mock_values[1].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -374,7 +394,7 @@ mod tests {
         mock_values[2].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -608,19 +628,21 @@ mod tests {
         expander.values.insert("col_1_values".into(), vec![Rc::new(&"ee_value"), Rc::new(&"d_value")]);
         expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"b_value")]);
 
-        let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
 
         {
-            let mut mock_path_entry = path_mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[0].insert("col_1".into(), Rc::new(&"ee_value"));
-            mock_path_entry[0].insert("col_2".into(), Rc::new(&"dd_value"));
-            mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[0].insert("col_1".into(), Rc::new(&"ee_value"));
+            path_entry[0].insert("col_2".into(), Rc::new(&"dd_value"));
+            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
         }
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 1, false);
+        expander.mock_values = mock_values;
+
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
 
         println!("bound sql: {}",  bound_sql);
 
@@ -673,31 +695,33 @@ mod tests {
         expander.values.insert("col_1_values".into(), vec![Rc::new(&"dd_value"), Rc::new(&"aa_value")]);
         expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"cc_value")]);
 
-        let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
 
         {
-            let mut mock_path_entry = path_mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[0].insert("col_1".into(), Rc::new(&"dd_value"));
-            mock_path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
-            mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[0].insert("col_1".into(), Rc::new(&"dd_value"));
+            path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
+            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
-            mock_path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
-            mock_path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
+            path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
+            path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
-            mock_path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
-            mock_path_entry[2].insert("col_3".into(), Rc::new(&"cc_value"));
-            mock_path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
+            path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
+            path_entry[2].insert("col_3".into(), Rc::new(&"cc_value"));
+            path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
         }
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 1, false);
+        expander.mock_values = mock_values;
+
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
 
         println!("bound sql: {}", bound_sql);
 

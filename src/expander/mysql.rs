@@ -1,21 +1,26 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 use mysql::prelude::ToValue;
 
-use super::{Expander, ExpanderConfig};
+use super::{Expander, ExpanderConfig, SqlStatementAlias};
+
+use std::path::PathBuf;
 
 use std::rc::Rc;
 
+#[derive(Default)]
 struct MysqlExpander<'a> {
     config: ExpanderConfig,
     values: HashMap<String, Vec<Rc<&'a ToValue>>>,
+    root_mock_values: Vec<BTreeMap<String, Rc<&'a ToValue>>>,
+    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, Rc<&'a ToValue>>>>,
 }
 
 impl <'a>MysqlExpander<'a> {
     fn new() -> Self {
         Self{
          config: Self::config(),
-         values: HashMap::new(),
+         ..Default::default()
         }
     }
 }
@@ -65,35 +70,13 @@ impl <'a>Expander for MysqlExpander<'a> {
         self.values.insert(name, values);
     }
 
-    /*
-    fn get_mock_values(&self, name: String) -> Option<Vec<Self::Value>> {
-        let values = vec![];
-
-        for row in mock_values.iter() {
-            if r > 0 {
-                sql.push_str(" UNION ");
-            }
-
-            sql.push_str("SELECT ");
-
-            for (name, value) in row {
-                i += 1;
-                c += 1;
-
-                if c > 1 {
-                    sql.push_str(", ")
-                }
-
-                sql.push_str(&self.bind_var_tag(i + offset, name.to_string()));
-                sql.push_str(&format!(" AS {}", &name));
-
-                values.push(*value);
-            }
-        }
-
-        Some(values)
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>> {
+        &self.root_mock_values
     }
-    */
+
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>> {
+        &self.mock_values
+    }
 }
 
 #[cfg(test)]
@@ -237,9 +220,9 @@ mod tests {
         mock_values[0].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
+        expander.root_mock_values = mock_values;
 
-        mock_bound_sql.push(';');
+        let (mut mock_bound_sql, mock_bindings) = expander.expand(&stmt);
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -299,7 +282,7 @@ mod tests {
         mock_values[1].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 0);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -371,7 +354,7 @@ mod tests {
         mock_values[2].insert("col_4".into(), Rc::new(&"d_value"));
 
         let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, &HashMap::new(), 1);
+        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 1);
 
         mock_bound_sql.push(';');
 
@@ -581,19 +564,21 @@ mod tests {
         expander.values.insert("col_1_values".into(), vec![Rc::new(&"ee_value"), Rc::new(&"d_value")]);
         expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"b_value")]);
 
-        let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
 
         {
-            let mut mock_path_entry = path_mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[0].insert("col_1".into(), Rc::new(&"ee_value"));
-            mock_path_entry[0].insert("col_2".into(), Rc::new(&"dd_value"));
-            mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[0].insert("col_1".into(), Rc::new(&"ee_value"));
+            path_entry[0].insert("col_2".into(), Rc::new(&"dd_value"));
+            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
         }
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 0, false);
+        expander.mock_values = mock_values;
+
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -638,31 +623,33 @@ mod tests {
         expander.values.insert("col_1_values".into(), vec![Rc::new(&"dd_value"), Rc::new(&"aa_value")]);
         expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"cc_value")]);
 
-        let mut path_mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn mysql::prelude::ToValue>>>> = HashMap::new();
 
         {
-            let mut mock_path_entry = path_mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[0].insert("col_1".into(), Rc::new(&"dd_value"));
-            mock_path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
-            mock_path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[0].insert("col_1".into(), Rc::new(&"dd_value"));
+            path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
+            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
-            mock_path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
-            mock_path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
-            mock_path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
+            path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
+            path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
+            path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
 
-            mock_path_entry.push(BTreeMap::new());
-            mock_path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
-            mock_path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
-            mock_path_entry[2].insert("col_3".into(), Rc::new(&"cc_value"));
-            mock_path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
+            path_entry.push(BTreeMap::new());
+            path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
+            path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
+            path_entry[2].insert("col_3".into(), Rc::new(&"cc_value"));
+            path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
         }
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, &vec![], &path_mock_values, 0, false);
+        expander.mock_values = mock_values;
+
+        let (bound_sql, bindings) = expander.expand_statement(&stmt, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 

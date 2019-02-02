@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 use super::{Expander, ExpanderConfig};
 
@@ -7,19 +7,24 @@ use crate::parser::SqlText;
 use crate::types::value::{Value, ToValue};
 
 use std::rc::Rc;
+use std::path::PathBuf;
 
 use chrono::prelude::*;
 
+#[derive(Default)]
 struct DirectExpander<'a> {
     config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToValue>>
+    values: HashMap<String, Vec<&'a ToValue>>,
+    root_mock_values: Vec<BTreeMap<String, Rc<&'a str>>>,
+    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, Rc<&'a str>>>>,
 }
 
 impl<'a> DirectExpander<'a> {
     fn new() -> Self {
         Self{
          config: Self::config(),
-         values: HashMap::new()
+         values: HashMap::new(),
+         ..Default::default()
         }
     }
 }
@@ -64,6 +69,20 @@ impl <'a>Expander for DirectExpander<'a> {
     fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> () {
         //self.values.insert(name, values);
     }
+
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>> {
+        &self.root_mock_values
+    }
+
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>> {
+        &self.mock_values
+    }
+
+    /*
+    fn get_mock_values(&self, name: String) -> Option<&BTreeMap<String, Self::Value>> {
+        self.values.get(&name)
+    }
+    */
 }
 
 #[cfg(test)]

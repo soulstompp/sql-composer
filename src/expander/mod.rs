@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use std::error::Error;
 
+#[derive(Default)]
 pub struct ExpanderConfig {
     start: usize,
 }
@@ -26,10 +27,10 @@ pub trait Expander : Sized {
     type Value;
 
     fn expand(&self, s: &SqlComposition) -> (String, Vec<Rc<Self::Value>>) {
-        self.expand_statement(s, &Vec::new(), &HashMap::new(), 1usize, false)
+        self.expand_statement(s, 1usize, false)
     }
 
-    fn expand_statement(&self, sc: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
+    fn expand_statement(&self, sc: &SqlComposition, offset: usize, child: bool) -> (String, Vec<Rc<Self::Value>>) {
         let mut i = offset;
 
         let mut sql = String::new();
@@ -42,7 +43,7 @@ pub trait Expander : Sized {
             }
             None => {
                 if sc.command.is_some() {
-                    return self.expand_wrapper(&sc, &mock_values, &child_mock_values, i, true).unwrap();
+                    return self.expand_wrapper(&sc, i, true).unwrap();
                 }
 
                 for c in &sc.sql {
@@ -59,7 +60,7 @@ pub trait Expander : Sized {
                                     panic!("stmt already cached!");
                                 },
                                 None => {
-                                    self.expand_statement(&ss, &mock_values, &child_mock_values, i, true)
+                                    self.expand_statement(&ss, i, true)
                                 },
                             }
                         },
@@ -87,10 +88,10 @@ pub trait Expander : Sized {
         (sql, values)
     }
 
-    fn expand_wrapper<'c> (&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
+    fn expand_wrapper<'c> (&self, composition: &SqlComposition, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
         if composition.stmt.is_some() {
             panic!("we already had a stmt!");
-            return Ok(self.expand_statement(composition, mock_values, child_mock_values, offset, child));
+            return Ok(self.expand_statement(composition, offset, child));
         }
 
         match &composition.command {
@@ -126,10 +127,9 @@ pub trait Expander : Sized {
                             out.push_text(") AS count_main");
                         }
 
-
                         out.end(";");
 
-                        Ok(self.expand_statement(&out, mock_values, child_mock_values, offset, child))
+                        Ok(self.expand_statement(&out, offset, child))
                     },
                     "expand" => {
                         let mut out = composition.clone();
@@ -143,34 +143,34 @@ pub trait Expander : Sized {
                             None => {
                                 match &out.of[0].path() {
                                     Some(path) => {
-                                        match child_mock_values.get(path) {
+                                        match self.mock_values().get(path) {
                                             Some(e) => {
                                                 println!("mocking child at {:?}", path);
 
-                                                Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, &HashMap::new(), offset))
+                                                Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, offset))
                                             },
-                                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), &mock_values, &child_mock_values, offset, child)),
+                                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
                                         }
                                     }
-                                    None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), &mock_values, &child_mock_values, offset, child)),
+                                    None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
                                 }
                             },
                         }
                     },
                     "union" => {
-                        self.union_expand(composition, mock_values, child_mock_values, offset, child)
+                        self.union_expand(composition, offset, child)
                     },
                     // TODO: handle this error better
                     _ => panic!("unknown call")
                 }
             },
             None => {
-                Ok(self.expand_statement(&composition, mock_values, child_mock_values, offset, child))
+                Ok(self.expand_statement(&composition, offset, child))
             }
         }
     }
 
-    fn union_expand(&self, composition: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
+    fn union_expand(&self, composition: &SqlComposition, offset: usize, child: bool) -> Result<(String, Vec<Rc<Self::Value>>), ()> {
         let mut out = SqlComposition::default();
 
         // columns in this case would mean an expand on each side of the union literal
@@ -201,10 +201,27 @@ pub trait Expander : Sized {
 
         out.end(";");
 
-        Ok(self.expand_statement(&out, mock_values, child_mock_values, offset, child))
+        Ok(self.expand_statement(&out, offset, child))
     }
 
-    fn mock_expand(&self, stmt: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, child_mock_values: &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
+
+    fn bind_var_tag(&self, u: usize, name: String) -> String;
+
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Rc<Self::Value>>);
+
+    fn get_values(&self, name: String) -> Option<&Vec<Rc<Self::Value>>>;
+
+    fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> ();
+
+    fn config() -> ExpanderConfig;
+
+    //fn insert_mock_values(&mut self, alias: SqlStatementAlias, values: Vec<Rc<Self::Value>>) -> ();
+
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>>;
+
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>>;
+
+    fn mock_expand(&self, stmt: &SqlComposition, mock_values: &Vec<BTreeMap<String, Rc<Self::Value>>>, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
         let mut sql = String::new();
         let mut values:Vec<Rc<Self::Value>> = vec![];
 
@@ -219,7 +236,7 @@ pub trait Expander : Sized {
         let mut expected_columns:Option<u8> = None;
 
         if (mock_values.is_empty()) {
-            panic!("empty, can't bind statement");
+            panic!("no empties!");
         }
         else {
             println!("non-empty, binding union statement directly");
@@ -261,14 +278,4 @@ pub trait Expander : Sized {
 
         (sql, values)
     }
-
-    fn bind_var_tag(&self, u: usize, name: String) -> String;
-
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Rc<Self::Value>>);
-
-    fn get_values(&self, name: String) -> Option<&Vec<Rc<Self::Value>>>;
-
-    fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> ();
-
-    fn config() -> ExpanderConfig;
 }

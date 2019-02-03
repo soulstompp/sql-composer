@@ -15,8 +15,8 @@ use chrono::prelude::*;
 struct DirectExpander<'a> {
     config: ExpanderConfig,
     values: HashMap<String, Vec<&'a ToValue>>,
-    root_mock_values: Vec<BTreeMap<String, Rc<&'a str>>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, Rc<&'a str>>>>,
+    root_mock_values: Vec<BTreeMap<String, &'a str>>,
+    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
 }
 
 impl<'a> DirectExpander<'a> {
@@ -58,23 +58,23 @@ impl <'a>Expander for DirectExpander<'a> {
         s
     }
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
         (self.bind_var_tag(offset, name), vec![])
     }
 
-    fn get_values(&self, name: String) -> Option<&Vec<Rc<Self::Value>>> {
+    fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {
         None
     }
 
-    fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> () {
+    fn insert_value(&mut self, name: String, values: Vec<Self::Value>) -> () {
         //self.values.insert(name, values);
     }
 
-    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>> {
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Self::Value>> {
         &self.root_mock_values
     }
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>> {
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
 

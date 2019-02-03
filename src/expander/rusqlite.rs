@@ -10,9 +10,9 @@ use super::{Expander, ExpanderConfig, SqlStatementAlias};
 #[derive(Default)]
 struct RusqliteExpander<'a> {
     config: ExpanderConfig,
-    values: HashMap<String, Vec<Rc<&'a ToSql>>>,
-    root_mock_values: Vec<BTreeMap<String, Rc<&'a ToSql>>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, Rc<&'a ToSql>>>>,
+    values: HashMap<String, Vec<&'a ToSql>>,
+    root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
+    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
 impl<'a> RusqliteExpander<'a> {
@@ -38,7 +38,7 @@ impl <'a>Expander for RusqliteExpander<'a> {
         format!("?{}", u)
     }
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Rc<Self::Value>>) {
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
         let mut sql = String::new();
         let mut new_values = vec![];
 
@@ -53,7 +53,7 @@ impl <'a>Expander for RusqliteExpander<'a> {
 
                     sql.push_str(&self.bind_var_tag(new_values.len() + offset, name.to_string()));
 
-                    new_values.push(Rc::clone(iv));
+                    new_values.push(*iv);
                 }
             },
             None => panic!("no value for binding: {}", i)
@@ -62,19 +62,19 @@ impl <'a>Expander for RusqliteExpander<'a> {
         (sql, new_values)
     }
 
-    fn get_values(&self, name: String) -> Option<&Vec<Rc<Self::Value>>> {
+    fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {
         self.values.get(&name)
     }
 
-    fn insert_value(&mut self, name: String, values: Vec<Rc<Self::Value>>) -> () {
+    fn insert_value(&mut self, name: String, values: Vec<Self::Value>) -> () {
         self.values.insert(name, values);
     }
 
-    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Rc<Self::Value>>> {
+    fn root_mock_values(&self) -> &Vec<BTreeMap<String, Self::Value>> {
         &self.root_mock_values
     }
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Rc<Self::Value>>>> {
+    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
 
@@ -145,9 +145,9 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("name".into(), vec![Rc::new(&person.name)]);
-        expander.values.insert("time_created".into(), vec![Rc::new(&person.time_created)]);
-        expander.values.insert("data".into(), vec![Rc::new(&person.data)]);
+        expander.values.insert("name".into(), vec![&person.name]);
+        expander.values.insert("time_created".into(), vec![&person.time_created]);
+        expander.values.insert("data".into(), vec![&person.data]);
 
         let (bound_sql, bindings) = expander.expand(&insert_stmt);
 
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -179,7 +179,7 @@ mod tests {
         let mut stmt = conn.prepare(&bound_sql).unwrap();
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -219,17 +219,17 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>> = vec![BTreeMap::new()];
+        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![BTreeMap::new()];
 
-        mock_values[0].insert("col_1".into(), Rc::new(&"a_value"));
-        mock_values[0].insert("col_2".into(), Rc::new(&"b_value"));
-        mock_values[0].insert("col_3".into(), Rc::new(&"c_value"));
-        mock_values[0].insert("col_4".into(), Rc::new(&"d_value"));
+        mock_values[0].insert("col_1".into(), &"a_value");
+        mock_values[0].insert("col_2".into(), &"b_value");
+        mock_values[0].insert("col_3".into(), &"c_value");
+        mock_values[0].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = expander.expand(&stmt);
         let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
@@ -242,7 +242,7 @@ mod tests {
         let mut mock_values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -260,7 +260,7 @@ mod tests {
         let mut mock_prep_stmt = conn.prepare(&mock_bound_sql).unwrap();
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -287,25 +287,25 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>> = vec![];
-
-        mock_values.push(BTreeMap::new());
-        mock_values[0].insert("col_1".into(), Rc::new(&"e_value"));
-        mock_values[0].insert("col_2".into(), Rc::new(&"d_value"));
-        mock_values[0].insert("col_3".into(), Rc::new(&"b_value"));
-        mock_values[0].insert("col_4".into(), Rc::new(&"a_value"));
+        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
         mock_values.push(BTreeMap::new());
-        mock_values[1].insert("col_1".into(), Rc::new(&"a_value"));
-        mock_values[1].insert("col_2".into(), Rc::new(&"b_value"));
-        mock_values[1].insert("col_3".into(), Rc::new(&"c_value"));
-        mock_values[1].insert("col_4".into(), Rc::new(&"d_value"));
+        mock_values[0].insert("col_1".into(), &"e_value");
+        mock_values[0].insert("col_2".into(), &"d_value");
+        mock_values[0].insert("col_3".into(), &"b_value");
+        mock_values[0].insert("col_4".into(), &"a_value");
+
+        mock_values.push(BTreeMap::new());
+        mock_values[1].insert("col_1".into(), &"a_value");
+        mock_values[1].insert("col_2".into(), &"b_value");
+        mock_values[1].insert("col_3".into(), &"c_value");
+        mock_values[1].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = expander.expand(&stmt);
         let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
@@ -319,7 +319,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -339,7 +339,7 @@ mod tests {
         let mut mock_values:Vec<Vec<String>> = vec![];
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -366,32 +366,32 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>> = vec![];
-
-        mock_values.push(BTreeMap::new());
-        mock_values[0].insert("col_1".into(), Rc::new(&"d_value"));
-        mock_values[0].insert("col_2".into(), Rc::new(&"f_value"));
-        mock_values[0].insert("col_3".into(), Rc::new(&"b_value"));
-        mock_values[0].insert("col_4".into(), Rc::new(&"a_value"));
+        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
         mock_values.push(BTreeMap::new());
-        mock_values[1].insert("col_1".into(), Rc::new(&"e_value"));
-        mock_values[1].insert("col_2".into(), Rc::new(&"d_value"));
-        mock_values[1].insert("col_3".into(), Rc::new(&"b_value"));
-        mock_values[1].insert("col_4".into(), Rc::new(&"a_value"));
+        mock_values[0].insert("col_1".into(), &"d_value");
+        mock_values[0].insert("col_2".into(), &"f_value");
+        mock_values[0].insert("col_3".into(), &"b_value");
+        mock_values[0].insert("col_4".into(), &"a_value");
 
         mock_values.push(BTreeMap::new());
-        mock_values[2].insert("col_1".into(), Rc::new(&"a_value"));
-        mock_values[2].insert("col_2".into(), Rc::new(&"b_value"));
-        mock_values[2].insert("col_3".into(), Rc::new(&"c_value"));
-        mock_values[2].insert("col_4".into(), Rc::new(&"d_value"));
+        mock_values[1].insert("col_1".into(), &"e_value");
+        mock_values[1].insert("col_2".into(), &"d_value");
+        mock_values[1].insert("col_3".into(), &"b_value");
+        mock_values[1].insert("col_4".into(), &"a_value");
+
+        mock_values.push(BTreeMap::new());
+        mock_values[2].insert("col_1".into(), &"a_value");
+        mock_values[2].insert("col_2".into(), &"b_value");
+        mock_values[2].insert("col_3".into(), &"c_value");
+        mock_values[2].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = expander.expand(&stmt);
         let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
@@ -403,7 +403,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -423,7 +423,7 @@ mod tests {
         let mut mock_values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -458,14 +458,14 @@ mod tests {
         println!("setup expander");
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
-        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
+        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         println!("binding");
         let (bound_sql, bindings) = expander.expand(&stmt);
@@ -477,7 +477,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -507,14 +507,14 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
-        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
+        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         let (bound_sql, bindings) = expander.expand(&stmt);
 
@@ -527,7 +527,7 @@ mod tests {
         let mut values:Vec<Vec<Option<i64>>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -557,14 +557,14 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        expander.values.insert("col_1_values".into(), vec![Rc::new(&"d_value"), Rc::new(&"a_value")]);
-        expander.values.insert("col_3_values".into(), vec![Rc::new(&"b_value"), Rc::new(&"c_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
+        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         let (bound_sql, bindings) = expander.expand(&stmt);
 
@@ -577,7 +577,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -619,25 +619,25 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        expander.values.insert("col_1_values".into(), vec![Rc::new(&"ee_value"), Rc::new(&"d_value")]);
-        expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"b_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
+        expander.values.insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
+        expander.values.insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
-        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> = HashMap::new();
 
         {
             let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
-            path_entry[0].insert("col_1".into(), Rc::new(&"ee_value"));
-            path_entry[0].insert("col_2".into(), Rc::new(&"dd_value"));
-            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry[0].insert("col_1".into(), &"ee_value");
+            path_entry[0].insert("col_2".into(), &"dd_value");
+            path_entry[0].insert("col_3".into(), &"bb_value");
+            path_entry[0].insert("col_4".into(), &"aa_value");
         }
 
         expander.mock_values = mock_values;
@@ -651,7 +651,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 
@@ -686,37 +686,37 @@ mod tests {
 
         let mut expander = RusqliteExpander::new();
 
-        expander.values.insert("a".into(), vec![Rc::new(&"a_value")]);
-        expander.values.insert("b".into(), vec![Rc::new(&"b_value")]);
-        expander.values.insert("c".into(), vec![Rc::new(&"c_value")]);
-        expander.values.insert("d".into(), vec![Rc::new(&"d_value")]);
-        expander.values.insert("e".into(), vec![Rc::new(&"e_value")]);
-        expander.values.insert("f".into(), vec![Rc::new(&"f_value")]);
-        expander.values.insert("col_1_values".into(), vec![Rc::new(&"dd_value"), Rc::new(&"aa_value")]);
-        expander.values.insert("col_3_values".into(), vec![Rc::new(&"bb_value"), Rc::new(&"cc_value")]);
+        expander.values.insert("a".into(), vec![&"a_value"]);
+        expander.values.insert("b".into(), vec![&"b_value"]);
+        expander.values.insert("c".into(), vec![&"c_value"]);
+        expander.values.insert("d".into(), vec![&"d_value"]);
+        expander.values.insert("e".into(), vec![&"e_value"]);
+        expander.values.insert("f".into(), vec![&"f_value"]);
+        expander.values.insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
+        expander.values.insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
-        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, Rc<&dyn ToSql>>>> = HashMap::new();
+        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> = HashMap::new();
 
         {
             let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
-            path_entry[0].insert("col_1".into(), Rc::new(&"dd_value"));
-            path_entry[0].insert("col_2".into(), Rc::new(&"ff_value"));
-            path_entry[0].insert("col_3".into(), Rc::new(&"bb_value"));
-            path_entry[0].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry[0].insert("col_1".into(), &"dd_value");
+            path_entry[0].insert("col_2".into(), &"ff_value");
+            path_entry[0].insert("col_3".into(), &"bb_value");
+            path_entry[0].insert("col_4".into(), &"aa_value");
 
             path_entry.push(BTreeMap::new());
-            path_entry[1].insert("col_1".into(), Rc::new(&"dd_value"));
-            path_entry[1].insert("col_2".into(), Rc::new(&"ff_value"));
-            path_entry[1].insert("col_3".into(), Rc::new(&"bb_value"));
-            path_entry[1].insert("col_4".into(), Rc::new(&"aa_value"));
+            path_entry[1].insert("col_1".into(), &"dd_value");
+            path_entry[1].insert("col_2".into(), &"ff_value");
+            path_entry[1].insert("col_3".into(), &"bb_value");
+            path_entry[1].insert("col_4".into(), &"aa_value");
 
             path_entry.push(BTreeMap::new());
-            path_entry[2].insert("col_1".into(), Rc::new(&"aa_value"));
-            path_entry[2].insert("col_2".into(), Rc::new(&"bb_value"));
-            path_entry[2].insert("col_3".into(), Rc::new(&"cc_value"));
-            path_entry[2].insert("col_4".into(), Rc::new(&"dd_value"));
+            path_entry[2].insert("col_1".into(), &"aa_value");
+            path_entry[2].insert("col_2".into(), &"bb_value");
+            path_entry[2].insert("col_3".into(), &"cc_value");
+            path_entry[2].insert("col_4".into(), &"dd_value");
         }
 
         expander.mock_values = mock_values;
@@ -730,7 +730,7 @@ mod tests {
         let mut values:Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*Rc::deref(x));
+            acc.push(*x);
             acc
         });
 

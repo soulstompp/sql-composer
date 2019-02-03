@@ -1,5 +1,5 @@
 [package]
-name = "reform"
+name = "sql-composer"
 version = "0.1.0"
 authors = ["Kenny Flegal <soulstompp@gmail.com>"]
 edition = '2018'

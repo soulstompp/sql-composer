@@ -5,7 +5,9 @@ use rusqlite::types::ToSql;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use super::{Expander, ExpanderConfig, SqlCompositionAlias};
+use super::{Expander, ExpanderConfig};
+
+use crate::types::SqlCompositionAlias;
 
 #[derive(Default)]
 struct RusqliteExpander<'a> {
@@ -90,7 +92,8 @@ impl <'a>Expander for RusqliteExpander<'a> {
 mod tests {
     use super::{Expander, RusqliteExpander};
 
-    use crate::parser::{SqlComposition, parse_template};
+    use crate::parser::{parse_template};
+    use crate::types::SqlComposition;
 
     use time::Timespec;
     use rusqlite::{Connection, NO_PARAMS};

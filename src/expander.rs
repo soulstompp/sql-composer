@@ -5,7 +5,8 @@ pub mod postgres;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-pub use super::parser::{SqlCompositionAlias, SqlComposition, Sql, parse_template};
+pub use super::parser::{parse_template};
+use crate::types::{SqlCompositionAlias, SqlComposition, Sql};
 use std::path::PathBuf;
 use std::any::Any;
 use std::cell::RefCell;

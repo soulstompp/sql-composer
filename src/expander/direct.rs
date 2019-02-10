@@ -2,7 +2,7 @@ use std::collections::{HashMap, BTreeMap};
 
 use super::{Expander, ExpanderConfig};
 
-use crate::parser::SqlText;
+use crate::types::SqlText;
 
 use crate::types::value::{Value, ToValue};
 
@@ -88,7 +88,7 @@ impl <'a>Expander for DirectExpander<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Expander, DirectExpander, Value, ToValue};
-    use super::super::parse_template;
+    use crate::parser::parse_template;
 
     use std::collections::HashMap;
     use chrono::prelude::*;

@@ -82,7 +82,8 @@ impl <'a>Expander for MysqlExpander<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Expander, MysqlExpander};
-    use crate::parser::{SqlComposition, parse_template};
+    use crate::types::{SqlComposition};
+    use crate::parser::parse_template;
     use mysql::prelude::*;
     use mysql::{Pool, from_row, Row};
 

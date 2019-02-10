@@ -6,7 +6,7 @@ use postgres::types::ToSql;
 
 use std::rc::Rc;
 
-use crate::parser::{SqlComposition, parse_template};
+use crate::types::SqlComposition;
 use super::{Expander, ExpanderConfig, SqlCompositionAlias};
 
 #[derive(Default)]
@@ -93,7 +93,9 @@ impl <'a>Expander for PostgresExpander<'a> {
 mod tests {
     use super::{Expander, PostgresExpander};
 
-    use crate::parser::{SqlComposition, parse_template};
+    use crate::parser::parse_template;
+
+    use crate::types::{SqlComposition};
 
     use postgres::{Connection, TlsMode};
     use postgres::rows::{Row, Rows};

@@ -2,8 +2,6 @@ use std::collections::{HashMap, BTreeMap};
 
 use super::{Expander, ExpanderConfig};
 
-use crate::types::SqlText;
-
 use crate::types::value::{Value, ToValue};
 
 use std::rc::Rc;

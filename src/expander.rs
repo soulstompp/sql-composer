@@ -44,7 +44,7 @@ pub trait Expander : Sized {
 
         for c in &sc.sql {
             let (sub_sql, sub_values) = match c {
-                Sql::Text(t) => {
+                Sql::Literal(t) => {
                     (t.to_string(), vec![])
                 },
                 Sql::Binding(b) => {

@@ -179,14 +179,14 @@ impl SqlComposition {
     }
 
     pub fn push_text(&mut self, value: &str) {
-        self.push_sql(Sql::Text(SqlText{
+        self.push_sql(Sql::Literal(SqlLiteral{
             value: value.into(),
             quoted: false
         }))
     }
 
     pub fn push_quoted_text(&mut self, value: &str) {
-        self.push_sql(Sql::Text(SqlText{
+        self.push_sql(Sql::Literal(SqlLiteral{
             value: value.into(),
             quoted: true
         }))
@@ -225,7 +225,7 @@ impl fmt::Display for SqlComposition {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Sql {
-  Text(SqlText),
+  Literal(SqlLiteral),
   Binding(SqlBinding),
   Composition((SqlComposition, Vec<SqlCompositionAlias>)),
   Ending(SqlEnding)
@@ -234,7 +234,7 @@ pub enum Sql {
 impl fmt::Display for Sql {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
       match self {
-          Sql::Text(t) => write!(f, "{}", t)?,
+          Sql::Literal(t) => write!(f, "{}", t)?,
           Sql::Binding(b) => write!(f, "{}", b)?,
           Sql::Composition(w) => write!(f, "{:?}", w)?,
           Sql::Ending(e) => write!(f, "{}", e)?
@@ -264,12 +264,12 @@ impl fmt::Display for SqlEnding {
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
-pub struct SqlText {
+pub struct SqlLiteral {
     pub value: String,
     pub quoted: bool
 }
 
-impl SqlText {
+impl SqlLiteral {
     pub fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
         let s = String::from_utf8(vec.to_vec())?;
 
@@ -277,7 +277,7 @@ impl SqlText {
     }
 }
 
-impl fmt::Display for SqlText {
+impl fmt::Display for SqlLiteral {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.value)
     }

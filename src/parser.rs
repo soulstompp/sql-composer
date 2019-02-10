@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use crate::types::{Sql, SqlBinding, SqlCompositionAlias, SqlComposition, SqlEnding, SqlText};
+use crate::types::{Sql, SqlBinding, SqlCompositionAlias, SqlComposition, SqlEnding, SqlLiteral};
 
 named!(opt_multispace<&[u8], Option<&[u8]>>,
     opt!(complete!(multispace))
@@ -19,7 +19,7 @@ named!(_parse_template<SqlComposition>,
             | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
             | do_parse!(sc: parse_expander_macro >> (Sql::Composition((sc.0, sc.1))))
-            | do_parse!(s: parse_sql >> (Sql::Text(s)))
+            | do_parse!(s: parse_sql >> (Sql::Literal(s)))
         ),
         SqlComposition::default(), |mut acc: SqlComposition, item: Sql| {
             let item_sql = item;
@@ -248,10 +248,10 @@ named!(parse_bindvar<SqlBinding>,
    )
 );
 
-named!(parse_sql<SqlText>,
+named!(parse_sql<SqlLiteral>,
    map_res!(
        take_until_either!(":;'"),
-       SqlText::from_utf8
+       SqlLiteral::from_utf8
    )
 );
 
@@ -266,7 +266,7 @@ named!(parse_sql_end<SqlEnding>,
 #[cfg(test)]
 mod tests {
     use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, parse_expander_macro };
-    use crate::types::{SqlCompositionAlias, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql};
+    use crate::types::{SqlCompositionAlias, SqlComposition, SqlBinding, SqlEnding, SqlLiteral, Sql};
     use std::path::{Path, PathBuf};
     use std::collections::HashMap;
 
@@ -321,7 +321,7 @@ mod tests {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/simple-template.tql")),
             sql: vec![
-                Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
+                Sql::Literal(SqlLiteral::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                 Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
             ],
@@ -333,9 +333,9 @@ mod tests {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/include-template.tql")),
             sql: vec![
-                Sql::Text(SqlText::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
+                Sql::Literal(SqlLiteral::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
                 Sql::Composition((simple_template_expand_comp(), vec![])),
-                Sql::Text(SqlText::from_utf8(b"\n)").unwrap()),
+                Sql::Literal(SqlLiteral::from_utf8(b"\n)").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
             ],
             ..Default::default()
@@ -388,7 +388,7 @@ mod tests {
 
         let out = parse_sql(input);
 
-        let expected = Ok((&b":bind(varname);"[..], SqlText{ value: "select * from foo where foo.bar = ".into(), ..Default::default() } ));
+        let expected = Ok((&b":bind(varname);"[..], SqlLiteral{ value: "select * from foo where foo.bar = ".into(), ..Default::default() } ));
         assert_eq!(out, expected);
     }
 
@@ -401,9 +401,9 @@ mod tests {
         let expected = Ok((&b""[..],
                            SqlComposition {
                                sql: vec![
-                                   Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
+                                   Sql::Literal(SqlLiteral::from_utf8(b"SELECT * FROM (").unwrap()),
                                    Sql::Composition((simple_template_expand_comp(), vec![])),
-                                   Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
+                                   Sql::Literal(SqlLiteral::from_utf8(b") WHERE name = ").unwrap()),
                                    Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
                                ],
@@ -423,9 +423,9 @@ mod tests {
         let expected:Result<(&[u8], SqlComposition), nom::Err<&[u8]>> = Ok((&b""[..],
                            SqlComposition {
                                sql: vec![
-                                   Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
+                                   Sql::Literal(SqlLiteral::from_utf8(b"SELECT * FROM (").unwrap()),
                                    Sql::Composition((include_template_expand_comp(), vec![])),
-                                   Sql::Text(SqlText::from_utf8(b") WHERE name = ").unwrap()),
+                                   Sql::Literal(SqlLiteral::from_utf8(b") WHERE name = ").unwrap()),
                                    Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                                    Sql::Ending(SqlEnding::from_utf8(b";").unwrap())
                                ],

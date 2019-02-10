@@ -84,7 +84,6 @@ pub struct SqlComposition {
     all: bool,
     columns: Option<Vec<String>>,
     pub of: Vec<SqlCompositionAlias>,
-    pub stmt: Option<SqlStatement>,
     pub aliases: HashMap<SqlCompositionAlias, SqlComposition>,
     pub path: Option<PathBuf>,
     pub sql: Vec<Sql>,
@@ -92,13 +91,6 @@ pub struct SqlComposition {
 
 
 impl SqlComposition {
-    pub fn new(stmt: SqlStatement) -> Self {
-        Self {
-            stmt: Some(stmt),
-            ..Default::default()
-        }
-    }
-
     pub fn from_str(q: &str) -> Self {
         let (remaining, stmt) = parse_template(&q.as_bytes(), None).unwrap();
 
@@ -225,57 +217,6 @@ impl fmt::Display for SqlComposition {
       }
 
       write!(f, ")")
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Clone)]
-pub struct SqlStatement {
-    template: String,
-    pub chunks: Vec<Sql>,
-}
-
-impl SqlStatement {
-    pub fn new(template: String) -> Self {
-        SqlStatement {
-            template: template,
-            ..Default::default()
-        }
-    }
-
-    fn push_chunk(&mut self, c: Sql) {
-        self.chunks.push(c);
-    }
-
-    pub fn push_text(&mut self, value: &str) {
-        self.push_chunk(Sql::Text(SqlText{
-            value: value.into(),
-            quoted: false
-        }))
-    }
-
-    pub fn push_quoted_text(&mut self, value: &str) {
-        self.push_chunk(Sql::Text(SqlText{
-            value: value.into(),
-            quoted: true
-        }))
-    }
-
-    pub fn end(&mut self, value: &str) {
-        //TODO: check if this has already ended
-        self.push_chunk(Sql::Ending(SqlEnding{
-            value: value.into()
-        }));
-    }
-}
-
-impl fmt::Display for SqlStatement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-
-      for c in self.chunks.iter() {
-          write!(f, "{}", c)?;
-      }
-
-      write!(f, "")
     }
 }
 
@@ -623,7 +564,7 @@ named!(parse_sql_end<SqlEnding>,
 
 #[cfg(test)]
 mod tests {
-    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, SqlCompositionAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
+    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, SqlCompositionAlias, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
     use std::path::{Path, PathBuf};
     use std::collections::HashMap;
 
@@ -677,7 +618,6 @@ mod tests {
     fn simple_template_comp() -> SqlComposition {
         SqlComposition{
             path: Some(PathBuf::from("src/tests/simple-template.tql")),
-            stmt: None,
             sql: vec![
                 Sql::Text(SqlText::from_utf8(b"SELECT foo_id, bar FROM foo WHERE foo.bar = ").unwrap()),
                 Sql::Binding(SqlBinding::from_utf8(b"varname").unwrap()),
@@ -703,7 +643,6 @@ mod tests {
     fn simple_template_expand_comp() -> SqlComposition {
         SqlComposition{
             command: Some("expand".into()),
-            stmt: None,
             of: simple_aliases(),
             aliases: simple_alias_hash(),
             ..Default::default()
@@ -713,7 +652,6 @@ mod tests {
     fn include_template_expand_comp() -> SqlComposition {
         SqlComposition{
             command: Some("expand".into()),
-            stmt: None,
             of: include_aliases(),
             aliases: include_shallow_alias_hash(),
             ..Default::default()
@@ -760,7 +698,6 @@ mod tests {
 
         let expected = Ok((&b""[..],
                            SqlComposition {
-                               stmt: None,
                                sql: vec![
                                    Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
                                    Sql::Composition((simple_template_expand_comp(), vec![])),
@@ -783,7 +720,6 @@ mod tests {
 
         let expected:Result<(&[u8], SqlComposition), nom::Err<&[u8]>> = Ok((&b""[..],
                            SqlComposition {
-                               stmt: None,
                                sql: vec![
                                    Sql::Text(SqlText::from_utf8(b"SELECT * FROM (").unwrap()),
                                    Sql::Composition((include_template_expand_comp(), vec![])),

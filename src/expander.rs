@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-pub use super::parser::{SqlStatement, SqlCompositionAlias, SqlComposition, Sql, parse_template};
+pub use super::parser::{SqlCompositionAlias, SqlComposition, Sql, parse_template};
 use std::path::PathBuf;
 use std::any::Any;
 use std::cell::RefCell;
@@ -37,63 +37,44 @@ pub trait Expander : Sized {
 
         let mut values:Vec<Self::Value> = vec![];
 
-        match &sc.stmt {
-            Some(s) => {
-                panic!("statement already cached!")
-            }
-            None => {
-                if sc.command.is_some() {
-                    return self.expand_wrapper(&sc, i, true).unwrap();
-                }
+        if sc.command.is_some() {
+            return self.expand_wrapper(&sc, i, true).unwrap();
+        }
 
-                for c in &sc.sql {
-                    let (sub_sql, sub_values) = match c {
-                        Sql::Text(t) => {
-                            (t.to_string(), vec![])
-                        },
-                        Sql::Binding(b) => {
-                            self.bind_values(b.name.to_string(), i)
-                        },
-                        Sql::Composition((ss, aliases)) => {
-                            match &ss.stmt {
-                                Some(ss_stmt) => {
-                                    panic!("stmt already cached!");
-                                },
-                                None => {
-                                    self.expand_statement(&ss, i, true)
-                                },
-                            }
-                        },
-                        Sql::Ending(e) => {
-                            if child {
-                                ("".to_string(), vec![])
-                            }
-                            else {
-                                (e.to_string(), vec![])
-                            }
-                        }
-                    };
-
-                    sql.push_str(&sub_sql);
-
-                    for sv in sub_values {
-                        values.push(sv);
+        for c in &sc.sql {
+            let (sub_sql, sub_values) = match c {
+                Sql::Text(t) => {
+                    (t.to_string(), vec![])
+                },
+                Sql::Binding(b) => {
+                    self.bind_values(b.name.to_string(), i)
+                },
+                Sql::Composition((ss, aliases)) => {
+                    self.expand_statement(&ss, i, true)
+                },
+                Sql::Ending(e) => {
+                    if child {
+                        ("".to_string(), vec![])
                     }
-
-                    i = values.len() + offset;
+                    else {
+                        (e.to_string(), vec![])
+                    }
                 }
-            },
+            };
+
+            sql.push_str(&sub_sql);
+
+            for sv in sub_values {
+                values.push(sv);
+            }
+
+            i = values.len() + offset;
         }
 
         (sql, values)
     }
 
     fn expand_wrapper<'c> (&self, composition: &SqlComposition, offset: usize, child: bool) -> Result<(String, Vec<Self::Value>), ()> {
-        if composition.stmt.is_some() {
-            panic!("we already had a stmt!");
-            return Ok(self.expand_statement(composition, offset, child));
-        }
-
         match &composition.command {
             Some(s) => {
                 match s.to_lowercase().as_str() {
@@ -136,23 +117,16 @@ pub trait Expander : Sized {
 
                         out.command = None;
 
-                        match &out.stmt {
-                            Some(out_stmt) => {
-                                panic!("stmt already cached!");
-                            },
-                            None => {
-                                match &out.of[0].path() {
-                                    Some(path) => {
-                                        match self.mock_values().get(path) {
-                                            Some(e) => {
-                                                Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, offset))
-                                            },
-                                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
-                                        }
-                                    }
+                        match &out.of[0].path() {
+                            Some(path) => {
+                                match self.mock_values().get(path) {
+                                    Some(e) => {
+                                        Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, offset))
+                                    },
                                     None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
                                 }
-                            },
+                            }
+                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
                         }
                     },
                     "union" => {

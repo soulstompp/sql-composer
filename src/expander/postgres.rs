@@ -7,7 +7,7 @@ use postgres::types::ToSql;
 use std::rc::Rc;
 
 use crate::parser::{SqlComposition, parse_template};
-use super::{Expander, ExpanderConfig, SqlStatementAlias};
+use super::{Expander, ExpanderConfig, SqlCompositionAlias};
 
 #[derive(Default)]
 struct PostgresExpander<'a> {

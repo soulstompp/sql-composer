@@ -5,7 +5,7 @@ use rusqlite::types::ToSql;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use super::{Expander, ExpanderConfig, SqlStatementAlias};
+use super::{Expander, ExpanderConfig, SqlCompositionAlias};
 
 #[derive(Default)]
 struct RusqliteExpander<'a> {

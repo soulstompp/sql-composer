@@ -8,12 +8,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
-pub struct SqlStatementAlias {
+pub struct SqlCompositionAlias {
     name: Option<String>,
     path: Option<PathBuf>,
 }
 
-impl SqlStatementAlias {
+impl SqlCompositionAlias {
     pub fn from_utf8(u: &[u8]) -> ::std::io::Result<Self> {
         let s = String::from_utf8(u.to_vec()).unwrap();
 
@@ -32,13 +32,13 @@ impl SqlStatementAlias {
         });
 
         if is_path {
-            Ok(SqlStatementAlias {
+            Ok(SqlCompositionAlias {
                 path: Some(PathBuf::from(&s)),
                 name: None,
             })
         }
         else if is_name {
-            Ok(SqlStatementAlias {
+            Ok(SqlCompositionAlias {
                 name: Some(s),
                 path: None,
             })
@@ -76,15 +76,16 @@ impl SqlStatementAlias {
 //            :count([distinct] [column1, column2 of] t1.sql [as ut1])
 //            :checksum([column1, column3 of] t2.sql [as ut1])
 
+
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlComposition {
     pub command: Option<String>,
     distinct: bool,
     all: bool,
     columns: Option<Vec<String>>,
-    pub of: Vec<SqlStatementAlias>,
+    pub of: Vec<SqlCompositionAlias>,
     pub stmt: Option<SqlStatement>,
-    pub aliases: HashMap<SqlStatementAlias, SqlComposition>,
+    pub aliases: HashMap<SqlCompositionAlias, SqlComposition>,
     pub path: Option<PathBuf>,
     pub sql: Vec<Sql>,
 }
@@ -161,7 +162,7 @@ impl SqlComposition {
     }
 
     fn insert_alias(&mut self, p: &Path) -> ::std::io::Result<()> {
-        let alias = SqlStatementAlias::from_path(p);
+        let alias = SqlCompositionAlias::from_path(p);
         self.aliases.entry(alias).or_insert(SqlComposition::from_path(&p)?);
 
         Ok(())
@@ -282,7 +283,7 @@ impl fmt::Display for SqlStatement {
 pub enum Sql {
   Text(SqlText),
   Binding(SqlBinding),
-  Composition((SqlComposition, Vec<SqlStatementAlias>)),
+  Composition((SqlComposition, Vec<SqlCompositionAlias>)),
   Ending(SqlEnding)
 }
 
@@ -454,7 +455,7 @@ named!(parse_macro_name<&[u8]>,
    )
 );
 
-named!(parse_expander_macro<&[u8], (SqlComposition, Vec<SqlStatementAlias>)>,
+named!(parse_expander_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
        complete!(do_parse!(
                command: parse_macro_name >>
                distinct: opt!(tag_no_case!("distinct")) >>
@@ -532,7 +533,7 @@ named!(column_list<Vec<String>>,
     )
 );
 
-named!(of_list<Vec<SqlStatementAlias>>,
+named!(of_list<Vec<SqlCompositionAlias>>,
     complete!(
         many1!(
             terminated!(
@@ -551,7 +552,7 @@ named!(of_list<Vec<SqlStatementAlias>>,
                     >>
                     ({
                         //TODO: clean this up properly
-                        let alias = SqlStatementAlias::from_utf8(column).unwrap();
+                        let alias = SqlCompositionAlias::from_utf8(column).unwrap();
 
                         println!("built alias: {:?}!", alias);
 
@@ -622,53 +623,53 @@ named!(parse_sql_end<SqlEnding>,
 
 #[cfg(test)]
 mod tests {
-    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, SqlStatementAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
+    use super::{ parse_bindvar, parse_sql, parse_sql_end, parse_template, SqlCompositionAlias, SqlStatement, SqlComposition, SqlBinding, SqlEnding, SqlText, Sql, parse_expander_macro };
     use std::path::{Path, PathBuf};
     use std::collections::HashMap;
 
-    fn simple_aliases() -> Vec<SqlStatementAlias> {
+    fn simple_aliases() -> Vec<SqlCompositionAlias> {
         vec![
-            SqlStatementAlias {
+            SqlCompositionAlias {
                 name: None,
                 path: Some("src/tests/simple-template.tql".into())
             }]
     }
 
-    fn include_aliases() -> Vec<SqlStatementAlias> {
+    fn include_aliases() -> Vec<SqlCompositionAlias> {
         vec![
-            SqlStatementAlias {
+            SqlCompositionAlias {
                 name: None,
                 path: Some("src/tests/include-template.tql".into())
             }]
 
     }
 
-    fn simple_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/simple-template.tql");
 
-        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
 
         acc
     }
 
-    fn include_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+    fn include_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
         let mut acc = simple_alias_hash();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
-        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
 
         acc
     }
 
-    fn include_shallow_alias_hash() -> HashMap<SqlStatementAlias, SqlComposition> {
+    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
-        acc.entry(SqlStatementAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(SqlComposition::from_path(&p).unwrap());
 
         acc
     }
@@ -825,11 +826,11 @@ mod tests {
             distinct: true,
             columns: Some(vec!["col1".into(), "col2".into()]),
             of: vec![
-                SqlStatementAlias {
+                SqlCompositionAlias {
                     name: None,
                     path: Some("src/tests/simple-template.tql".into())
                 },
-                SqlStatementAlias {
+                SqlCompositionAlias {
                     name: None,
                     path: Some("src/tests/include-template.tql".into())
                 }],
@@ -852,7 +853,7 @@ mod tests {
             command: Some("count".into()),
             path: None,
             of: vec![
-                SqlStatementAlias {
+                SqlCompositionAlias {
                     name: None,
                     path: Some("src/tests/simple-template.tql".into())
                 }],

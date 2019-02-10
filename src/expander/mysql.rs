@@ -2,7 +2,7 @@ use std::collections::{HashMap, BTreeMap};
 
 use mysql::prelude::ToValue;
 
-use super::{Expander, ExpanderConfig, SqlStatementAlias};
+use super::{Expander, ExpanderConfig, SqlCompositionAlias};
 
 use std::path::PathBuf;
 

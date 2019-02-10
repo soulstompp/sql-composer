@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-pub use super::parser::{SqlStatement, SqlStatementAlias, SqlComposition, Sql, parse_template};
+pub use super::parser::{SqlStatement, SqlCompositionAlias, SqlComposition, Sql, parse_template};
 use std::path::PathBuf;
 use std::any::Any;
 use std::cell::RefCell;
@@ -213,7 +213,7 @@ pub trait Expander : Sized {
 
     fn config() -> ExpanderConfig;
 
-    //fn insert_mock_values(&mut self, alias: SqlStatementAlias, values: Vec<Self::Value>) -> ();
+    //fn insert_mock_values(&mut self, alias: SqlCompositionAlias, values: Vec<Self::Value>) -> ();
 
     fn root_mock_values(&self) -> &Vec<BTreeMap<String, Self::Value>>;
 

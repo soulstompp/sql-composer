@@ -71,11 +71,10 @@ impl SqlCompositionAlias {
     }
 
     pub fn path(&self) -> Option<PathBuf> {
-        if let Some(p) = &self.path {
-            return Some(p.to_path_buf());
-        }
-        else {
-            return None;
+        //! Returns the path as a PathBuf
+        match &self.path {
+            Some(p) => Some(p.to_path_buf()),
+            None => None,
         }
     }
 }

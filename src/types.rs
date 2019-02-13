@@ -183,7 +183,7 @@ impl SqlComposition {
     //TODO: error if path already set to Some(...)
     pub fn set_path(&mut self, new: &Path) -> Result<(), ()> {
         match &self.path {
-            Some(current) => Err(()),
+            Some(_current) => Err(()),
             None => {
                 self.path = Some(new.into());
                 Ok(())

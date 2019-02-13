@@ -51,7 +51,7 @@ pub trait Expander: Sized {
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
                 Sql::Binding(b) => self.bind_values(b.name.to_string(), i),
-                Sql::Composition((ss, aliases)) => self.expand_statement(&ss, i, true),
+                Sql::Composition((ss, _aliases)) => self.expand_statement(&ss, i, true),
                 Sql::Ending(e) => {
                     if child {
                         ("".to_string(), vec![])
@@ -160,7 +160,7 @@ pub trait Expander: Sized {
         let mut out = SqlComposition::default();
 
         // columns in this case would mean an expand on each side of the union literal
-        let columns = composition.column_list().unwrap();
+        let _columns = composition.column_list().unwrap();
 
         let mut i = 0usize;
 
@@ -208,7 +208,7 @@ pub trait Expander: Sized {
 
     fn mock_expand(
         &self,
-        stmt: &SqlComposition,
+        _stmt: &SqlComposition,
         mock_values: &Vec<BTreeMap<String, Self::Value>>,
         offset: usize,
     ) -> (String, Vec<Self::Value>) {
@@ -225,7 +225,7 @@ pub trait Expander: Sized {
 
         let mut expected_columns: Option<u8> = None;
 
-        if (mock_values.is_empty()) {
+        if mock_values.is_empty() {
             panic!("mock_values cannot be empty");
         }
         else {

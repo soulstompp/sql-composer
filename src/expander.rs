@@ -1,15 +1,15 @@
 pub mod direct;
 
-pub mod rusqlite;
-pub mod postgres;
 pub mod mysql;
+pub mod postgres;
+pub mod rusqlite;
 
-use std::collections::{BTreeMap, HashMap};
-pub use super::parser::{parse_template};
-use crate::types::{SqlCompositionAlias, SqlComposition, Sql};
-use std::path::PathBuf;
+pub use super::parser::parse_template;
+use crate::types::{Sql, SqlComposition, SqlCompositionAlias};
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use std::error::Error;
@@ -24,19 +24,24 @@ pub enum ExpanderErrorMessage {
     Error(String),
 }
 
-pub trait Expander : Sized {
+pub trait Expander: Sized {
     type Value: Copy;
 
     fn expand(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
         self.expand_statement(s, 1usize, false)
     }
 
-    fn expand_statement(&self, sc: &SqlComposition, offset: usize, child: bool) -> (String, Vec<Self::Value>) {
+    fn expand_statement(
+        &self,
+        sc: &SqlComposition,
+        offset: usize,
+        child: bool,
+    ) -> (String, Vec<Self::Value>) {
         let mut i = offset;
 
         let mut sql = String::new();
 
-        let mut values:Vec<Self::Value> = vec![];
+        let mut values: Vec<Self::Value> = vec![];
 
         if sc.command.is_some() {
             return self.expand_wrapper(&sc, i, true).unwrap();
@@ -44,20 +49,13 @@ pub trait Expander : Sized {
 
         for c in &sc.sql {
             let (sub_sql, sub_values) = match c {
-                Sql::Literal(t) => {
-                    (t.to_string(), vec![])
-                },
-                Sql::Binding(b) => {
-                    self.bind_values(b.name.to_string(), i)
-                },
-                Sql::Composition((ss, aliases)) => {
-                    self.expand_statement(&ss, i, true)
-                },
+                Sql::Literal(t) => (t.to_string(), vec![]),
+                Sql::Binding(b) => self.bind_values(b.name.to_string(), i),
+                Sql::Composition((ss, aliases)) => self.expand_statement(&ss, i, true),
                 Sql::Ending(e) => {
                     if child {
                         ("".to_string(), vec![])
-                    }
-                    else {
+                    } else {
                         (e.to_string(), vec![])
                     }
                 }
@@ -75,7 +73,12 @@ pub trait Expander : Sized {
         (sql, values)
     }
 
-    fn expand_wrapper<'c> (&self, composition: &SqlComposition, offset: usize, child: bool) -> Result<(String, Vec<Self::Value>), ()> {
+    fn expand_wrapper<'c>(
+        &self,
+        composition: &SqlComposition,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
         match &composition.command {
             Some(s) => {
                 match s.to_lowercase().as_str() {
@@ -88,8 +91,7 @@ pub trait Expander : Sized {
 
                         if let Some(c) = columns {
                             out.push_text(&c);
-                        }
-                        else {
+                        } else {
                             out.push_text("*");
                         }
 
@@ -97,10 +99,10 @@ pub trait Expander : Sized {
 
                         for alias in composition.of.iter() {
                             out.push_text("(");
-                            match composition.aliases.get(&alias)  {
-                                Some(sc) =>  {
+                            match composition.aliases.get(&alias) {
+                                Some(sc) => {
                                     out.push_sub_comp(sc.clone());
-                                },
+                                }
                                 None => {
                                     panic!("no alias found with alias: {:?}", alias);
                                 }
@@ -112,38 +114,47 @@ pub trait Expander : Sized {
                         out.end(";");
 
                         Ok(self.expand_statement(&out, offset, child))
-                    },
+                    }
                     "expand" => {
                         let mut out = composition.clone();
 
                         out.command = None;
 
                         match &out.of[0].path() {
-                            Some(path) => {
-                                match self.mock_values().get(path) {
-                                    Some(e) => {
-                                        Ok(self.mock_expand(&out.aliases.get(&out.of[0]).unwrap(), e, offset))
-                                    },
-                                    None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
-                                }
-                            }
-                            None => Ok(self.expand_statement(&out.aliases.get(&out.of[0]).unwrap(), offset, child)),
+                            Some(path) => match self.mock_values().get(path) {
+                                Some(e) => Ok(self.mock_expand(
+                                    &out.aliases.get(&out.of[0]).unwrap(),
+                                    e,
+                                    offset,
+                                )),
+                                None => Ok(self.expand_statement(
+                                    &out.aliases.get(&out.of[0]).unwrap(),
+                                    offset,
+                                    child,
+                                )),
+                            },
+                            None => Ok(self.expand_statement(
+                                &out.aliases.get(&out.of[0]).unwrap(),
+                                offset,
+                                child,
+                            )),
                         }
-                    },
-                    "union" => {
-                        self.union_expand(composition, offset, child)
-                    },
+                    }
+                    "union" => self.union_expand(composition, offset, child),
                     // TODO: handle this error better
-                    _ => panic!("unknown call")
+                    _ => panic!("unknown call"),
                 }
-            },
-            None => {
-                Ok(self.expand_statement(&composition, offset, child))
             }
+            None => Ok(self.expand_statement(&composition, offset, child)),
         }
     }
 
-    fn union_expand(&self, composition: &SqlComposition, offset: usize, child: bool) -> Result<(String, Vec<Self::Value>), ()> {
+    fn union_expand(
+        &self,
+        composition: &SqlComposition,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
         let mut out = SqlComposition::default();
 
         // columns in this case would mean an expand on each side of the union literal
@@ -160,10 +171,10 @@ pub trait Expander : Sized {
                 out.push_text(" UNION ");
             }
 
-            match composition.aliases.get(&alias)  {
-                Some(sc) =>  {
+            match composition.aliases.get(&alias) {
+                Some(sc) => {
                     out.push_sub_comp(sc.clone());
-                },
+                }
                 None => {
                     panic!("no alias found with alias: {:?}", alias);
                 }
@@ -176,7 +187,6 @@ pub trait Expander : Sized {
 
         Ok(self.expand_statement(&out, offset, child))
     }
-
 
     fn bind_var_tag(&self, u: usize, name: String) -> String;
 
@@ -194,9 +204,14 @@ pub trait Expander : Sized {
 
     fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>>;
 
-    fn mock_expand(&self, stmt: &SqlComposition, mock_values: &Vec<BTreeMap<String, Self::Value>>, offset: usize) -> (String, Vec<Self::Value>) {
+    fn mock_expand(
+        &self,
+        stmt: &SqlComposition,
+        mock_values: &Vec<BTreeMap<String, Self::Value>>,
+        offset: usize,
+    ) -> (String, Vec<Self::Value>) {
         let mut sql = String::new();
-        let mut values:Vec<Self::Value> = vec![];
+        let mut values: Vec<Self::Value> = vec![];
 
         let mut i = offset;
         let mut r = 0;
@@ -206,12 +221,11 @@ pub trait Expander : Sized {
             i = 1
         }
 
-        let mut expected_columns:Option<u8> = None;
+        let mut expected_columns: Option<u8> = None;
 
         if (mock_values.is_empty()) {
             panic!("mock_values cannot be empty");
-        }
-        else {
+        } else {
             for row in mock_values.iter() {
                 if r > 0 {
                     sql.push_str(" UNION ALL ");
@@ -238,8 +252,7 @@ pub trait Expander : Sized {
                     if c != ec {
                         panic!("expected {} columns found {} for row {}", ec, c, r);
                     }
-                }
-                else {
+                } else {
                     expected_columns = Some(c);
                 }
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 
 use std::path::PathBuf;
 
@@ -6,8 +6,8 @@ use postgres::types::ToSql;
 
 use std::rc::Rc;
 
-use crate::types::SqlComposition;
 use super::{Expander, ExpanderConfig, SqlCompositionAlias};
+use crate::types::SqlComposition;
 
 #[derive(Default)]
 struct PostgresExpander<'a> {
@@ -19,23 +19,20 @@ struct PostgresExpander<'a> {
 
 impl<'a> PostgresExpander<'a> {
     fn new() -> Self {
-        Self{
-         config: Self::config(),
-         values: HashMap::new(),
-         root_mock_values: Vec::new(),
-         mock_values: HashMap::new()
+        Self {
+            config: Self::config(),
+            values: HashMap::new(),
+            root_mock_values: Vec::new(),
+            mock_values: HashMap::new(),
         }
     }
-
 }
 
-impl <'a>Expander for PostgresExpander<'a> {
+impl<'a> Expander for PostgresExpander<'a> {
     type Value = &'a (dyn ToSql + 'a);
 
     fn config() -> ExpanderConfig {
-        ExpanderConfig {
-            start: 0
-        }
+        ExpanderConfig { start: 0 }
     }
 
     fn bind_var_tag(&self, u: usize, _name: String) -> String {
@@ -59,8 +56,8 @@ impl <'a>Expander for PostgresExpander<'a> {
 
                     new_values.push(*iv);
                 }
-            },
-            None => panic!("no value for binding: {}", new_values.len())
+            }
+            None => panic!("no value for binding: {}", new_values.len()),
         };
 
         (sql, new_values)
@@ -95,11 +92,11 @@ mod tests {
 
     use crate::parser::parse_template;
 
-    use crate::types::{SqlComposition};
+    use crate::types::SqlComposition;
 
-    use postgres::{Connection, TlsMode};
     use postgres::rows::{Row, Rows};
     use postgres::types::ToSql;
+    use postgres::{Connection, TlsMode};
 
     use std::collections::{BTreeMap, HashMap};
 
@@ -128,12 +125,15 @@ mod tests {
 
         conn.execute("DROP TABLE IF EXISTS person;", &[]).unwrap();
 
-        conn.execute("CREATE TABLE IF NOT EXISTS person (
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS person (
                         id              SERIAL PRIMARY KEY,
                         name            VARCHAR NOT NULL,
                         data            BYTEA
-                      )", &[]).unwrap();
-
+                      )",
+            &[],
+        )
+        .unwrap();
 
         let person = Person {
             id: 0,
@@ -141,7 +141,11 @@ mod tests {
             data: None,
         };
 
-        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));", None).unwrap();
+        let (remaining, insert_stmt) = parse_template(
+            b"INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
+            None,
+        )
+        .unwrap();
 
         assert_eq!(remaining, b"", "insert stmt nothing remaining");
 
@@ -161,10 +165,7 @@ mod tests {
             acc
         });
 
-        conn.execute(
-            &bound_sql,
-            &rebindings,
-        ).unwrap();
+        conn.execute(&bound_sql, &rebindings).unwrap();
 
         let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';", None).unwrap();
 
@@ -178,7 +179,7 @@ mod tests {
 
         let stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut people:Vec<Person> = vec![];
+        let mut people: Vec<Person> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -220,7 +221,7 @@ mod tests {
         expander.values.insert("c".into(), vec![&"c_value"]);
         expander.values.insert("d".into(), vec![&"d_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![BTreeMap::new()];
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![BTreeMap::new()];
 
         mock_values[0].insert("col_1".into(), &"a_value");
         mock_values[0].insert("col_2".into(), &"b_value");
@@ -234,9 +235,8 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-
-        let mut values:Vec<Vec<String>> = vec![];
-        let mut mock_values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
+        let mut mock_values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -276,7 +276,7 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
         mock_values.push(BTreeMap::new());
         mock_values[0].insert("col_1".into(), &"e_value");
@@ -299,7 +299,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -312,7 +312,7 @@ mod tests {
 
         let mut mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut mock_values:Vec<Vec<String>> = vec![];
+        let mut mock_values: Vec<Vec<String>> = vec![];
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -331,7 +331,8 @@ mod tests {
     fn test_bind_double_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+        let stmt =
+            SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
         let mut expander = PostgresExpander::new();
 
@@ -342,7 +343,7 @@ mod tests {
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
 
-        let mut mock_values:Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
         mock_values.push(BTreeMap::new());
         mock_values[0].insert("col_1".into(), &"d_value");
@@ -369,7 +370,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -382,7 +383,7 @@ mod tests {
 
         let mut mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut mock_values:Vec<Vec<String>> = vec![];
+        let mut mock_values: Vec<Vec<String>> = vec![];
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -419,8 +420,12 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
-        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        expander
+            .values
+            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander
+            .values
+            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         println!("binding");
         let (bound_sql, bindings) = expander.expand(&stmt);
@@ -431,7 +436,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -448,7 +453,8 @@ mod tests {
     fn test_count_command() {
         let conn = setup_db();
 
-        let (remaining, stmt) = parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
+        let (remaining, stmt) =
+            parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(*) FROM (SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4) AS count_main";
@@ -461,8 +467,12 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
-        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        expander
+            .values
+            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander
+            .values
+            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         let (bound_sql, bindings) = expander.expand(&stmt);
 
@@ -472,7 +482,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<Option<i64>>> = vec![];
+        let mut values: Vec<Vec<Option<i64>>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -483,9 +493,7 @@ mod tests {
             values.push(vec![row.get(0)]);
         }
 
-        let expected_values:Vec<Vec<Option<i64>>> = vec![
-            vec![Some(3)],
-        ];
+        let expected_values: Vec<Vec<Option<i64>>> = vec![vec![Some(3)]];
 
         assert_eq!(values, expected_values, "exected values");
     }
@@ -507,8 +515,12 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
-        expander.values.insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander.values.insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        expander
+            .values
+            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
+        expander
+            .values
+            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         let (bound_sql, bindings) = expander.expand(&stmt);
 
@@ -518,7 +530,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -561,13 +573,20 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
-        expander.values.insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
-        expander.values.insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
+        expander
+            .values
+            .insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
+        expander
+            .values
+            .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
-        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> = HashMap::new();
+        let mut mock_values: HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
+            HashMap::new();
 
         {
-            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values
+                .entry(PathBuf::from("src/tests/values/include.tql"))
+                .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
             path_entry[0].insert("col_1".into(), &"ee_value");
@@ -580,11 +599,11 @@ mod tests {
 
         let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
 
-        println!("bound sql: {}",  bound_sql);
+        println!("bound sql: {}", bound_sql);
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -621,13 +640,20 @@ mod tests {
         expander.values.insert("d".into(), vec![&"d_value"]);
         expander.values.insert("e".into(), vec![&"e_value"]);
         expander.values.insert("f".into(), vec![&"f_value"]);
-        expander.values.insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
-        expander.values.insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
+        expander
+            .values
+            .insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
+        expander
+            .values
+            .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
-        let mut mock_values:HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> = HashMap::new();
+        let mut mock_values: HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
+            HashMap::new();
 
         {
-            let mut path_entry = mock_values.entry(PathBuf::from("src/tests/values/double-include.tql")).or_insert(Vec::new());
+            let mut path_entry = mock_values
+                .entry(PathBuf::from("src/tests/values/double-include.tql"))
+                .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
             path_entry[0].insert("col_1".into(), &"dd_value");
@@ -654,7 +680,7 @@ mod tests {
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-        let mut values:Vec<Vec<String>> = vec![];
+        let mut values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);

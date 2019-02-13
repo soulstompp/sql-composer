@@ -5,16 +5,16 @@ use chrono::prelude::*;
 //borrowed from rusqlite's Value type
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
-        /// The value is a `NULL` value.
-        Null,
-        /// The value is a signed integer.
-        Integer(i64),
-        /// The value is a floating point number.
-        Real(f64),
-        /// The value is a text string.
-        Text(String),
-        /// The value is a blob of data
-        Blob(Vec<u8>),
+    /// The value is a `NULL` value.
+    Null,
+    /// The value is a signed integer.
+    Integer(i64),
+    /// The value is a floating point number.
+    Real(f64),
+    /// The value is a text string.
+    Text(String),
+    /// The value is a blob of data
+    Blob(Vec<u8>),
 }
 
 pub trait ToValue {
@@ -23,15 +23,13 @@ pub trait ToValue {
     fn to_sql_text(&self) -> Result<String, ()> {
         let value = self.to_value()?;
 
-        Ok(
-            match value {
-                Value::Integer(i) => i.to_string(),
-                Value::Real(f) => f.to_string(),
-                Value::Text(s) => format!("'{}'", s.to_string()),
-                Value::Blob(b) => format!("'{}'", String::from_utf8(b.to_vec()).unwrap()),
-                Value::Null => format!("NULL")
-            }
-        )
+        Ok(match value {
+            Value::Integer(i) => i.to_string(),
+            Value::Real(f) => f.to_string(),
+            Value::Text(s) => format!("'{}'", s.to_string()),
+            Value::Blob(b) => format!("'{}'", String::from_utf8(b.to_vec()).unwrap()),
+            Value::Null => format!("NULL"),
+        })
     }
 }
 
@@ -152,5 +150,3 @@ from_nullable!(i64);
 from_nullable!(f64);
 from_nullable!(String);
 from_nullable!(Vec<u8>);
-
-

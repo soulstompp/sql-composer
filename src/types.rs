@@ -18,6 +18,17 @@ pub struct SqlCompositionAlias {
 
 impl SqlCompositionAlias {
     pub fn from_utf8(u: &[u8]) -> ::std::io::Result<Self> {
+        //! Create a SqlCompositionAlias struct from utf8
+        //!
+        //! If u contains a valid string identifier, this will be
+        //! converted to a `String` and used as the `name` element.
+        //!
+        //! If u contains a path, this will be converted to a
+        //! PathBuf and used as the `path` element.
+        //!
+        //! In all other cases, the code `panic`s.
+        //! TODO: could we manually return an Error for the io::Result?
+
         let s = String::from_utf8(u.to_vec()).unwrap();
 
         let (is_name, is_path) = s.chars().fold((true, false), |mut acc, u| {
@@ -35,13 +46,13 @@ impl SqlCompositionAlias {
         });
 
         if is_path {
-            Ok(SqlCompositionAlias {
-                path: Some(PathBuf::from(&s)),
+            Ok(Self {
                 name: None,
+                path: Some(PathBuf::from(&s)),
             })
         }
         else if is_name {
-            Ok(SqlCompositionAlias {
+            Ok(Self {
                 name: Some(s),
                 path: None,
             })

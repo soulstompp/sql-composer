@@ -11,19 +11,19 @@ use crate::types::SqlComposition;
 
 #[derive(Default)]
 struct PostgresExpander<'a> {
-    config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToSql>>,
+    config:           ExpanderConfig,
+    values:           HashMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
+    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
 impl<'a> PostgresExpander<'a> {
     fn new() -> Self {
         Self {
-            config: Self::config(),
-            values: HashMap::new(),
+            config:           Self::config(),
+            values:           HashMap::new(),
             root_mock_values: Vec::new(),
-            mock_values: HashMap::new(),
+            mock_values:      HashMap::new(),
         }
     }
 }
@@ -110,7 +110,7 @@ mod tests {
 
     #[derive(Debug, PartialEq)]
     struct Person {
-        id: i32,
+        id:   i32,
         name: String,
         data: Option<Vec<u8>>,
     }
@@ -136,7 +136,7 @@ mod tests {
         .unwrap();
 
         let person = Person {
-            id: 0,
+            id:   0,
             name: "Steven".to_string(),
             data: None,
         };
@@ -188,7 +188,7 @@ mod tests {
 
         for row in &stmt.query(&rebindings).unwrap() {
             people.push(Person {
-                id: row.get(0),
+                id:   row.get(0),
                 name: row.get(1),
                 data: row.get(2),
             });

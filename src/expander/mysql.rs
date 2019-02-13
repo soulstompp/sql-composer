@@ -10,10 +10,10 @@ use std::rc::Rc;
 
 #[derive(Default)]
 struct MysqlExpander<'a> {
-    config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToValue>>,
+    config:           ExpanderConfig,
+    values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a ToValue>>>,
+    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToValue>>>,
 }
 
 impl<'a> MysqlExpander<'a> {
@@ -92,7 +92,7 @@ mod tests {
 
     #[derive(Debug, PartialEq)]
     struct Person {
-        id: i32,
+        id:   i32,
         name: String,
         data: Option<String>,
     }
@@ -121,7 +121,7 @@ mod tests {
         let pool = setup_db();
 
         let person = Person {
-            id: 0,
+            id:   0,
             name: "Steven".to_string(),
             data: None,
         };
@@ -173,7 +173,7 @@ mod tests {
                 result
                     .map(|x| x.unwrap())
                     .map(|row| Person {
-                        id: row.get(0).unwrap(),
+                        id:   row.get(0).unwrap(),
                         name: row.get(1).unwrap(),
                         data: row.get(2).unwrap(),
                     })

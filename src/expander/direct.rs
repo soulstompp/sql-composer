@@ -11,10 +11,10 @@ use chrono::prelude::*;
 
 #[derive(Default)]
 struct DirectExpander<'a> {
-    config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToValue>>,
+    config:           ExpanderConfig,
+    values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
+    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
 }
 
 impl<'a> DirectExpander<'a> {
@@ -46,7 +46,8 @@ impl<'a> Expander for DirectExpander<'a> {
 
                 s.push_str(&value.to_sql_text().unwrap().to_string());
             }
-        } else {
+        }
+        else {
             panic!("don't have proper error handling yet!");
         }
 
@@ -91,10 +92,10 @@ mod tests {
 
     #[derive(Debug, PartialEq)]
     struct Person {
-        id: i32,
-        name: String,
+        id:           i32,
+        name:         String,
         time_created: DateTime<Local>,
-        data: Option<Vec<u8>>,
+        data:         Option<Vec<u8>>,
     }
 
     #[test]
@@ -102,10 +103,10 @@ mod tests {
         let now = Local::now();
 
         let person = Person {
-            id: 0,
-            name: "Steven".to_string(),
+            id:           0,
+            name:         "Steven".to_string(),
             time_created: now,
-            data: None,
+            data:         None,
         };
 
         let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();

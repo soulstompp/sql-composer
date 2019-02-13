@@ -11,10 +11,10 @@ use crate::types::SqlCompositionAlias;
 
 #[derive(Default)]
 struct RusqliteExpander<'a> {
-    config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToSql>>,
+    config:           ExpanderConfig,
+    values:           HashMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
+    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
 impl<'a> RusqliteExpander<'a> {
@@ -105,10 +105,10 @@ mod tests {
 
     #[derive(Debug, PartialEq)]
     struct Person {
-        id: i32,
-        name: String,
+        id:           i32,
+        name:         String,
         time_created: Timespec,
-        data: Option<Vec<u8>>,
+        data:         Option<Vec<u8>>,
     }
 
     fn setup_db() -> Connection {
@@ -133,10 +133,10 @@ mod tests {
         let conn = setup_db();
 
         let person = Person {
-            id: 0,
-            name: "Steven".to_string(),
+            id:           0,
+            name:         "Steven".to_string(),
             time_created: time::get_time(),
-            data: None,
+            data:         None,
         };
 
         let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
@@ -188,10 +188,10 @@ mod tests {
 
         let person_iter = stmt
             .query_map(&rebindings, |row| Person {
-                id: row.get(0),
-                name: row.get(1),
+                id:           row.get(0),
+                name:         row.get(1),
                 time_created: row.get(2),
-                data: row.get(3),
+                data:         row.get(3),
             })
             .unwrap();
 

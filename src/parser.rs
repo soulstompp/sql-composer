@@ -225,9 +225,7 @@ named!(
 #[cfg(test)]
 mod tests {
     use super::{parse_bindvar, parse_expander_macro, parse_sql, parse_sql_end, parse_template};
-    use crate::types::{
-        Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral,
-    };
+    use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
@@ -332,7 +330,7 @@ mod tests {
         let expected = Ok((
             &b"blah blah blah"[..],
             SqlBinding {
-                name: "varname".into(),
+                name:   "varname".into(),
                 quoted: false,
             },
         ));

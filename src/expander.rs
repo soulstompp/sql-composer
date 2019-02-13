@@ -55,7 +55,8 @@ pub trait Expander: Sized {
                 Sql::Ending(e) => {
                     if child {
                         ("".to_string(), vec![])
-                    } else {
+                    }
+                    else {
                         (e.to_string(), vec![])
                     }
                 }
@@ -91,7 +92,8 @@ pub trait Expander: Sized {
 
                         if let Some(c) = columns {
                             out.push_text(&c);
-                        } else {
+                        }
+                        else {
                             out.push_text("*");
                         }
 
@@ -225,7 +227,8 @@ pub trait Expander: Sized {
 
         if (mock_values.is_empty()) {
             panic!("mock_values cannot be empty");
-        } else {
+        }
+        else {
             for row in mock_values.iter() {
                 if r > 0 {
                     sql.push_str(" UNION ALL ");
@@ -252,7 +255,8 @@ pub trait Expander: Sized {
                     if c != ec {
                         panic!("expected {} columns found {} for row {}", ec, c, r);
                     }
-                } else {
+                }
+                else {
                     expected_columns = Some(c);
                 }
 

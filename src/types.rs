@@ -39,12 +39,14 @@ impl SqlCompositionAlias {
                 path: Some(PathBuf::from(&s)),
                 name: None,
             })
-        } else if is_name {
+        }
+        else if is_name {
             Ok(SqlCompositionAlias {
                 name: Some(s),
                 path: None,
             })
-        } else {
+        }
+        else {
             //TODO: better error handling
             panic!("invalid path");
         }
@@ -60,7 +62,8 @@ impl SqlCompositionAlias {
     pub fn path(&self) -> Option<PathBuf> {
         if let Some(p) = &self.path {
             return Some(p.to_path_buf());
-        } else {
+        }
+        else {
             return None;
         }
     }
@@ -77,14 +80,14 @@ impl SqlCompositionAlias {
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlComposition {
-    pub command: Option<String>,
+    pub command:  Option<String>,
     pub distinct: bool,
-    pub all: bool,
-    pub columns: Option<Vec<String>>,
-    pub of: Vec<SqlCompositionAlias>,
-    pub aliases: HashMap<SqlCompositionAlias, SqlComposition>,
-    pub path: Option<PathBuf>,
-    pub sql: Vec<Sql>,
+    pub all:      bool,
+    pub columns:  Option<Vec<String>>,
+    pub of:       Vec<SqlCompositionAlias>,
+    pub aliases:  HashMap<SqlCompositionAlias, SqlComposition>,
+    pub path:     Option<PathBuf>,
+    pub sql:      Vec<Sql>,
 }
 
 impl SqlComposition {
@@ -184,14 +187,14 @@ impl SqlComposition {
 
     pub fn push_text(&mut self, value: &str) {
         self.push_sql(Sql::Literal(SqlLiteral {
-            value: value.into(),
+            value:  value.into(),
             quoted: false,
         }))
     }
 
     pub fn push_quoted_text(&mut self, value: &str) {
         self.push_sql(Sql::Literal(SqlLiteral {
-            value: value.into(),
+            value:  value.into(),
             quoted: true,
         }))
     }
@@ -269,7 +272,7 @@ impl fmt::Display for SqlEnding {
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct SqlLiteral {
-    pub value: String,
+    pub value:  String,
     pub quoted: bool,
 }
 
@@ -292,7 +295,7 @@ impl fmt::Display for SqlLiteral {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SqlBinding {
-    pub name: String,
+    pub name:   String,
     pub quoted: bool,
 }
 
@@ -301,7 +304,7 @@ impl SqlBinding {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self {
-            name: s,
+            name:   s,
             quoted: false,
         })
     }
@@ -310,7 +313,7 @@ impl SqlBinding {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self {
-            name: s,
+            name:   s,
             quoted: true,
         })
     }

@@ -1,0 +1,11 @@
+# There are a lot of options see:
+#   https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
+edition                      = "2018"
+
+## Unstable, only available on nightlies:
+#   `rustup component add rustfmt --toolchain nightly`
+#   `cargo +nightly fmt`
+# indent_style                 = "Visual"
+control_brace_style          = "ClosingNextLine"
+imports_indent               = "Visual"
+struct_field_align_threshold = 10

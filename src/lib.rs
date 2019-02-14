@@ -1,12 +1,12 @@
 #[macro_use]
 extern crate nom;
-extern crate time;
 extern crate chrono;
+extern crate time;
 
-extern crate rusqlite;
-extern crate postgres;
 extern crate mysql;
+extern crate postgres;
+extern crate rusqlite;
 
-mod parser;
 mod expander;
+mod parser;
 mod types;

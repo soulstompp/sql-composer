@@ -1,39 +1,37 @@
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 
 use super::{Expander, ExpanderConfig};
 
-use crate::types::value::{Value, ToValue};
+use crate::types::value::{ToValue, Value};
 
-use std::rc::Rc;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use chrono::prelude::*;
 
 #[derive(Default)]
 struct DirectExpander<'a> {
-    config: ExpanderConfig,
-    values: HashMap<String, Vec<&'a ToValue>>,
+    config:           ExpanderConfig,
+    values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
-    mock_values: HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
+    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
 }
 
 impl<'a> DirectExpander<'a> {
     fn new() -> Self {
-        Self{
-         config: Self::config(),
-         values: HashMap::new(),
-         ..Default::default()
+        Self {
+            config: Self::config(),
+            values: HashMap::new(),
+            ..Default::default()
         }
     }
 }
 
-impl <'a>Expander for DirectExpander<'a> {
+impl<'a> Expander for DirectExpander<'a> {
     type Value = &'a str;
 
     fn config() -> ExpanderConfig {
-        ExpanderConfig {
-            start: 0
-        }
+        ExpanderConfig { start: 0 }
     }
 
     //TODO: error handling
@@ -85,19 +83,19 @@ impl <'a>Expander for DirectExpander<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Expander, DirectExpander, Value, ToValue};
+    use super::{DirectExpander, Expander, ToValue, Value};
     use crate::parser::parse_template;
 
-    use std::collections::HashMap;
     use chrono::prelude::*;
     use rusqlite::{Connection, NO_PARAMS};
+    use std::collections::HashMap;
 
     #[derive(Debug, PartialEq)]
     struct Person {
-        id: i32,
-        name: String,
+        id:           i32,
+        name:         String,
         time_created: DateTime<Local>,
-        data: Option<Vec<u8>>,
+        data:         Option<Vec<u8>>,
     }
 
     #[test]
@@ -105,10 +103,10 @@ mod tests {
         let now = Local::now();
 
         let person = Person {
-            id: 0,
-            name: "Steven".to_string(),
+            id:           0,
+            name:         "Steven".to_string(),
             time_created: now,
-            data: None,
+            data:         None,
         };
 
         let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
@@ -118,14 +116,19 @@ mod tests {
         let mut expander = DirectExpander::new();
 
         expander.values.insert("name".into(), vec![&person.name]);
-        expander.values.insert("time_created".into(), vec![&person.time_created]);
+        expander
+            .values
+            .insert("time_created".into(), vec![&person.time_created]);
         expander.values.insert("data".into(), vec![&person.data]);
 
         let (bound_sql, bindings) = expander.expand(&insert_stmt);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
-        let expected_bound_sql = format!("INSERT INTO person (name, time_created, data) VALUES ('{}', '{}', {});", "Steven", now_value, "NULL");
+        let expected_bound_sql = format!(
+            "INSERT INTO person (name, time_created, data) VALUES ('{}', '{}', {});",
+            "Steven", now_value, "NULL"
+        );
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
@@ -141,8 +144,6 @@ mod tests {
     }
 
     #[test]
-    fn test_union_command() {
-
-    }
+    fn test_union_command() {}
 
 }

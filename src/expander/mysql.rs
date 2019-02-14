@@ -189,7 +189,7 @@ mod tests {
     }
 
     fn parse(input: &str) -> SqlComposition {
-        let (remaining, stmt) = parse_template(input.as_bytes(), None).unwrap();
+        let (_remaining, stmt) = parse_template(input.as_bytes(), None).unwrap();
 
         stmt
     }
@@ -230,7 +230,7 @@ mod tests {
         let (bound_sql, bindings) = expander.expand(&stmt);
         expander.root_mock_values = mock_values;
 
-        let (mut mock_bound_sql, mock_bindings) = expander.expand(&stmt);
+        let (mock_bound_sql, mock_bindings) = expander.expand(&stmt);
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -246,7 +246,7 @@ mod tests {
             values.push(get_row_values(row.unwrap()));
         }
 
-        let mut mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let _mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -413,7 +413,7 @@ mod tests {
     fn test_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -463,7 +463,7 @@ mod tests {
     fn test_count_command() {
         let pool = setup_db();
 
-        let (remaining, stmt) =
+        let (_remaining, stmt) =
             parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
@@ -513,7 +513,7 @@ mod tests {
     fn test_union_command() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
+        let (_remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
@@ -567,7 +567,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -597,7 +597,7 @@ mod tests {
         > = HashMap::new();
 
         {
-            let mut path_entry = mock_values
+            let path_entry = mock_values
                 .entry(PathBuf::from("src/tests/values/include.tql"))
                 .or_insert(Vec::new());
 
@@ -634,7 +634,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -665,7 +665,7 @@ mod tests {
         > = HashMap::new();
 
         {
-            let mut path_entry = mock_values
+            let path_entry = mock_values
                 .entry(PathBuf::from("src/tests/values/double-include.tql"))
                 .or_insert(Vec::new());
 

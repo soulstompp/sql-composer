@@ -58,11 +58,11 @@ impl<'a> Expander for DirectExpander<'a> {
         (self.bind_var_tag(offset, name), vec![])
     }
 
-    fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {
+    fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {
         None
     }
 
-    fn insert_value(&mut self, name: String, values: Vec<Self::Value>) -> () {
+    fn insert_value(&mut self, _name: String, _values: Vec<Self::Value>) -> () {
         //self.values.insert(name, values);
     }
 
@@ -121,7 +121,7 @@ mod tests {
             .insert("time_created".into(), vec![&person.time_created]);
         expander.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = expander.expand(&insert_stmt);
+        let (bound_sql, _bindings) = expander.expand(&insert_stmt);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -136,7 +136,7 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let (bound_sql, bindings) = expander.expand(&select_stmt);
+        let (bound_sql, _bindings) = expander.expand(&select_stmt);
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

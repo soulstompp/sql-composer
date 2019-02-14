@@ -24,9 +24,7 @@ named!(
         ),
         SqlComposition::default(),
         |mut acc: SqlComposition, item: Sql| {
-            let item_sql = item;
-
-            match item_sql {
+            match item {
                 Sql::Composition((mut sc, aliases)) => {
                     for alias in &aliases {
                         let stmt_path = alias.path().unwrap();
@@ -41,7 +39,7 @@ named!(
                     acc.push_sql(Sql::Composition((sc, aliases)));
                 }
                 _ => {
-                    acc.push_sql(item_sql);
+                    acc.push_sql(item);
                 }
             }
 

@@ -86,6 +86,7 @@ pub trait Expander: Sized {
                     "count" => {
                         let mut out = SqlComposition::default();
 
+                        //TODO: push_literal not push_text
                         out.push_text("SELECT COUNT(");
 
                         let columns = composition.column_list().unwrap();
@@ -94,7 +95,7 @@ pub trait Expander: Sized {
                             out.push_text(&c);
                         }
                         else {
-                            out.push_text("*");
+                            out.push_text("1");
                         }
 
                         out.push_text(") FROM ");

@@ -172,10 +172,9 @@ impl SqlComposition {
     }
 
     pub fn insert_alias(&mut self, p: &Path) -> ::std::io::Result<()> {
-        let alias = SqlCompositionAlias::from_path(p);
         self.aliases
-            .entry(alias)
-            .or_insert(SqlComposition::from_path(&p)?);
+            .entry(SqlCompositionAlias::from_path(p))
+            .or_insert(SqlComposition::from_path(p)?);
 
         Ok(())
     }

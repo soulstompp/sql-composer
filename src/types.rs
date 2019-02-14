@@ -194,7 +194,7 @@ impl SqlComposition {
         self.push_sql(Sql::Composition((value, vec![])));
     }
 
-    pub fn push_text(&mut self, value: &str) {
+    pub fn push_literal(&mut self, value: &str) {
         self.push_sql(Sql::Literal(SqlLiteral {
             value:  value.into(),
             quoted: false,

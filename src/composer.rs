@@ -86,22 +86,21 @@ pub trait Composer: Sized {
                     "count" => {
                         let mut out = SqlComposition::default();
 
-                        //TODO: push_literal not push_text
-                        out.push_text("SELECT COUNT(");
+                        out.push_literal("SELECT COUNT(");
 
                         let columns = composition.column_list().unwrap();
 
                         if let Some(c) = columns {
-                            out.push_text(&c);
+                            out.push_literal(&c);
                         }
                         else {
-                            out.push_text("1");
+                            out.push_literal("1");
                         }
 
-                        out.push_text(") FROM ");
+                        out.push_literal(") FROM ");
 
                         for alias in composition.of.iter() {
-                            out.push_text("(");
+                            out.push_literal("(");
                             match composition.aliases.get(&alias) {
                                 Some(sc) => {
                                     out.push_sub_comp(sc.clone());
@@ -111,7 +110,7 @@ pub trait Composer: Sized {
                                 }
                             }
 
-                            out.push_text(") AS count_main");
+                            out.push_literal(") AS count_main");
                         }
 
                         out.end(";");
@@ -171,7 +170,7 @@ pub trait Composer: Sized {
 
         for alias in composition.of.iter() {
             if i > 0 {
-                out.push_text(" UNION ");
+                out.push_literal(" UNION ");
             }
 
             match composition.aliases.get(&alias) {

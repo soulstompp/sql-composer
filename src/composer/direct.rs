@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use super::{Expander, ExpanderConfig};
+use super::{Composer, ComposerConfig};
 
 use crate::types::value::{ToValue, Value};
 
@@ -10,14 +10,14 @@ use std::rc::Rc;
 use chrono::prelude::*;
 
 #[derive(Default)]
-struct DirectExpander<'a> {
-    config:           ExpanderConfig,
+struct DirectComposer<'a> {
+    config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
     mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
 }
 
-impl<'a> DirectExpander<'a> {
+impl<'a> DirectComposer<'a> {
     fn new() -> Self {
         Self {
             config: Self::config(),
@@ -27,11 +27,11 @@ impl<'a> DirectExpander<'a> {
     }
 }
 
-impl<'a> Expander for DirectExpander<'a> {
+impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
 
-    fn config() -> ExpanderConfig {
-        ExpanderConfig { start: 0 }
+    fn config() -> ComposerConfig {
+        ComposerConfig { start: 0 }
     }
 
     //TODO: error handling
@@ -83,7 +83,7 @@ impl<'a> Expander for DirectExpander<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirectExpander, Expander, ToValue, Value};
+    use super::{DirectComposer, Composer, ToValue, Value};
     use crate::parser::parse_template;
 
     use chrono::prelude::*;
@@ -113,15 +113,15 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let mut expander = DirectExpander::new();
+        let mut composeer = DirectComposer::new();
 
-        expander.values.insert("name".into(), vec![&person.name]);
-        expander
+        composeer.values.insert("name".into(), vec![&person.name]);
+        composeer
             .values
             .insert("time_created".into(), vec![&person.time_created]);
-        expander.values.insert("data".into(), vec![&person.data]);
+        composeer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, _bindings) = expander.expand(&insert_stmt);
+        let (bound_sql, _bindings) = composeer.compose(&insert_stmt);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -136,7 +136,7 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let (bound_sql, _bindings) = expander.expand(&select_stmt);
+        let (bound_sql, _bindings) = composeer.compose(&select_stmt);
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

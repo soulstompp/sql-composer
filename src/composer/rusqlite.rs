@@ -5,19 +5,19 @@ use rusqlite::types::ToSql;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use super::{Expander, ExpanderConfig};
+use super::{Composer, ComposerConfig};
 
 use crate::types::SqlCompositionAlias;
 
 #[derive(Default)]
-struct RusqliteExpander<'a> {
-    config:           ExpanderConfig,
+struct RusqliteComposer<'a> {
+    config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
     mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
-impl<'a> RusqliteExpander<'a> {
+impl<'a> RusqliteComposer<'a> {
     fn new() -> Self {
         Self {
             config: Self::config(),
@@ -27,11 +27,11 @@ impl<'a> RusqliteExpander<'a> {
     }
 }
 
-impl<'a> Expander for RusqliteExpander<'a> {
+impl<'a> Composer for RusqliteComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
 
-    fn config() -> ExpanderConfig {
-        ExpanderConfig { start: 0 }
+    fn config() -> ComposerConfig {
+        ComposerConfig { start: 0 }
     }
 
     fn bind_var_tag(&self, u: usize, _name: String) -> String {
@@ -87,7 +87,7 @@ impl<'a> Expander for RusqliteExpander<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Expander, RusqliteExpander};
+    use super::{Composer, RusqliteComposer};
 
     use crate::parser::parse_template;
     use crate::types::SqlComposition;
@@ -147,15 +147,15 @@ mod tests {
         );
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("name".into(), vec![&person.name]);
-        expander
+        composeer.values.insert("name".into(), vec![&person.name]);
+        composeer
             .values
             .insert("time_created".into(), vec![&person.time_created]);
-        expander.values.insert("data".into(), vec![&person.data]);
+        composeer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = expander.expand(&insert_stmt);
+        let (bound_sql, bindings) = composeer.compose(&insert_stmt);
 
         let expected_bound_sql =
             "INSERT INTO person (name, time_created, data) VALUES (?1, ?2, ?3);";
@@ -173,7 +173,7 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let (bound_sql, bindings) = expander.expand(&select_stmt);
+        let (bound_sql, bindings) = composeer.compose(&select_stmt);
 
         let expected_bound_sql = "SELECT id, name, time_created, data FROM person WHERE name = ?1 AND time_created = ?2 AND name = ?3 AND time_created = ?4";
 
@@ -225,12 +225,12 @@ mod tests {
 
         let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![BTreeMap::new()];
 
@@ -239,8 +239,8 @@ mod tests {
         mock_values[0].insert("col_3".into(), &"c_value");
         mock_values[0].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = composeer.mock_compose(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -297,13 +297,13 @@ mod tests {
 
         let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
@@ -319,8 +319,8 @@ mod tests {
         mock_values[1].insert("col_3".into(), &"c_value");
         mock_values[1].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = composeer.mock_compose(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -381,14 +381,14 @@ mod tests {
         let stmt =
             SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![];
 
@@ -410,8 +410,8 @@ mod tests {
         mock_values[2].insert("col_3".into(), &"c_value");
         mock_values[2].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, _mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        let (mut mock_bound_sql, _mock_bindings) = composeer.mock_compose(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -467,7 +467,7 @@ mod tests {
     fn test_multi_value_bind() {
         let conn = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT col_1, col_2, col_3, col_4 FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT col_1, col_2, col_3, col_4 FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_sql = "SELECT col_1, col_2, col_3, col_4 FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS main WHERE col_1 in (?13, ?14) AND col_3 IN (?15, ?16);";
 
@@ -476,24 +476,24 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        println!("setup expander");
-        let mut expander = RusqliteExpander::new();
+        println!("setup composeer");
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         println!("binding");
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -531,24 +531,24 @@ mod tests {
             parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
-        let expected_bound_sql = "SELECT COUNT(*) FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS count_main";
+        let expected_bound_sql = "SELECT COUNT(1) FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS count_main";
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -585,22 +585,22 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 UNION SELECT ?13 AS col_1, ?14 AS col_2, ?15 AS col_3, ?16 AS col_4 UNION ALL SELECT ?17 AS col_1, ?18 AS col_2, ?19 AS col_3, ?20 AS col_4 UNION SELECT ?21 AS col_1, ?22 AS col_2, ?23 AS col_3, ?24 AS col_4 UNION ALL SELECT ?25 AS col_1, ?26 AS col_2, ?27 AS col_3, ?28 AS col_4 UNION ALL SELECT ?29 AS col_1, ?30 AS col_2, ?31 AS col_3, ?32 AS col_4";
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -643,7 +643,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4) AS main WHERE col_1 in (?9, ?10) AND col_3 IN (?11, ?12);";
 
@@ -652,18 +652,18 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
@@ -682,9 +682,9 @@ mod tests {
             path_entry[0].insert("col_4".into(), &"aa_value");
         }
 
-        expander.mock_values = mock_values;
+        composeer.mock_values = mock_values;
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
+        let (bound_sql, bindings) = composeer.compose_statement(&stmt, 1, false);
 
         println!("bound sql: {}", bound_sql);
 
@@ -718,7 +718,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS main WHERE col_1 in (?13, ?14) AND col_3 IN (?15, ?16);";
 
@@ -728,18 +728,18 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut expander = RusqliteExpander::new();
+        let mut composeer = RusqliteComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
@@ -770,9 +770,9 @@ mod tests {
             path_entry[2].insert("col_4".into(), &"dd_value");
         }
 
-        expander.mock_values = mock_values;
+        composeer.mock_values = mock_values;
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
+        let (bound_sql, bindings) = composeer.compose_statement(&stmt, 1, false);
 
         println!("bound sql: {}", bound_sql);
 

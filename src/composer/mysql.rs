@@ -2,21 +2,21 @@ use std::collections::{BTreeMap, HashMap};
 
 use mysql::prelude::ToValue;
 
-use super::{Expander, ExpanderConfig, SqlCompositionAlias};
+use super::{Composer, ComposerConfig, SqlCompositionAlias};
 
 use std::path::PathBuf;
 
 use std::rc::Rc;
 
 #[derive(Default)]
-struct MysqlExpander<'a> {
-    config:           ExpanderConfig,
+struct MysqlComposer<'a> {
+    config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
     mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToValue>>>,
 }
 
-impl<'a> MysqlExpander<'a> {
+impl<'a> MysqlComposer<'a> {
     fn new() -> Self {
         Self {
             config: Self::config(),
@@ -25,11 +25,11 @@ impl<'a> MysqlExpander<'a> {
     }
 }
 
-impl<'a> Expander for MysqlExpander<'a> {
+impl<'a> Composer for MysqlComposer<'a> {
     type Value = &'a (dyn ToValue + 'a);
 
-    fn config() -> ExpanderConfig {
-        ExpanderConfig { start: 0 }
+    fn config() -> ComposerConfig {
+        ComposerConfig { start: 0 }
     }
 
     fn bind_var_tag(&self, _u: usize, _name: String) -> String {
@@ -79,7 +79,7 @@ impl<'a> Expander for MysqlExpander<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Expander, MysqlExpander};
+    use super::{Composer, MysqlComposer};
     use crate::parser::parse_template;
     use crate::types::SqlComposition;
     use mysql::prelude::*;
@@ -126,7 +126,7 @@ mod tests {
             data: None,
         };
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
         let (remaining, insert_stmt) = parse_template(
             b"INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
@@ -136,10 +136,10 @@ mod tests {
 
         assert_eq!(remaining, b"", "insert stmt nothing remaining");
 
-        expander.values.insert("name".into(), vec![&person.name]);
-        expander.values.insert("data".into(), vec![&person.data]);
+        composeer.values.insert("name".into(), vec![&person.name]);
+        composeer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = expander.expand(&insert_stmt);
+        let (bound_sql, bindings) = composeer.compose(&insert_stmt);
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES (?, ?);";
 
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(remaining, b"", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = expander.expand(&select_stmt);
+        let (bound_sql, bindings) = composeer.compose(&select_stmt);
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = ? AND name = ?;";
 
@@ -212,12 +212,12 @@ mod tests {
 
         let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
             vec![BTreeMap::new()];
@@ -227,10 +227,10 @@ mod tests {
         mock_values[0].insert("col_3".into(), &"c_value");
         mock_values[0].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        expander.root_mock_values = mock_values;
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        composeer.root_mock_values = mock_values;
 
-        let (mock_bound_sql, mock_bindings) = expander.expand(&stmt);
+        let (mock_bound_sql, mock_bindings) = composeer.compose(&stmt);
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -267,13 +267,13 @@ mod tests {
 
         let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
             vec![];
@@ -290,8 +290,8 @@ mod tests {
         mock_values[1].insert("col_3".into(), &"c_value");
         mock_values[1].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = composeer.mock_compose(&stmt, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -334,14 +334,14 @@ mod tests {
         let stmt =
             SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
 
         let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
             vec![];
@@ -364,8 +364,8 @@ mod tests {
         mock_values[2].insert("col_3".into(), &"c_value");
         mock_values[2].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = expander.mock_expand(&stmt, &mock_values, 1);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
+        let (mut mock_bound_sql, mock_bindings) = composeer.mock_compose(&stmt, &mock_values, 1);
 
         mock_bound_sql.push(';');
 
@@ -413,7 +413,7 @@ mod tests {
     fn test_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -422,22 +422,22 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -467,24 +467,24 @@ mod tests {
             parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
-        let expected_bound_sql = "SELECT COUNT(*) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main";
+        let expected_bound_sql = "SELECT COUNT(1) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main";
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -518,22 +518,22 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = expander.expand(&stmt);
+        let (bound_sql, bindings) = composeer.compose(&stmt);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -567,7 +567,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -576,18 +576,18 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
@@ -608,9 +608,9 @@ mod tests {
             path_entry[0].insert("col_4".into(), &"aa_value");
         }
 
-        expander.mock_values = mock_values;
+        composeer.mock_values = mock_values;
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, 0, false);
+        let (bound_sql, bindings) = composeer.compose_statement(&stmt, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -634,7 +634,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -644,18 +644,18 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut expander = MysqlExpander::new();
+        let mut composeer = MysqlComposer::new();
 
-        expander.values.insert("a".into(), vec![&"a_value"]);
-        expander.values.insert("b".into(), vec![&"b_value"]);
-        expander.values.insert("c".into(), vec![&"c_value"]);
-        expander.values.insert("d".into(), vec![&"d_value"]);
-        expander.values.insert("e".into(), vec![&"e_value"]);
-        expander.values.insert("f".into(), vec![&"f_value"]);
-        expander
+        composeer.values.insert("a".into(), vec![&"a_value"]);
+        composeer.values.insert("b".into(), vec![&"b_value"]);
+        composeer.values.insert("c".into(), vec![&"c_value"]);
+        composeer.values.insert("d".into(), vec![&"d_value"]);
+        composeer.values.insert("e".into(), vec![&"e_value"]);
+        composeer.values.insert("f".into(), vec![&"f_value"]);
+        composeer
             .values
             .insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
-        expander
+        composeer
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
@@ -688,9 +688,9 @@ mod tests {
             path_entry[2].insert("col_4".into(), &"dd_value");
         }
 
-        expander.mock_values = mock_values;
+        composeer.mock_values = mock_values;
 
-        let (bound_sql, bindings) = expander.expand_statement(&stmt, 0, false);
+        let (bound_sql, bindings) = composeer.compose_statement(&stmt, 0, false);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 

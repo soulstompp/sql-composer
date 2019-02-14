@@ -15,23 +15,23 @@ use std::rc::Rc;
 use std::error::Error;
 
 #[derive(Default)]
-pub struct ExpanderConfig {
+pub struct ComposerConfig {
     start: usize,
 }
 
-pub enum ExpanderErrorMessage {
+pub enum ComposerErrorMessage {
     Declined,
     Error(String),
 }
 
-pub trait Expander: Sized {
+pub trait Composer: Sized {
     type Value: Copy;
 
-    fn expand(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
-        self.expand_statement(s, 1usize, false)
+    fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
+        self.compose_statement(s, 1usize, false)
     }
 
-    fn expand_statement(
+    fn compose_statement(
         &self,
         sc: &SqlComposition,
         offset: usize,
@@ -44,14 +44,14 @@ pub trait Expander: Sized {
         let mut values: Vec<Self::Value> = vec![];
 
         if sc.command.is_some() {
-            return self.expand_wrapper(&sc, i, true).unwrap();
+            return self.compose_wrapper(&sc, i, true).unwrap();
         }
 
         for c in &sc.sql {
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
                 Sql::Binding(b) => self.bind_values(b.name.to_string(), i),
-                Sql::Composition((ss, _aliases)) => self.expand_statement(&ss, i, true),
+                Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true),
                 Sql::Ending(e) => {
                     if child {
                         ("".to_string(), vec![])
@@ -74,7 +74,7 @@ pub trait Expander: Sized {
         (sql, values)
     }
 
-    fn expand_wrapper<'c>(
+    fn compose_wrapper<'c>(
         &self,
         composition: &SqlComposition,
         offset: usize,
@@ -116,43 +116,43 @@ pub trait Expander: Sized {
 
                         out.end(";");
 
-                        Ok(self.expand_statement(&out, offset, child))
+                        Ok(self.compose_statement(&out, offset, child))
                     }
-                    "expand" => {
+                    "compose" => {
                         let mut out = composition.clone();
 
                         out.command = None;
 
                         match &out.of[0].path() {
                             Some(path) => match self.mock_values().get(path) {
-                                Some(e) => Ok(self.mock_expand(
+                                Some(e) => Ok(self.mock_compose(
                                     &out.aliases.get(&out.of[0]).unwrap(),
                                     e,
                                     offset,
                                 )),
-                                None => Ok(self.expand_statement(
+                                None => Ok(self.compose_statement(
                                     &out.aliases.get(&out.of[0]).unwrap(),
                                     offset,
                                     child,
                                 )),
                             },
-                            None => Ok(self.expand_statement(
+                            None => Ok(self.compose_statement(
                                 &out.aliases.get(&out.of[0]).unwrap(),
                                 offset,
                                 child,
                             )),
                         }
                     }
-                    "union" => self.union_expand(composition, offset, child),
+                    "union" => self.union_compose(composition, offset, child),
                     // TODO: handle this error better
                     _ => panic!("unknown call"),
                 }
             }
-            None => Ok(self.expand_statement(&composition, offset, child)),
+            None => Ok(self.compose_statement(&composition, offset, child)),
         }
     }
 
-    fn union_expand(
+    fn union_compose(
         &self,
         composition: &SqlComposition,
         offset: usize,
@@ -160,7 +160,7 @@ pub trait Expander: Sized {
     ) -> Result<(String, Vec<Self::Value>), ()> {
         let mut out = SqlComposition::default();
 
-        // columns in this case would mean an expand on each side of the union literal
+        // columns in this case would mean an compose on each side of the union literal
         let _columns = composition.column_list().unwrap();
 
         let mut i = 0usize;
@@ -188,7 +188,7 @@ pub trait Expander: Sized {
 
         out.end(";");
 
-        Ok(self.expand_statement(&out, offset, child))
+        Ok(self.compose_statement(&out, offset, child))
     }
 
     fn bind_var_tag(&self, u: usize, name: String) -> String;
@@ -199,7 +199,7 @@ pub trait Expander: Sized {
 
     fn insert_value(&mut self, name: String, values: Vec<Self::Value>) -> ();
 
-    fn config() -> ExpanderConfig;
+    fn config() -> ComposerConfig;
 
     //fn insert_mock_values(&mut self, alias: SqlCompositionAlias, values: Vec<Self::Value>) -> ();
 
@@ -207,7 +207,7 @@ pub trait Expander: Sized {
 
     fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>>;
 
-    fn mock_expand(
+    fn mock_compose(
         &self,
         _stmt: &SqlComposition,
         mock_values: &Vec<BTreeMap<String, Self::Value>>,

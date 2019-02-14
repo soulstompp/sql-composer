@@ -19,7 +19,7 @@ named!(
             //TODO: collect aliases properly
             | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
-            | do_parse!(sc: parse_expander_macro >> (Sql::Composition((sc.0, sc.1))))
+            | do_parse!(sc: parse_composeer_macro >> (Sql::Composition((sc.0, sc.1))))
             | do_parse!(s: parse_sql >> (Sql::Literal(s)))
         ),
         SqlComposition::default(),
@@ -60,10 +60,10 @@ pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], Sql
     })
 }
 
-pub fn parse_expand(input: &[u8]) -> IResult<&[u8], SqlComposition> {
-    let expand_res = _parse_expand(input);
+pub fn parse_compose(input: &[u8]) -> IResult<&[u8], SqlComposition> {
+    let compose_res = _parse_compose(input);
 
-    expand_res.and_then(|(remaining, s)| {
+    compose_res.and_then(|(remaining, s)| {
         parse_path_arg(s).and_then(|(_r, p)| {
             let statement = SqlComposition::from_utf8_path_name(p).unwrap();
 
@@ -73,8 +73,8 @@ pub fn parse_expand(input: &[u8]) -> IResult<&[u8], SqlComposition> {
 }
 
 named!(
-    _parse_expand<&[u8]>,
-    delimited!(tag_s!(":expand("), take_until_s!(")"), tag_s!(")"))
+    _parse_compose<&[u8]>,
+    delimited!(tag_s!(":compose("), take_until_s!(")"), tag_s!(")"))
 );
 
 named!(
@@ -87,7 +87,7 @@ named!(
     delimited!(tag_s!(":"), take_until_s!("("), tag_s!("("))
 );
 
-named!(parse_expander_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
+named!(parse_composeer_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
        complete!(do_parse!(
                command: parse_macro_name >>
                distinct: opt!(tag_no_case!("distinct")) >>
@@ -222,7 +222,7 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bindvar, parse_expander_macro, parse_sql, parse_sql_end, parse_template};
+    use super::{parse_bindvar, parse_composeer_macro, parse_sql, parse_sql_end, parse_template};
     use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
@@ -293,7 +293,7 @@ mod tests {
             path: Some(PathBuf::from("src/tests/include-template.tql")),
             sql: vec![
                 Sql::Literal(SqlLiteral::from_utf8(b"SELECT COUNT(foo_id)\nFROM (\n  ").unwrap()),
-                Sql::Composition((simple_template_expand_comp(), vec![])),
+                Sql::Composition((simple_template_compose_comp(), vec![])),
                 Sql::Literal(SqlLiteral::from_utf8(b"\n)").unwrap()),
                 Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
             ],
@@ -301,18 +301,18 @@ mod tests {
         }
     }
 
-    fn simple_template_expand_comp() -> SqlComposition {
+    fn simple_template_compose_comp() -> SqlComposition {
         SqlComposition {
-            command: Some("expand".into()),
+            command: Some("compose".into()),
             of: simple_aliases(),
             aliases: simple_alias_hash(),
             ..Default::default()
         }
     }
 
-    fn include_template_expand_comp() -> SqlComposition {
+    fn include_template_compose_comp() -> SqlComposition {
         SqlComposition {
-            command: Some("expand".into()),
+            command: Some("compose".into()),
             of: include_aliases(),
             aliases: include_shallow_alias_hash(),
             ..Default::default()
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn test_parse_simple_template() {
         let input =
-            "SELECT * FROM (:expand(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
+            "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 
@@ -374,7 +374,7 @@ mod tests {
             SqlComposition {
                 sql: vec![
                     Sql::Literal(SqlLiteral::from_utf8(b"SELECT * FROM (").unwrap()),
-                    Sql::Composition((simple_template_expand_comp(), vec![])),
+                    Sql::Composition((simple_template_compose_comp(), vec![])),
                     Sql::Literal(SqlLiteral::from_utf8(b") WHERE name = ").unwrap()),
                     Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                     Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_parse_include_template() {
-        let input = "SELECT * FROM (:expand(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
+        let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let out = parse_template(input.as_bytes(), None);
 
@@ -397,7 +397,7 @@ mod tests {
             SqlComposition {
                 sql: vec![
                     Sql::Literal(SqlLiteral::from_utf8(b"SELECT * FROM (").unwrap()),
-                    Sql::Composition((include_template_expand_comp(), vec![])),
+                    Sql::Composition((include_template_compose_comp(), vec![])),
                     Sql::Literal(SqlLiteral::from_utf8(b") WHERE name = ").unwrap()),
                     Sql::Binding(SqlBinding::from_quoted_utf8(b"bindvar").unwrap()),
                     Sql::Ending(SqlEnding::from_utf8(b";").unwrap()),
@@ -426,10 +426,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_composed_expander() {
+    fn test_parse_composed_composeer() {
         let sql_str = b":count(distinct col1, col2 of src/tests/simple-template.tql, src/tests/include-template.tql);";
 
-        let comp = parse_expander_macro(sql_str);
+        let comp = parse_composeer_macro(sql_str);
 
         let expected = Ok((
             &b";"[..],
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_composed_expander() {
+    fn test_simple_composed_composeer() {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
         let comp = SqlComposition::from_str(sql_str);

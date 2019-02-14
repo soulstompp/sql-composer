@@ -43,7 +43,7 @@ impl<'a> Expander for PostgresExpander<'a> {
         let mut sql = String::new();
         let mut new_values = vec![];
 
-        let i = offset;
+        let _i = offset;
 
         match self.values.get(&name) {
             Some(v) => {
@@ -233,7 +233,7 @@ mod tests {
 
         mock_bound_sql.push(';');
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
@@ -247,7 +247,7 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        let mut mock_prep_stmt = conn.prepare(&mock_bound_sql).unwrap();
+        let mock_prep_stmt = conn.prepare(&mock_bound_sql).unwrap();
 
         let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);
@@ -297,7 +297,7 @@ mod tests {
 
         println!("bound_sql: {}", bound_sql);
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -310,7 +310,7 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        let mut mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
@@ -368,7 +368,7 @@ mod tests {
 
         mock_bound_sql.push(';');
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -381,7 +381,7 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        let mut mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let mock_prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
@@ -402,7 +402,7 @@ mod tests {
     fn test_multi_value_bind() {
         let conn = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT col_1, col_2, col_3, col_4 FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT col_1, col_2, col_3, col_4 FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_sql = "SELECT col_1, col_2, col_3, col_4 FROM (SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4) AS main WHERE col_1 in ($13, $14) AND col_3 IN ($15, $16);";
 
@@ -434,7 +434,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_sql, "preparable statements match");
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -453,7 +453,7 @@ mod tests {
     fn test_count_command() {
         let conn = setup_db();
 
-        let (remaining, stmt) =
+        let (_remaining, stmt) =
             parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
@@ -480,7 +480,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<Option<i64>>> = vec![];
 
@@ -502,7 +502,7 @@ mod tests {
     fn test_union_command() {
         let conn = setup_db();
 
-        let (remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
+        let (_remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 UNION SELECT $13 AS col_1, $14 AS col_2, $15 AS col_3, $16 AS col_4 UNION ALL SELECT $17 AS col_1, $18 AS col_2, $19 AS col_3, $20 AS col_4 UNION SELECT $21 AS col_1, $22 AS col_2, $23 AS col_3, $24 AS col_4 UNION ALL SELECT $25 AS col_1, $26 AS col_2, $27 AS col_3, $28 AS col_4 UNION ALL SELECT $29 AS col_1, $30 AS col_2, $31 AS col_3, $32 AS col_4";
@@ -528,7 +528,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -556,7 +556,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4) AS main WHERE col_1 in ($9, $10) AND col_3 IN ($11, $12);";
 
@@ -584,7 +584,7 @@ mod tests {
             HashMap::new();
 
         {
-            let mut path_entry = mock_values
+            let path_entry = mock_values
                 .entry(PathBuf::from("src/tests/values/include.tql"))
                 .or_insert(Vec::new());
 
@@ -601,7 +601,7 @@ mod tests {
 
         println!("bound sql: {}", bound_sql);
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -622,7 +622,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let conn = setup_db();
 
-        let (remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:expand(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4) AS main WHERE col_1 in ($13, $14) AND col_3 IN ($15, $16);";
 
@@ -651,7 +651,7 @@ mod tests {
             HashMap::new();
 
         {
-            let mut path_entry = mock_values
+            let path_entry = mock_values
                 .entry(PathBuf::from("src/tests/values/double-include.tql"))
                 .or_insert(Vec::new());
 
@@ -678,7 +678,7 @@ mod tests {
 
         let (bound_sql, bindings) = expander.expand_statement(&stmt, 1, false);
 
-        let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+        let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 

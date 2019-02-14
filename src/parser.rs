@@ -469,7 +469,7 @@ mod tests {
 
         println!("final comp: {}", comp);
 
-        let mut expected = SqlComposition {
+        let expected = SqlComposition {
             command: Some("count".into()),
             path: None,
             of: vec![SqlCompositionAlias {

@@ -8,5 +8,6 @@ extern crate postgres;
 extern crate rusqlite;
 
 mod composer;
+mod error;
 mod parser;
 mod types;

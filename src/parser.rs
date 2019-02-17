@@ -1,6 +1,7 @@
 use std::str;
 
 use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
+use crate::error::{Error, ErrorKind};
 use nom::{multispace, IResult};
 use std::fmt;
 use std::fs::File;

@@ -1,5 +1,6 @@
 pub mod value;
 
+use crate::error::{new_alias_conflict_error, new_error, Error, ErrorKind, Result};
 use crate::parser::parse_template;
 use std::collections::HashMap;
 use std::fmt;
@@ -17,7 +18,7 @@ pub struct SqlCompositionAlias {
 }
 
 impl SqlCompositionAlias {
-    pub fn from_utf8(u: &[u8]) -> ::std::io::Result<Self> {
+    pub fn from_utf8(u: &[u8]) -> Result<Self> {
         //! Create a SqlCompositionAlias struct from utf8
         //!
         //! If u contains a valid string identifier, this will be
@@ -29,7 +30,7 @@ impl SqlCompositionAlias {
         //! In all other cases, the code `panic`s.
         //! TODO: could we manually return an Error for the io::Result?
 
-        let s = String::from_utf8(u.to_vec()).unwrap();
+        let s = String::from_utf8(u.to_vec())?;
 
         let (is_name, is_path) = s.chars().fold((true, false), |mut acc, u| {
             let c = u as char;
@@ -79,6 +80,24 @@ impl SqlCompositionAlias {
     }
 }
 
+impl fmt::Display for SqlCompositionAlias {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let name = match &self.name {
+            Some(n) => n,
+            None => "<None>",
+        };
+
+        write!(f, "name: {}", name)?;
+
+        let path = match &self.path {
+            Some(p) => p.to_string_lossy(),
+            None => "<None>".into(),
+        };
+
+        write!(f, ", path: {}", path)
+    }
+}
+
 //command - :(command [distinct, all] [column1, column2] of t1.tql, t2.tql)
 //-----------------------------------------------------------------------------
 // examples - :union([all] [distinct] [column1, column2 of] t1.sql [as ut1], t2.tql as [ut2])
@@ -114,7 +133,7 @@ impl SqlComposition {
         stmt
     }
 
-    pub fn from_path(path: &Path) -> ::std::io::Result<SqlComposition> {
+    pub fn from_path(path: &Path) -> Result<SqlComposition> {
         let mut f = File::open(path).unwrap();
         let mut s = String::new();
 
@@ -125,7 +144,7 @@ impl SqlComposition {
         Ok(stmt)
     }
 
-    pub fn from_utf8_path_name(vec: &[u8]) -> ::std::io::Result<SqlComposition> {
+    pub fn from_utf8_path_name(vec: &[u8]) -> Result<SqlComposition> {
         //TODO: don't unwrap here
         let s = &std::str::from_utf8(vec).unwrap();
         let p = Path::new(s);
@@ -133,7 +152,7 @@ impl SqlComposition {
         Self::from_path(p)
     }
 
-    pub fn column_list(&self) -> Result<Option<String>, ()> {
+    pub fn column_list(&self) -> Result<Option<String>> {
         match &self.columns {
             Some(c) => {
                 let s = c
@@ -159,7 +178,7 @@ impl SqlComposition {
         self.sql.push(c)
     }
 
-    pub fn update_aliases(&mut self) -> ::std::io::Result<()> {
+    pub fn update_aliases(&mut self) -> Result<()> {
         for alias in &self.of {
             let p = alias.path().unwrap();
 
@@ -171,7 +190,7 @@ impl SqlComposition {
         Ok(())
     }
 
-    pub fn insert_alias(&mut self, p: &Path) -> ::std::io::Result<()> {
+    pub fn insert_alias(&mut self, p: &Path) -> Result<()> {
         self.aliases
             .entry(SqlCompositionAlias::from_path(p))
             .or_insert(SqlComposition::from_path(p)?);
@@ -180,9 +199,19 @@ impl SqlComposition {
     }
 
     //TODO: error if path already set to Some(...)
-    pub fn set_path(&mut self, new: &Path) -> Result<(), ()> {
+    pub fn set_path(&mut self, new: &Path) -> Result<()> {
         match &self.path {
-            Some(_current) => Err(()),
+            Some(existing) => Err(new_alias_conflict_error(
+                SqlCompositionAlias {
+                    name: None,
+                    path: Some(existing.to_path_buf()),
+                },
+                SqlCompositionAlias {
+                    name: None,
+                    path: Some(new.into()),
+                },
+            )
+            .into()),
             None => {
                 self.path = Some(new.into());
                 Ok(())
@@ -266,7 +295,7 @@ pub struct SqlEnding {
 }
 
 impl SqlEnding {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
+    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self { value: s })
@@ -286,7 +315,7 @@ pub struct SqlLiteral {
 }
 
 impl SqlLiteral {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
+    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self {
@@ -309,7 +338,7 @@ pub struct SqlBinding {
 }
 
 impl SqlBinding {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
+    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self {
@@ -318,7 +347,7 @@ impl SqlBinding {
         })
     }
 
-    pub fn from_quoted_utf8(vec: &[u8]) -> Result<Self, ::std::string::FromUtf8Error> {
+    pub fn from_quoted_utf8(vec: &[u8]) -> Result<Self> {
         let s = String::from_utf8(vec.to_vec())?;
 
         Ok(Self {

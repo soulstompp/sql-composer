@@ -8,6 +8,12 @@ use crate::types::SqlCompositionAlias;
 
 use nom::{Err, ErrorKind as NomErrorKind};
 
+
+use nom::types::CompleteStr;
+use nom_locate::LocatedSpan;
+
+type Span<'a> = LocatedSpan<CompleteStr<'a>>;
+
 //NOTE: this mod borrowed heavily from rust-csv's csv::error:Error to get started
 
 /// A crate private constructor for `Error`.

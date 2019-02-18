@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate nom;
+extern crate nom_locate;
+
 extern crate chrono;
 extern crate time;
 

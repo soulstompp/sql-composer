@@ -1,12 +1,6 @@
-use std::str;
-
 use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
-use crate::error::{Error, ErrorKind};
 use nom::{multispace, IResult};
-use std::fmt;
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 named!(opt_multispace<&[u8], Option<&[u8]>>,
     opt!(complete!(multispace))
@@ -20,7 +14,7 @@ named!(
             //TODO: collect aliases properly
             | do_parse!(q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(b: parse_bindvar >> (Sql::Binding(b)))
-            | do_parse!(sc: parse_composeer_macro >> (Sql::Composition((sc.0, sc.1))))
+            | do_parse!(sc: parse_composer_macro >> (Sql::Composition((sc.0, sc.1))))
             | do_parse!(s: parse_sql >> (Sql::Literal(s)))
         ),
         SqlComposition::default(),
@@ -54,29 +48,12 @@ pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], Sql
 
     res.and_then(|(remaining, mut comp)| {
         if let Some(p) = path {
-            comp.set_path(&p);
+            comp.set_path(&p).unwrap();
         }
 
         Ok((remaining, comp))
     })
 }
-
-pub fn parse_compose(input: &[u8]) -> IResult<&[u8], SqlComposition> {
-    let compose_res = _parse_compose(input);
-
-    compose_res.and_then(|(remaining, s)| {
-        parse_path_arg(s).and_then(|(_r, p)| {
-            let statement = SqlComposition::from_utf8_path_name(p).unwrap();
-
-            Ok((remaining, statement))
-        })
-    })
-}
-
-named!(
-    _parse_compose<&[u8]>,
-    delimited!(tag_s!(":compose("), take_until_s!(")"), tag_s!(")"))
-);
 
 named!(
     parse_path_arg<&[u8]>,
@@ -88,7 +65,7 @@ named!(
     delimited!(tag_s!(":"), take_until_s!("("), tag_s!("("))
 );
 
-named!(parse_composeer_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
+named!(parse_composer_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
        complete!(do_parse!(
                command: parse_macro_name >>
                distinct: opt!(tag_no_case!("distinct")) >>
@@ -121,7 +98,7 @@ named!(parse_composeer_macro<&[u8], (SqlComposition, Vec<SqlCompositionAlias>)>,
                      ..Default::default()
                  };
 
-                 sc.update_aliases();
+                 sc.update_aliases().unwrap();
 
                  (sc, vec![])
                })
@@ -223,7 +200,7 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bindvar, parse_composeer_macro, parse_sql, parse_sql_end, parse_template};
+    use super::{parse_bindvar, parse_composer_macro, parse_sql, parse_sql_end, parse_template};
     use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
@@ -427,10 +404,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_composed_composeer() {
+    fn test_parse_composed_composer() {
         let sql_str = b":count(distinct col1, col2 of src/tests/simple-template.tql, src/tests/include-template.tql);";
 
-        let comp = parse_composeer_macro(sql_str);
+        let comp = parse_composer_macro(sql_str);
 
         let expected = Ok((
             &b";"[..],
@@ -461,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_composed_composeer() {
+    fn test_simple_composed_composer() {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
         let comp = SqlComposition::from_str(sql_str);

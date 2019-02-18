@@ -2,12 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::{Composer, ComposerConfig};
 
-use crate::types::value::{ToValue, Value};
+use crate::types::value::ToValue;
 
 use std::path::PathBuf;
-use std::rc::Rc;
-
-use chrono::prelude::*;
 
 #[derive(Default)]
 struct DirectComposer<'a> {
@@ -83,12 +80,10 @@ impl<'a> Composer for DirectComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirectComposer, Composer, ToValue, Value};
+    use super::{DirectComposer, Composer};
     use crate::parser::parse_template;
 
     use chrono::prelude::*;
-    use rusqlite::{Connection, NO_PARAMS};
-    use std::collections::HashMap;
 
     #[derive(Debug, PartialEq)]
     struct Person {
@@ -113,15 +108,15 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let mut composeer = DirectComposer::new();
+        let mut composer = DirectComposer::new();
 
-        composeer.values.insert("name".into(), vec![&person.name]);
-        composeer
+        composer.values.insert("name".into(), vec![&person.name]);
+        composer
             .values
             .insert("time_created".into(), vec![&person.time_created]);
-        composeer.values.insert("data".into(), vec![&person.data]);
+        composer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, _bindings) = composeer.compose(&insert_stmt);
+        let (bound_sql, _bindings) = composer.compose(&insert_stmt);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -136,7 +131,7 @@ mod tests {
 
         assert_eq!(remaining, b"", "nothing remaining");
 
-        let (bound_sql, _bindings) = composeer.compose(&select_stmt);
+        let (bound_sql, _bindings) = composer.compose(&select_stmt);
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

@@ -5,23 +5,13 @@ pub mod postgres;
 pub mod rusqlite;
 
 pub use super::parser::parse_template;
-use crate::types::{Sql, SqlComposition, SqlCompositionAlias};
-use std::any::Any;
-use std::cell::RefCell;
+use crate::types::{Sql, SqlComposition};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::rc::Rc;
-
-use std::error::Error;
 
 #[derive(Default)]
 pub struct ComposerConfig {
     start: usize,
-}
-
-pub enum ComposerErrorMessage {
-    Declined,
-    Error(String),
 }
 
 pub trait Composer: Sized {

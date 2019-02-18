@@ -1,5 +1,5 @@
 use std::error::Error as StdError;
-use std::fmt::{self, Display};
+use std::fmt;
 use std::io;
 use std::result;
 use std::str;

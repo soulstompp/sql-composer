@@ -1,6 +1,6 @@
 pub mod value;
 
-use crate::error::{new_alias_conflict_error, new_error, Error, ErrorKind, Result};
+use crate::error::{new_alias_conflict_error, Result};
 use crate::parser::parse_template;
 use std::collections::HashMap;
 use std::fmt;

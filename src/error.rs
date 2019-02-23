@@ -4,9 +4,17 @@ use std::io;
 use std::result;
 use std::str;
 
-use crate::types::SqlCompositionAlias;
+use crate::types::{SqlCompositionAlias, SqlComposition};
 
-use nom::{Err, ErrorKind as NomErrorKind};
+/// A type alias for `Result<T, sql-composer::Error>`.
+pub type Result<T> = result::Result<T, Error>;
+
+#[derive(Debug)]
+pub struct Error(Box<ErrorKind>);
+
+use nom::{Err as NomErr, ErrorKind as NomErrorKind};
+
+//pub type IResult<I, O> = std::result::Result<(I, O), Error>;
 
 //NOTE: this mod borrowed heavily from rust-csv's csv::error:Error to get started
 
@@ -15,14 +23,6 @@ pub fn new_error(kind: ErrorKind) -> Error {
     // use `pub(crate)` when it stabilizes.
     Error(Box::new(kind))
 }
-
-/// A type alias for `Result<T, sql-composer::Error>`.
-pub type Result<T> = result::Result<T, Error>;
-
-/// An error can occur when building or expanding a SqlCompostion
-///
-#[derive(Debug)]
-pub struct Error(Box<ErrorKind>);
 
 impl Error {
     /// Return the specific type of this error.
@@ -65,6 +65,12 @@ pub enum ErrorKind {
         alias: Option<SqlCompositionAlias>,
         /// The corresponding UTF-8 error.
         err: AliasConflictError,
+    },
+    NomError {
+        //TODO: this should be a position
+        alias: Option<SqlCompositionAlias>,
+        /// The corresponding nom error.
+        err: String,
     },
     /// Hints that destructuring should not be exhaustive.
     ///
@@ -252,7 +258,7 @@ pub fn new_alias_conflict_error(
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AliasConflictError {
     existing_alias: SqlCompositionAlias,
     new_alias:      SqlCompositionAlias,

@@ -1,5 +1,9 @@
 use crate::types::{Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
+
+use crate::error::{new_error, Result, Error, ErrorKind};
+
 use nom::{multispace, IResult};
+
 use std::path::PathBuf;
 
 named!(opt_multispace<&[u8], Option<&[u8]>>,
@@ -43,7 +47,7 @@ named!(
     )
 );
 
-pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], SqlComposition> {
+pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> Result<(&[u8], SqlComposition)> {
     let res = _parse_template(input);
 
     res.and_then(|(remaining, mut comp)| {
@@ -52,7 +56,16 @@ pub fn parse_template(input: &[u8], path: Option<PathBuf>) -> IResult<&[u8], Sql
         }
 
         Ok((remaining, comp))
-    })
+    }).or_else(|e|
+        //match e {
+           //nom::Err(et) => {
+            Err(new_error(
+                ErrorKind::NomError{
+                    alias: None,
+                    err: e.to_string()
+                })
+         //   }
+    )
 }
 
 named!(
@@ -205,6 +218,8 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
+    use crate::error::{new_error, Error, Result};
+
     fn simple_aliases() -> Vec<SqlCompositionAlias> {
         vec![SqlCompositionAlias {
             name: None,
@@ -345,9 +360,9 @@ mod tests {
         let input =
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = parse_template(input.as_bytes(), None);
+        let out = parse_template(input.as_bytes(), None).unwrap();
 
-        let expected = Ok((
+        let expected = (
             &b""[..],
             SqlComposition {
                 sql: vec![
@@ -359,7 +374,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-        ));
+        );
 
         assert_eq!(out, expected);
     }
@@ -368,9 +383,9 @@ mod tests {
     fn test_parse_include_template() {
         let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = parse_template(input.as_bytes(), None);
+        let out = parse_template(input.as_bytes(), None).unwrap();
 
-        let expected: Result<(&[u8], SqlComposition), nom::Err<&[u8]>> = Ok((
+        let expected = (
             &b""[..],
             SqlComposition {
                 sql: vec![
@@ -382,7 +397,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-        ));
+        );
 
         assert_eq!(out, expected);
     }

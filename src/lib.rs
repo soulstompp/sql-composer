@@ -4,21 +4,21 @@
 /// and automating complex parameter substitution.
 ///
 /// For parameter substitution, write SQL as normal, declaring placeholders
-/// with the added keyword `:bind(var_name)`.  Set values for each binding
-/// and then expand, composer will return the SQL string with placeholders
-/// inserted for your dialect of SQL.
+/// with the added keyword `:bind(var_name)`.  Calling :bind(var_name) tells the composer where to
+/// add placeholders and what values are needed for the database driver to
+/// prepare the SQL statement.
 ///
-/// The output of sql-composer provides both the string of SQL to hand to your SQL driver
-/// as well as the bind parameters, abstracting away the differences in bind syntax
+/// The output of a composer provides both the string of SQL with the appropriate bind parameters to hand to your SQL driver
+/// as well as the bind parameters. This helps to abstract away the differences in bind parameter syntax
 /// between mysql, postgresql and sqlite.
 ///
-/// `:expand(pathbuf or string)`.  
-/// * `:bind(var_name)` ::  handles SQL named parameters
-/// * `:expand(pathbuf or string)` :: pulls in one full statement of SQL, not just a snippet.
+/// `:compose(pathbuf or string)`.
+/// * `:bind(var_name)` ::  handles SQL named bind parameters
+/// * `:compose(pathbuf or string)` :: composes a complete statement of SQL into the current SQL
 ///
-/// * each expander is like a "prepare statement" call.  Because you could set values
-/// and expand a stmt, then change values and run the stmt through again.
-
+/// * A composer can be reused for a single statement multiple times. You could call compose()
+/// multiple times with different sets of values and get SQL that looks quite different due to the
+/// difference in number of placeholders and size/shape of the bind values returned as well.
 
 #[macro_use]
 extern crate nom;

@@ -11,6 +11,9 @@ use std::io::prelude::*;
 
 struct Null();
 
+use nom::types::CompleteStr;
+use nom_locate::LocatedSpan;
+
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct SqlCompositionAlias {
     pub name: Option<String>,
@@ -32,6 +35,14 @@ impl SqlCompositionAlias {
 
         let s = String::from_utf8(u.to_vec())?;
 
+        Self::from_str(&s)
+    }
+
+    pub fn from_completestr(s: CompleteStr) -> Result<Self> {
+        Self::from_str(*s)
+    }
+
+    fn from_str(s: &str) -> Result<Self> {
         let (is_name, is_path) = s.chars().fold((true, false), |mut acc, u| {
             let c = u as char;
 
@@ -54,7 +65,7 @@ impl SqlCompositionAlias {
         }
         else if is_name {
             Ok(Self {
-                name: Some(s),
+                name: Some(s.to_string()),
                 path: None,
             })
         }
@@ -62,6 +73,7 @@ impl SqlCompositionAlias {
             //TODO: better error handling
             panic!("invalid path");
         }
+
     }
 
     pub fn from_path(p: &Path) -> Self {
@@ -121,12 +133,25 @@ pub struct SqlComposition {
 
 impl SqlComposition {
     pub fn from_str(q: &str) -> Self {
-        let (remaining, stmt) = parse_template(&q.as_bytes(), None).unwrap();
+        let (remaining, stmt) = parse_template(CompleteStr(&q), None).unwrap();
 
         if remaining.len() > 0 {
             panic!(
                 "found extra information: {}",
-                String::from_utf8(remaining.to_vec()).unwrap()
+                remaining.to_string()
+            );
+        }
+
+        stmt
+    }
+
+    pub fn from_completestr(q: CompleteStr) -> Self {
+        let (remaining, stmt) = parse_template(CompleteStr(&q), None).unwrap();
+
+        if remaining.len() > 0 {
+            panic!(
+                "found extra information: {}",
+                remaining.to_string()
             );
         }
 
@@ -139,7 +164,7 @@ impl SqlComposition {
 
         let _res = f.read_to_string(&mut s);
 
-        let (_remaining, stmt) = parse_template(&s.as_bytes(), Some(path.into())).unwrap();
+        let (_remaining, stmt) = parse_template(CompleteStr(&s), Some(path.into())).unwrap();
 
         Ok(stmt)
     }
@@ -147,6 +172,12 @@ impl SqlComposition {
     pub fn from_utf8_path_name(vec: &[u8]) -> Result<SqlComposition> {
         //TODO: don't unwrap here
         let s = &std::str::from_utf8(vec).unwrap();
+        let p = Path::new(s);
+
+        Self::from_path(p)
+    }
+
+    pub fn from_path_name(s: &str) -> Result<SqlComposition> {
         let p = Path::new(s);
 
         Self::from_path(p)
@@ -300,6 +331,12 @@ impl SqlEnding {
 
         Ok(Self { value: s })
     }
+
+    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
+        let s = cs.to_string();
+
+        Ok(Self { value: s })
+    }
 }
 
 impl fmt::Display for SqlEnding {
@@ -317,6 +354,15 @@ pub struct SqlLiteral {
 impl SqlLiteral {
     pub fn from_utf8(vec: &[u8]) -> Result<Self> {
         let s = String::from_utf8(vec.to_vec())?;
+
+        Ok(Self {
+            value: s,
+            ..Default::default()
+        })
+    }
+
+    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
+        let s = cs.to_string();
 
         Ok(Self {
             value: s,
@@ -353,6 +399,24 @@ impl SqlBinding {
         Ok(Self {
             name:   s,
             quoted: true,
+        })
+    }
+
+    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
+        let s = cs.to_string();
+
+        Ok(Self {
+            name: s,
+            quoted: false,
+        })
+    }
+
+    pub fn from_quoted_completestr(cs: CompleteStr) -> Result<Self> {
+        let s = cs.to_string();
+
+        Ok(Self {
+            name: s,
+            quoted: false,
         })
     }
 }

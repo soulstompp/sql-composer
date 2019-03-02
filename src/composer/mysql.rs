@@ -124,12 +124,12 @@ mod tests {
         let mut composer = MysqlComposer::new();
 
         let (remaining, insert_stmt) = parse_template(
-            b"INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
+            "INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));".into(),
             None,
         )
         .unwrap();
 
-        assert_eq!(remaining, b"", "insert stmt nothing remaining");
+        assert_eq!(*remaining, "", "insert stmt nothing remaining");
 
         composer.values.insert("name".into(), vec![&person.name]);
         composer.values.insert("data".into(), vec![&person.data]);
@@ -147,9 +147,9 @@ mod tests {
 
         let _res = &pool.prep_exec(&bound_sql, &rebindings.as_slice());
 
-        let (remaining, select_stmt) = parse_template(b"SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';", None).unwrap();
+        let (remaining, select_stmt) = parse_template("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';".into(), None).unwrap();
 
-        assert_eq!(remaining, b"", "select stmt nothing remaining");
+        assert_eq!(*remaining, "", "select stmt nothing remaining");
 
         let (bound_sql, bindings) = composer.compose(&select_stmt);
 
@@ -184,7 +184,7 @@ mod tests {
     }
 
     fn parse(input: &str) -> SqlComposition {
-        let (_remaining, stmt) = parse_template(input.as_bytes(), None).unwrap();
+        let (_remaining, stmt) = parse_template(input.into(), None).unwrap();
 
         stmt
     }
@@ -205,7 +205,7 @@ mod tests {
     fn test_bind_simple_template() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
+        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
         let mut composer = MysqlComposer::new();
 
@@ -260,7 +260,7 @@ mod tests {
     fn test_bind_include_template() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
+        let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
         let mut composer = MysqlComposer::new();
 
@@ -327,7 +327,7 @@ mod tests {
         let pool = setup_db();
 
         let stmt =
-            SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+            SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
 
         let mut composer = MysqlComposer::new();
 
@@ -408,7 +408,7 @@ mod tests {
     fn test_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -459,7 +459,7 @@ mod tests {
         let pool = setup_db();
 
         let (_remaining, stmt) =
-            parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
+            parse_template(":count(src/tests/values/double-include.tql);".into(), None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main";
@@ -508,7 +508,7 @@ mod tests {
     fn test_union_command() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
+        let (_remaining, stmt) = parse_template(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);".into(), None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
@@ -562,7 +562,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 
@@ -629,7 +629,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS main WHERE col_1 in (?, ?) AND col_3 IN (?, ?);";
 

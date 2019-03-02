@@ -135,13 +135,13 @@ mod tests {
             data:         None,
         };
 
-        let (remaining, insert_stmt) = parse_template(b"INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
+        let (remaining, insert_stmt) = parse_template("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into(), None).unwrap();
 
         println!(
             "remaining: {}",
-            String::from_utf8(remaining.to_vec()).unwrap()
+            remaining.to_string()
         );
-        assert_eq!(remaining, b"", "nothing remaining");
+        assert_eq!(*remaining, "", "nothing remaining");
 
         let mut composer = RusqliteComposer::new();
 
@@ -165,9 +165,9 @@ mod tests {
 
         conn.execute(&bound_sql, &rebindings).unwrap();
 
-        let (remaining, select_stmt) = parse_template(b"SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)'", None).unwrap();
+        let (remaining, select_stmt) = parse_template("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)'".into(), None).unwrap();
 
-        assert_eq!(remaining, b"", "nothing remaining");
+        assert_eq!(*remaining, "", "nothing remaining");
 
         let (bound_sql, bindings) = composer.compose(&select_stmt);
 
@@ -219,7 +219,7 @@ mod tests {
     fn test_bind_simple_template() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/simple.tql").unwrap();
+        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
         let mut composer = RusqliteComposer::new();
 
@@ -291,7 +291,7 @@ mod tests {
     fn test_bind_include_template() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::from_utf8_path_name(b"src/tests/values/include.tql").unwrap();
+        let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
         let mut composer = RusqliteComposer::new();
 
@@ -375,7 +375,7 @@ mod tests {
         let conn = setup_db();
 
         let stmt =
-            SqlComposition::from_utf8_path_name(b"src/tests/values/double-include.tql").unwrap();
+            SqlComposition::from_path_name("src/tests/values/double-include.tql").unwrap();
 
         let mut composer = RusqliteComposer::new();
 
@@ -463,7 +463,7 @@ mod tests {
     fn test_multi_value_bind() {
         let conn = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT col_1, col_2, col_3, col_4 FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT col_1, col_2, col_3, col_4 FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_sql = "SELECT col_1, col_2, col_3, col_4 FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS main WHERE col_1 in (?13, ?14) AND col_3 IN (?15, ?16);";
 
@@ -524,7 +524,7 @@ mod tests {
         let conn = setup_db();
 
         let (_remaining, stmt) =
-            parse_template(b":count(src/tests/values/double-include.tql);", None).unwrap();
+            parse_template(":count(src/tests/values/double-include.tql);".into(), None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS count_main";
@@ -576,7 +576,7 @@ mod tests {
     fn test_union_command() {
         let conn = setup_db();
 
-        let (_remaining, stmt) = parse_template(b":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None).unwrap();
+        let (_remaining, stmt) = parse_template(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);".into(), None).unwrap();
 
         println!("made it through parse");
         let expected_bound_sql = "SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 UNION SELECT ?13 AS col_1, ?14 AS col_2, ?15 AS col_3, ?16 AS col_4 UNION ALL SELECT ?17 AS col_1, ?18 AS col_2, ?19 AS col_3, ?20 AS col_4 UNION SELECT ?21 AS col_1, ?22 AS col_2, ?23 AS col_3, ?24 AS col_4 UNION ALL SELECT ?25 AS col_1, ?26 AS col_2, ?27 AS col_3, ?28 AS col_4 UNION ALL SELECT ?29 AS col_1, ?30 AS col_2, ?31 AS col_3, ?32 AS col_4";
@@ -639,7 +639,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() {
         let conn = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4) AS main WHERE col_1 in (?9, ?10) AND col_3 IN (?11, ?12);";
 
@@ -714,7 +714,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(b"SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));", None).unwrap();
+        let (_remaining, stmt) = parse_template("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values)) AND col_3 IN (:bind(col_3_values));".into(), None).unwrap();
 
         let expected_bound_sql = "SELECT * FROM (SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4) AS main WHERE col_1 in (?13, ?14) AND col_3 IN (?15, ?16);";
 

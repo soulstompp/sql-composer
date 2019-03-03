@@ -32,27 +32,6 @@ pub struct SqlCompositionAlias {
 }
 
 impl SqlCompositionAlias {
-    pub fn from_utf8(u: &[u8]) -> Result<Self> {
-        //! Create a SqlCompositionAlias struct from utf8
-        //!
-        //! If u contains a valid string identifier, this will be
-        //! converted to a `String` and used as the `name` element.
-        //!
-        //! If u contains a path, this will be converted to a
-        //! PathBuf and used as the `path` element.
-        //!
-        //! In all other cases, the code `panic`s.
-        //! TODO: could we manually return an Error for the io::Result?
-
-        let s = String::from_utf8(u.to_vec())?;
-
-        Self::from_str(&s)
-    }
-
-    pub fn from_completestr(s: CompleteStr) -> Result<Self> {
-        Self::from_str(*s)
-    }
-
     pub fn from_span(s: Span) -> Result<Self> {
         Self::from_str(*s.fragment)
     }
@@ -156,16 +135,6 @@ impl SqlComposition {
         stmt
     }
 
-    pub fn from_completestr(q: CompleteStr) -> Self {
-        let (remaining, stmt) = parse_template(Span::new(q), None).unwrap();
-
-        if remaining.fragment.len() > 0 {
-            panic!("found extra information: {}", remaining.to_string());
-        }
-
-        stmt
-    }
-
     pub fn from_path(path: &Path) -> Result<SqlComposition> {
         let mut f = File::open(path).unwrap();
         let mut s = String::new();
@@ -176,14 +145,6 @@ impl SqlComposition {
             parse_template(Span::new(s.as_str().into()), Some(path.into())).unwrap();
 
         Ok(stmt)
-    }
-
-    pub fn from_utf8_path_name(vec: &[u8]) -> Result<SqlComposition> {
-        //TODO: don't unwrap here
-        let s = &std::str::from_utf8(vec).unwrap();
-        let p = Path::new(s);
-
-        Self::from_path(p)
     }
 
     pub fn from_path_name(s: &str) -> Result<SqlComposition> {
@@ -335,18 +296,6 @@ pub struct SqlEnding {
 }
 
 impl SqlEnding {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
-        let s = String::from_utf8(vec.to_vec())?;
-
-        Ok(Self { value: s })
-    }
-
-    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
-        let s = cs.to_string();
-
-        Ok(Self { value: s })
-    }
-
     pub fn from_span(s: Span) -> Result<Self> {
         let s = s.to_string();
 
@@ -367,24 +316,6 @@ pub struct SqlLiteral {
 }
 
 impl SqlLiteral {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
-        let s = String::from_utf8(vec.to_vec())?;
-
-        Ok(Self {
-            value: s,
-            ..Default::default()
-        })
-    }
-
-    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
-        let s = cs.to_string();
-
-        Ok(Self {
-            value: s,
-            ..Default::default()
-        })
-    }
-
     pub fn from_span(s: Span) -> Result<Self> {
         let s = s.fragment.to_string();
 
@@ -408,44 +339,8 @@ pub struct SqlBinding {
 }
 
 impl SqlBinding {
-    pub fn from_utf8(vec: &[u8]) -> Result<Self> {
-        let s = String::from_utf8(vec.to_vec())?;
-
-        Ok(Self {
-            name:   s,
-            quoted: false,
-        })
-    }
-
-    pub fn from_quoted_utf8(vec: &[u8]) -> Result<Self> {
-        let s = String::from_utf8(vec.to_vec())?;
-
-        Ok(Self {
-            name:   s,
-            quoted: true,
-        })
-    }
-
-    pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
-        let s = cs.to_string();
-
-        Ok(Self {
-            name:   s,
-            quoted: false,
-        })
-    }
-
     pub fn from_span(s: Span) -> Result<Self> {
         let s = s.to_string();
-
-        Ok(Self {
-            name:   s,
-            quoted: false,
-        })
-    }
-
-    pub fn from_quoted_completestr(cs: CompleteStr) -> Result<Self> {
-        let s = cs.to_string();
 
         Ok(Self {
             name:   s,

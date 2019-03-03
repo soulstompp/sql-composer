@@ -59,12 +59,12 @@ pub fn parse_template(input: Span, path: Option<PathBuf>) -> IResult<Span, SqlCo
 
 named!(
     parse_path_arg(Span) -> Span,
-    delimited!(tag_s!("<"), take_until_s!(">"), tag_s!(">"))
+    delimited!(tag!("<"), take_until!(">"), tag!(">"))
 );
 
 named!(
     parse_macro_name(Span) -> Span,
-    delimited!(tag_s!(":"), take_until_s!("("), tag_s!("("))
+    delimited!(tag!(":"), take_until!("("), tag!("("))
 );
 
 named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
@@ -124,7 +124,7 @@ named!(
                 }) >> ({ column.to_string() })
             ),
             opt!(do_parse!(
-                opt_multispace >> tag_s!(",") >> opt_multispace >> ()
+                opt_multispace >> tag!(",") >> opt_multispace >> ()
             ))
         )),
         do_parse!(opt_multispace >> tag_no_case!("of") >> opt_multispace >> ())
@@ -155,7 +155,7 @@ named!(
             })
         ),
         opt!(do_parse!(
-            opt_multispace >> tag_s!(",") >> opt_multispace >> ()
+            opt_multispace >> tag!(",") >> opt_multispace >> ()
         ))
     )))
 );
@@ -177,7 +177,7 @@ named!(
 named!(
     parse_quoted_bindvar(Span) -> SqlBinding,
     map_res!(
-        delimited!(tag_s!("':bind("), take_until_s!(")"), tag_s!(")'")),
+        delimited!(tag!("':bind("), take_until!(")"), tag!(")'")),
         SqlBinding::from_quoted_span
     )
 );
@@ -185,7 +185,7 @@ named!(
 named!(
     parse_bindvar(Span) -> SqlBinding,
     map_res!(
-        delimited!(tag_s!(":bind("), take_until_s!(")"), tag_s!(")")),
+        delimited!(tag!(":bind("), take_until!(")"), tag!(")")),
         SqlBinding::from_span
     )
 );
@@ -197,7 +197,7 @@ named!(
 
 named!(
     parse_sql_end(Span) -> SqlEnding,
-    map_res!(tag_s!(";"), SqlEnding::from_span)
+    map_res!(tag!(";"), SqlEnding::from_span)
 );
 
 #[cfg(test)]

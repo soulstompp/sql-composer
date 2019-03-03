@@ -1,18 +1,29 @@
 pub mod value;
 
 use crate::error::{new_alias_conflict_error, Result};
+
 use crate::parser::parse_template;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+pub use nom::types::CompleteStr;
+
+use nom_locate::LocatedSpan;
+
+pub type Span<'a> = LocatedSpan<CompleteStr<'a>>;
+
+struct Token<'a> {
+    pub position: Span<'a>,
+    pub sql:      Option<Sql>,
+    pub notes:    Vec<String>,
+}
 
 use std::fs::File;
 use std::io::prelude::*;
 
 struct Null();
-
-use nom::types::CompleteStr;
-use nom_locate::LocatedSpan;
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct SqlCompositionAlias {
@@ -40,6 +51,10 @@ impl SqlCompositionAlias {
 
     pub fn from_completestr(s: CompleteStr) -> Result<Self> {
         Self::from_str(*s)
+    }
+
+    pub fn from_span(s: Span) -> Result<Self> {
+        Self::from_str(*s.fragment)
     }
 
     fn from_str(s: &str) -> Result<Self> {
@@ -73,7 +88,6 @@ impl SqlCompositionAlias {
             //TODO: better error handling
             panic!("invalid path");
         }
-
     }
 
     pub fn from_path(p: &Path) -> Self {
@@ -133,26 +147,20 @@ pub struct SqlComposition {
 
 impl SqlComposition {
     pub fn from_str(q: &str) -> Self {
-        let (remaining, stmt) = parse_template(CompleteStr(&q), None).unwrap();
+        let (remaining, stmt) = parse_template(Span::new(q.into()), None).unwrap();
 
-        if remaining.len() > 0 {
-            panic!(
-                "found extra information: {}",
-                remaining.to_string()
-            );
+        if remaining.fragment.len() > 0 {
+            panic!("found extra information: {}", remaining.to_string());
         }
 
         stmt
     }
 
     pub fn from_completestr(q: CompleteStr) -> Self {
-        let (remaining, stmt) = parse_template(CompleteStr(&q), None).unwrap();
+        let (remaining, stmt) = parse_template(Span::new(q), None).unwrap();
 
-        if remaining.len() > 0 {
-            panic!(
-                "found extra information: {}",
-                remaining.to_string()
-            );
+        if remaining.fragment.len() > 0 {
+            panic!("found extra information: {}", remaining.to_string());
         }
 
         stmt
@@ -164,7 +172,8 @@ impl SqlComposition {
 
         let _res = f.read_to_string(&mut s);
 
-        let (_remaining, stmt) = parse_template(CompleteStr(&s), Some(path.into())).unwrap();
+        let (_remaining, stmt) =
+            parse_template(Span::new(s.as_str().into()), Some(path.into())).unwrap();
 
         Ok(stmt)
     }
@@ -337,6 +346,12 @@ impl SqlEnding {
 
         Ok(Self { value: s })
     }
+
+    pub fn from_span(s: Span) -> Result<Self> {
+        let s = s.to_string();
+
+        Ok(Self { value: s })
+    }
 }
 
 impl fmt::Display for SqlEnding {
@@ -363,6 +378,15 @@ impl SqlLiteral {
 
     pub fn from_completestr(cs: CompleteStr) -> Result<Self> {
         let s = cs.to_string();
+
+        Ok(Self {
+            value: s,
+            ..Default::default()
+        })
+    }
+
+    pub fn from_span(s: Span) -> Result<Self> {
+        let s = s.fragment.to_string();
 
         Ok(Self {
             value: s,
@@ -406,7 +430,16 @@ impl SqlBinding {
         let s = cs.to_string();
 
         Ok(Self {
-            name: s,
+            name:   s,
+            quoted: false,
+        })
+    }
+
+    pub fn from_span(s: Span) -> Result<Self> {
+        let s = s.to_string();
+
+        Ok(Self {
+            name:   s,
             quoted: false,
         })
     }
@@ -415,7 +448,16 @@ impl SqlBinding {
         let s = cs.to_string();
 
         Ok(Self {
-            name: s,
+            name:   s,
+            quoted: false,
+        })
+    }
+
+    pub fn from_quoted_span(s: Span) -> Result<Self> {
+        let s = s.to_string();
+
+        Ok(Self {
+            name:   s,
             quoted: false,
         })
     }

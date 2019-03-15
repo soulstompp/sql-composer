@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod rusqlite;
 
 pub use super::parser::parse_template;
-use crate::types::{Sql, SqlComposition};
+use crate::types::{ParsedItem, Sql, SqlComposition};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -18,12 +18,14 @@ pub trait Composer: Sized {
     type Value: Copy;
 
     fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
-        self.compose_statement(s, 1usize, false)
+        let item = ParsedItem::generated(s.clone(), None).unwrap();
+
+        self.compose_statement(&item, 1usize, false)
     }
 
     fn compose_statement(
         &self,
-        sc: &SqlComposition,
+        sc: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
     ) -> (String, Vec<Self::Value>) {
@@ -33,14 +35,14 @@ pub trait Composer: Sized {
 
         let mut values: Vec<Self::Value> = vec![];
 
-        if sc.command.is_some() {
+        if sc.item.command.is_some() {
             return self.compose_wrapper(&sc, i, true).unwrap();
         }
 
-        for c in &sc.sql {
+        for c in &sc.item.sql {
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
-                Sql::Binding(b) => self.bind_values(b.name.to_string(), i),
+                Sql::Binding(b) => self.bind_values(b.item.name.to_string(), i),
                 Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true),
                 Sql::Ending(e) => {
                     if child {
@@ -66,67 +68,69 @@ pub trait Composer: Sized {
 
     fn compose_wrapper<'c>(
         &self,
-        composition: &SqlComposition,
+        composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>), ()> {
-        match &composition.command {
+        match &composition.item.command {
             Some(s) => {
-                match s.to_lowercase().as_str() {
-                    "count" => {
+                match s.item().to_lowercase().as_str() {
+                    name @ "count" => {
                         let mut out = SqlComposition::default();
 
-                        out.push_literal("SELECT COUNT(");
+                        out.push_generated_literal("SELECT COUNT(", Some(name.into()));
 
-                        let columns = composition.column_list().unwrap();
+                        let columns = composition.item.column_list().unwrap();
 
                         if let Some(c) = columns {
-                            out.push_literal(&c);
+                            out.push_generated_literal(&c, Some(name.into()));
                         }
                         else {
-                            out.push_literal("1");
+                            out.push_generated_literal("1", Some(name.into()));
                         }
 
-                        out.push_literal(") FROM ");
+                        out.push_generated_literal(") FROM ", Some(name.into()));
 
-                        for alias in composition.of.iter() {
-                            out.push_literal("(");
-                            match composition.aliases.get(&alias) {
+                        for position in composition.item.of.iter() {
+                            out.push_generated_literal("(", Some(name.into()));
+                            match composition.item.aliases.get(&position.item()) {
                                 Some(sc) => {
                                     out.push_sub_comp(sc.clone());
                                 }
                                 None => {
-                                    panic!("no alias found with alias: {:?}", alias);
+                                    panic!("no position found with position: {:?}", position);
                                 }
                             }
 
-                            out.push_literal(") AS count_main");
+                            out.push_generated_literal(") AS count_main", Some(name.into()));
                         }
 
-                        out.end(";");
+                        out.push_generated_end(Some(name.into()));
 
-                        Ok(self.compose_statement(&out, offset, child))
+                        let item = ParsedItem::generated(out, Some("COUNT".into())).unwrap();
+
+                        Ok(self.compose_statement(&item, offset, child))
                     }
                     "compose" => {
                         let mut out = composition.clone();
 
-                        out.command = None;
+                        out.item.command = None;
 
-                        match &out.of[0].path() {
+                        match &out.item.of[0].item().path() {
                             Some(path) => match self.mock_values().get(path) {
                                 Some(e) => Ok(self.mock_compose(
-                                    &out.aliases.get(&out.of[0]).unwrap(),
+                                    &out.item.aliases.get(&out.item.of[0].item()).unwrap().item,
                                     e,
                                     offset,
                                 )),
                                 None => Ok(self.compose_statement(
-                                    &out.aliases.get(&out.of[0]).unwrap(),
+                                    &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                     offset,
                                     child,
                                 )),
                             },
                             None => Ok(self.compose_statement(
-                                &out.aliases.get(&out.of[0]).unwrap(),
+                                &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                 offset,
                                 child,
                             )),
@@ -143,41 +147,43 @@ pub trait Composer: Sized {
 
     fn union_compose(
         &self,
-        composition: &SqlComposition,
+        composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>), ()> {
         let mut out = SqlComposition::default();
 
         // columns in this case would mean an compose on each side of the union literal
-        let _columns = composition.column_list().unwrap();
+        let _columns = composition.item.column_list().unwrap();
 
         let mut i = 0usize;
 
-        if composition.of.len() < 2 {
+        if composition.item.of.len() < 2 {
             panic!("union requires 2 of arguments");
         }
 
-        for alias in composition.of.iter() {
+        for position in composition.item.of.iter() {
             if i > 0 {
-                out.push_literal(" UNION ");
+                out.push_generated_literal(" UNION ", Some("UNION".into()));
             }
 
-            match composition.aliases.get(&alias) {
+            match composition.item.aliases.get(&position.item()) {
                 Some(sc) => {
                     out.push_sub_comp(sc.clone());
                 }
                 None => {
-                    panic!("no alias found with alias: {:?}", alias);
+                    panic!("no alias found with alias: {:?}", position.item());
                 }
             }
 
             i += 1;
         }
 
-        out.end(";");
+        out.push_generated_end(Some("UNION".into()));
 
-        Ok(self.compose_statement(&out, offset, child))
+        let item = ParsedItem::generated(out, Some("UNION".into())).unwrap();
+
+        Ok(self.compose_statement(&item, offset, child))
     }
 
     fn bind_var_tag(&self, u: usize, name: String) -> String;

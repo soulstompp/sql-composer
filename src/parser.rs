@@ -1,5 +1,5 @@
-use crate::types::{CompleteStr, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias,
-                   SqlEnding, SqlLiteral};
+use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
+                   SqlComposition, SqlCompositionAlias, SqlEnding, SqlLiteral};
 
 use nom::{multispace, IResult};
 use std::path::PathBuf;
@@ -9,34 +9,34 @@ named!(opt_multispace(Span) -> Option<Span>,
 );
 
 named!(
-    _parse_template(Span) -> SqlComposition,
+    _parse_template(Span) -> ParsedItem<SqlComposition>,
     fold_many1!(
         alt_complete!(
             do_parse!(position!() >> e: parse_sql_end >> (Sql::Ending(e)))
             //TODO: collect aliases properly
             | do_parse!(position!() >> q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(position!() >> b: parse_bindvar >> (Sql::Binding(b)))
-            | do_parse!(position!() >> sc: parse_composer_macro >> (Sql::Composition((sc.0, sc.1))))
+            | do_parse!(position!() >> sc: parse_composer_macro >> (Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).unwrap(), sc.1))))
             | do_parse!(position!() >> s: parse_sql >> (Sql::Literal(s)))
         ),
-        SqlComposition::default(),
-        |mut acc: SqlComposition, item: Sql| {
+        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).unwrap(),
+        |mut acc: ParsedItem<SqlComposition>, item: Sql| {
             match item {
                 Sql::Composition((mut sc, aliases)) => {
                     for alias in &aliases {
                         let stmt_path = alias.path().unwrap();
 
-                        sc.insert_alias(&stmt_path).unwrap();
+                        sc.item.insert_alias(&stmt_path).unwrap();
                     }
 
-                    if acc.sql.len() == 0 {
+                    if acc.item.sql.len() == 0 {
                         return sc;
                     }
 
-                    acc.push_sql(Sql::Composition((sc, aliases)));
+                    acc.item.push_sql(Sql::Composition((sc, aliases)));
                 }
                 _ => {
-                    acc.push_sql(item);
+                    acc.item.push_sql(item);
                 }
             }
 
@@ -45,12 +45,16 @@ named!(
     )
 );
 
-pub fn parse_template(input: Span, path: Option<PathBuf>) -> IResult<Span, SqlComposition> {
-    let res = _parse_template(input);
+pub fn parse_template(
+    span: Span,
+    alias: Option<SqlCompositionAlias>,
+) -> IResult<Span, ParsedItem<SqlComposition>> {
+    let res = _parse_template(span);
 
     res.and_then(|(remaining, mut comp)| {
-        if let Some(p) = path {
-            comp.set_path(&p).unwrap();
+        if let Some(a) = alias {
+            comp.item
+                .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))));
         }
 
         Ok((remaining, comp))
@@ -58,43 +62,38 @@ pub fn parse_template(input: Span, path: Option<PathBuf>) -> IResult<Span, SqlCo
 }
 
 named!(
-    parse_path_arg(Span) -> Span,
-    delimited!(tag!("<"), take_until!(">"), tag!(">"))
-);
-
-named!(
-    parse_macro_name(Span) -> Span,
-    delimited!(tag!(":"), take_until!("("), tag!("("))
+    parse_macro_name(Span) -> ParsedItem<String>,
+       do_parse!(
+           position!() >>
+           name: delimited!(tag!(":"), take_until!("("), tag!("(")) >>
+           (
+               ParsedItem::from_span(name.fragment.to_string(), name, None).expect("invalid parsed item came from parser parse_macro_name")
+           )
+        )
 );
 
 named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
        complete!(do_parse!(
+               position!() >>
                command: parse_macro_name >>
-               distinct: opt!(tag_no_case!("distinct")) >>
+               position!() >>
+               distinct: command_distinct_arg >>
                opt_multispace >>
-               all: opt!(tag_no_case!("all")) >>
+               position!() >>
+               all: command_all_arg >>
                opt_multispace >>
-               columns: opt!(do_parse!(
-                       columns: column_list >>
-                       (columns)
-                       )
-               ) >>
+               columns: opt!(column_list) >>
                opt_multispace >>
-               of: do_parse!(
-                       of: of_list >>
-                       ({
-                           println!("of: {:?}", of);
-                           of
-                       })
-               ) >>
+               position!() >>
+               of: of_list >>
                tag!(")") >>
                ({
                  println!("we made it!");
 
                  let mut sc = SqlComposition {
-                     command: Some(command.to_string()),
-                     distinct: distinct.is_some(),
-                     all: all.is_some(),
+                     command: Some(command),
+                     distinct,
+                     all,
                      columns,
                      of,
                      ..Default::default()
@@ -108,34 +107,122 @@ named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
 );
 
 named!(
-    column_list(Span) -> Vec<String>,
-    complete!(terminated!(
-        many1!(terminated!(
-            do_parse!(
-                column: take_while!(|u| {
-                    let c = u as char;
-
-                    match c {
-                        'a'...'z' => true,
-                        '0'...'9' => true,
-                        '_' => true,
-                        _ => false,
-                    }
-                }) >> ({ column.to_string() })
-            ),
-            opt!(do_parse!(
-                opt_multispace >> tag!(",") >> opt_multispace >> ()
-            ))
-        )),
-        do_parse!(opt_multispace >> tag_no_case!("of") >> opt_multispace >> ())
-    ))
+    command_distinct_arg(Span) -> Option<ParsedItem<bool>>,
+    do_parse!(
+        position!() >>
+        distinct_tag: opt!(tag_no_case!("distinct")) >>
+        (
+            match distinct_tag {
+                Some(d) => {
+                    Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_distinct_arg"))
+                }
+                None    => None
+            }
+        )
+    )
 );
 
 named!(
-    of_list(Span) -> Vec<SqlCompositionAlias>,
+    command_all_arg(Span) -> Option<ParsedItem<bool>>,
+    do_parse!(
+        position!() >>
+        all_tag: opt!(tag_no_case!("all")) >>
+        (
+            match all_tag {
+                Some(d) => {
+                    Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_all_arg"))
+                }
+                None    => None
+            }
+        )
+    )
+);
+
+named!(
+    column_list(Span) -> Vec<ParsedItem<String>>,
+    terminated!(
+        many1!(column_listing),
+        do_parse!(opt_multispace >> tag_no_case!("of") >> opt_multispace >> ())
+    )
+);
+
+named!(
+    column_name(Span) -> ParsedItem<String>,
+    do_parse!(
+        position!() >>
+        column: take_while!(|u| {
+            let c = u as char;
+
+            match c {
+                'a'...'z' => true,
+                '0'...'9' => true,
+                '_' => true,
+                _ => false,
+            }
+        }) >>
+        ({
+            let p = ParsedItem::from_span(
+                column.fragment.to_string(),
+                column,
+                None
+            );
+
+            p.expect("unable to build ParsedItem of String from column_list parser")
+        })
+    )
+);
+
+named!(
+    column_listing(Span) -> ParsedItem<String>,
+    do_parse!(
+        i: column_name >>
+        opt_multispace >>
+        opt!(tag!(",")) >>
+        opt_multispace >>
+        (i)
+    )
+);
+
+pub fn _column_list(span: Span) -> IResult<Span, Vec<ParsedItem<String>>> {
+    let res = _column_list(span);
+
+    res.and_then(|(remaining, mut vec)| Ok((remaining, vec)))
+}
+
+/*
+named!(
+    column_list(Span) -> Vec<ParsedItem<String>>,
     complete!(many1!(terminated!(
         do_parse!(
-            column: take_while!(|u| {
+            position!() >>
+            column_name: take_while!(|u| {
+                let c = u as char;
+
+                match c {
+                    'a'...'z' => true,
+                    '0'...'9' => true,
+                    '_' => true,
+                    _ => false,
+                }
+            }) >> ({
+                //TODO: clean this up properly
+                let name = String::from(*column_name.fragment);
+
+                ParsedItem::from_span(name, column_name, None).expect("Unable to create parsed item in column_list parser")
+            })
+        ),
+        opt!(do_parse!(
+            opt_multispace >> tag!(",") >> opt_multispace >> ()
+        ))
+    )))
+);
+*/
+named!(
+    of_list(Span) -> Vec<ParsedItem<SqlCompositionAlias>>,
+    complete!(many1!(terminated!(
+        do_parse!(
+            position!() >>
+            of_name: take_while!(|u| {
                 let c = u as char;
 
                 match c {
@@ -147,11 +234,11 @@ named!(
                 }
             }) >> ({
                 //TODO: clean this up properly
-                let alias = SqlCompositionAlias::from_span(column).unwrap();
+                let alias = SqlCompositionAlias::from_span(of_name).unwrap();
 
                 println!("built alias: {:?}!", alias);
 
-                alias
+                ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser")
             })
         ),
         opt!(do_parse!(
@@ -175,29 +262,63 @@ named!(
 );
 
 named!(
-    parse_quoted_bindvar(Span) -> SqlBinding,
-    map_res!(
-        delimited!(tag!("':bind("), take_until!(")"), tag!(")'")),
-        SqlBinding::from_quoted_span
+    parse_quoted_bindvar(Span) -> ParsedItem<SqlBinding>,
+    do_parse!(
+        position!() >>
+        bindvar: delimited!(tag!("':bind("), take_until!(")"), tag!(")'")) >>
+        (
+            ParsedItem::from_span(
+                SqlBinding::new_quoted(bindvar).expect("SqlBinding::new_quoted() failed unexpectedly from parse_quoted_bindvar parser"),
+                    bindvar,
+                    None
+            ).unwrap()
+        )
     )
 );
 
 named!(
-    parse_bindvar(Span) -> SqlBinding,
-    map_res!(
-        delimited!(tag!(":bind("), take_until!(")"), tag!(")")),
-        SqlBinding::from_span
+    parse_bindvar(Span) -> ParsedItem<SqlBinding>,
+    do_parse!(
+        position!() >>
+        bindvar: delimited!(tag!(":bind("), take_until!(")"), tag!(")")) >>
+        (
+            ParsedItem::from_span(
+                SqlBinding::new(bindvar).expect("SqlBinding::new() failed unexpectedly from parse_bindvar parser"),
+                bindvar,
+                None
+            ).unwrap()
+        )
     )
 );
 
 named!(
-    parse_sql(Span) -> SqlLiteral,
-    map_res!(take_until_either!(":;'"), SqlLiteral::from_span)
+    parse_sql(Span) -> ParsedItem<SqlLiteral>,
+    do_parse!(
+        position!() >>
+        literal: take_until_either!(":;'") >>
+        (
+            ParsedItem::from_span(
+                SqlLiteral::new(literal.fragment.to_string()).expect("SqlLiteral::new() failed unexpectedly from parse_sql"),
+                literal,
+                None
+            ).unwrap()
+        )
+    )
 );
 
 named!(
-    parse_sql_end(Span) -> SqlEnding,
-    map_res!(tag!(";"), SqlEnding::from_span)
+    parse_sql_end(Span) -> ParsedItem<SqlEnding>,
+    do_parse!(
+        position!() >>
+        ending: tag!(";") >>
+        (
+            ParsedItem::from_span(
+                SqlEnding::new(ending.fragment.to_string()).expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
+                ending,
+                None
+            ).unwrap()
+        )
+    )
 );
 
 #[cfg(test)]

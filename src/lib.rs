@@ -13,4 +13,5 @@ extern crate rusqlite;
 mod composer;
 mod error;
 mod parser;
+mod tests;
 mod types;

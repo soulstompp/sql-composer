@@ -145,7 +145,7 @@ mod tests {
         composer.values.insert("name".into(), vec![&person.name]);
         composer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = composer.compose(&insert_stmt);
+        let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ($1, $2);";
 
@@ -162,7 +162,7 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = composer.compose(&select_stmt);
+        let (bound_sql, bindings) = composer.compose(&select_stmt.item);
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = $1 AND name = $2;";
 
@@ -219,8 +219,9 @@ mod tests {
         mock_values[0].insert("col_3".into(), &"c_value");
         mock_values[0].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (mut mock_bound_sql, mock_bindings) =
+            composer.mock_compose(&stmt.item, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -281,8 +282,9 @@ mod tests {
         mock_values[1].insert("col_3".into(), &"c_value");
         mock_values[1].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (mut mock_bound_sql, mock_bindings) =
+            composer.mock_compose(&stmt.item, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -354,8 +356,9 @@ mod tests {
         mock_values[2].insert("col_3".into(), &"c_value");
         mock_values[2].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (mut mock_bound_sql, mock_bindings) =
+            composer.mock_compose(&stmt.item, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -419,7 +422,7 @@ mod tests {
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
         println!("binding");
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -468,7 +471,7 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -516,7 +519,7 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 

@@ -16,17 +16,17 @@ named!(
             //TODO: collect aliases properly
             | do_parse!(position!() >> q: parse_quoted_bindvar >> (Sql::Binding(q)))
             | do_parse!(position!() >> b: parse_bindvar >> (Sql::Binding(b)))
-            | do_parse!(position!() >> sc: parse_composer_macro >> (Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).unwrap(), sc.1))))
+            | do_parse!(position!() >> sc: parse_composer_macro >> (Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"), sc.1))))
             | do_parse!(position!() >> s: parse_sql >> (Sql::Literal(s)))
         ),
-        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).unwrap(),
+        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"),
         |mut acc: ParsedItem<SqlComposition>, item: Sql| {
             match item {
                 Sql::Composition((mut sc, aliases)) => {
                     for alias in &aliases {
-                        let stmt_path = alias.path().unwrap();
+                        let stmt_path = alias.path().expect("expected alias path");
 
-                        sc.item.insert_alias(&stmt_path).unwrap();
+                        sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
                     }
 
                     if acc.item.sql.len() == 0 {
@@ -88,8 +88,6 @@ named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
                of: of_list >>
                tag!(")") >>
                ({
-                 println!("we made it!");
-
                  let mut sc = SqlComposition {
                      command: Some(command),
                      distinct,
@@ -99,7 +97,7 @@ named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
                      ..Default::default()
                  };
 
-                 sc.update_aliases().unwrap();
+                 sc.update_aliases().expect("expected to update aliases");
 
                  (sc, vec![])
                })
@@ -141,61 +139,18 @@ named!(
 named!(
     column_list(Span) -> Vec<ParsedItem<String>>,
     terminated!(
-        many1!(column_listing),
+        many1!(column_name),
         do_parse!(opt_multispace >> tag_no_case!("of") >> opt_multispace >> ())
     )
 );
 
 named!(
     column_name(Span) -> ParsedItem<String>,
-    do_parse!(
-        position!() >>
-        column: take_while!(|u| {
-            let c = u as char;
-
-            match c {
-                'a'...'z' => true,
-                '0'...'9' => true,
-                '_' => true,
-                _ => false,
-            }
-        }) >>
-        ({
-            let p = ParsedItem::from_span(
-                column.fragment.to_string(),
-                column,
-                None
-            );
-
-            p.expect("unable to build ParsedItem of String from column_list parser")
-        })
-    )
-);
-
-named!(
-    column_listing(Span) -> ParsedItem<String>,
-    do_parse!(
-        i: column_name >>
-        opt_multispace >>
-        opt!(tag!(",")) >>
-        opt_multispace >>
-        (i)
-    )
-);
-
-pub fn _column_list(span: Span) -> IResult<Span, Vec<ParsedItem<String>>> {
-    let res = _column_list(span);
-
-    res.and_then(|(remaining, mut vec)| Ok((remaining, vec)))
-}
-
-/*
-named!(
-    column_list(Span) -> Vec<ParsedItem<String>>,
-    complete!(many1!(terminated!(
+    dbg_dmp!(
+    terminated!(
         do_parse!(
             position!() >>
-            column_name: take_while!(|u| {
+            column: take_while!(|u| {
                 let c = u as char;
 
                 match c {
@@ -204,19 +159,22 @@ named!(
                     '_' => true,
                     _ => false,
                 }
-            }) >> ({
-                //TODO: clean this up properly
-                let name = String::from(*column_name.fragment);
+            }) >>
+            ({
+                let p = ParsedItem::from_span(
+                    column.fragment.to_string(),
+                    column,
+                    None
+                );
 
-                ParsedItem::from_span(name, column_name, None).expect("Unable to create parsed item in column_list parser")
+                p.expect("unable to build ParsedItem of String from column_list parser")
             })
-        ),
-        opt!(do_parse!(
-            opt_multispace >> tag!(",") >> opt_multispace >> ()
-        ))
-    )))
+          ),
+          opt!(do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()))
+    )
+    )
 );
-*/
+
 named!(
     of_list(Span) -> Vec<ParsedItem<SqlCompositionAlias>>,
     complete!(many1!(terminated!(
@@ -234,7 +192,7 @@ named!(
                 }
             }) >> ({
                 //TODO: clean this up properly
-                let alias = SqlCompositionAlias::from_span(of_name).unwrap();
+                let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
 
                 println!("built alias: {:?}!", alias);
 
@@ -268,10 +226,10 @@ named!(
         bindvar: delimited!(tag!("':bind("), take_until!(")"), tag!(")'")) >>
         (
             ParsedItem::from_span(
-                SqlBinding::new_quoted(bindvar).expect("SqlBinding::new_quoted() failed unexpectedly from parse_quoted_bindvar parser"),
+                SqlBinding::new_quoted(bindvar.fragment.to_string()).expect("SqlBinding::new_quoted() failed unexpectedly from parse_quoted_bindvar parser"),
                     bindvar,
                     None
-            ).unwrap()
+            ).expect("expected a parsed item from_span in parse_quoted_bindvar")
         )
     )
 );
@@ -283,10 +241,10 @@ named!(
         bindvar: delimited!(tag!(":bind("), take_until!(")"), tag!(")")) >>
         (
             ParsedItem::from_span(
-                SqlBinding::new(bindvar).expect("SqlBinding::new() failed unexpectedly from parse_bindvar parser"),
+                SqlBinding::new(bindvar.fragment.to_string()).expect("SqlBinding::new() failed unexpectedly from parse_bindvar parser"),
                 bindvar,
                 None
-            ).unwrap()
+            ).expect("expected Ok from ParsedItem::from_span in parse_bindvar")
         )
     )
 );
@@ -301,7 +259,7 @@ named!(
                 SqlLiteral::new(literal.fragment.to_string()).expect("SqlLiteral::new() failed unexpectedly from parse_sql"),
                 literal,
                 None
-            ).unwrap()
+            ).expect("expected Ok from ParsedItem::from_span in parse_sql")
         )
     )
 );
@@ -316,175 +274,241 @@ named!(
                 SqlEnding::new(ending.fragment.to_string()).expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
                 ending,
                 None
-            ).unwrap()
+            ).expect("expected Ok from ParsedItem::from_span in parse_sql_end")
         )
     )
 );
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bindvar, parse_composer_macro, parse_sql, parse_sql_end, parse_template};
-    use crate::types::{Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlEnding,
-                       SqlLiteral};
+    use super::{column_list, parse_bindvar, parse_composer_macro, parse_sql, parse_sql_end,
+                parse_template};
+    use crate::types::{ParsedItem, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias,
+                       SqlEnding, SqlLiteral};
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
-    use nom::types::CompleteStr;
+    use crate::tests::{build_parsed_binding_item, build_parsed_ending_item, build_parsed_item,
+                       build_parsed_literal_item, build_parsed_path_position,
+                       build_parsed_quoted_binding_item, build_parsed_sql_binding,
+                       build_parsed_sql_ending, build_parsed_sql_literal,
+                       build_parsed_sql_quoted_binding, build_parsed_string, build_span};
 
-    fn simple_aliases() -> Vec<SqlCompositionAlias> {
-        vec![SqlCompositionAlias {
+    use nom::types::CompleteStr;
+    use nom::{multispace, IResult};
+
+    fn simple_aliases(
+        shift_line: Option<u32>,
+        shift_offset: Option<usize>,
+    ) -> Vec<ParsedItem<SqlCompositionAlias>> {
+        let shift_line = shift_line.unwrap_or(0);
+        let shift_offset = shift_offset.unwrap_or(0);
+
+        let item = SqlCompositionAlias {
             name: None,
             path: Some("src/tests/simple-template.tql".into()),
-        }]
+        };
+
+        vec![build_parsed_item(
+            item,
+            Some(1 + shift_line),
+            Some(24 + shift_offset),
+            "src/tests/simple-template.tql",
+        )]
     }
 
-    fn include_aliases() -> Vec<SqlCompositionAlias> {
-        vec![SqlCompositionAlias {
+    fn include_aliases() -> Vec<ParsedItem<SqlCompositionAlias>> {
+        let item = SqlCompositionAlias {
             name: None,
             path: Some("src/tests/include-template.tql".into()),
-        }]
+        };
+
+        vec![build_parsed_item(
+            item,
+            None,
+            Some(24),
+            "src/tests/include-template.tql",
+        )]
     }
 
-    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
+    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/simple-template.tql");
 
-        acc.entry(SqlCompositionAlias::from_path(&p))
-            .or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(
+            SqlComposition::from_path(&p).expect("expected to insert in simple_alias_hash"),
+        );
 
         acc
     }
 
-    fn include_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
+    fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>> {
         let mut acc = simple_alias_hash();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
-        acc.entry(SqlCompositionAlias::from_path(&p))
-            .or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(
+            SqlComposition::from_path(&p).expect("expected to insert in include_alias_hash"),
+        );
 
         acc
     }
 
-    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, SqlComposition> {
+    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
-        acc.entry(SqlCompositionAlias::from_path(&p))
-            .or_insert(SqlComposition::from_path(&p).unwrap());
+        acc.entry(SqlCompositionAlias::from_path(&p)).or_insert(
+            SqlComposition::from_path(&p).expect("expected to insert in include_shallow_alias"),
+        );
 
         acc
     }
 
-    fn simple_template_comp() -> SqlComposition {
-        SqlComposition {
-            path: Some(PathBuf::from("src/tests/simple-template.tql")),
+    fn simple_template_comp(
+        shift_line: Option<u32>,
+        shift_offset: Option<usize>,
+    ) -> ParsedItem<SqlComposition> {
+        let shift_line = shift_line.unwrap_or(0);
+        let shift_offset = shift_offset.unwrap_or(0);
+
+        let item = SqlComposition {
+            position: Some(build_parsed_path_position(
+                "src/tests/simple-template.tql".into(),
+                1,
+                0,
+                "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n",
+            )),
             sql: vec![
-                Sql::Literal(
-                    SqlLiteral::from_span(Span::new(
-                        "SELECT foo_id, bar FROM foo WHERE foo.bar = ".into(),
-                    ))
-                    .unwrap(),
+                build_parsed_sql_literal(
+                    "SELECT foo_id, bar FROM foo WHERE foo.bar = ",
+                    None,
+                    None,
+                    "SELECT foo_id, bar FROM foo WHERE foo.bar = ",
                 ),
-                Sql::Binding(SqlBinding::from_span(Span::new("varname".into())).unwrap()),
-                Sql::Ending(SqlEnding::from_span(Span::new(";".into())).unwrap()),
+                build_parsed_sql_binding("varname", None, Some(50), "varname"),
+                build_parsed_sql_ending(";", None, Some(58), ";"),
             ],
             ..Default::default()
-        }
+        };
+
+        build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_comp() -> SqlComposition {
-        SqlComposition {
-            path: Some(PathBuf::from("src/tests/include-template.tql")),
+    fn include_template_comp() -> ParsedItem<SqlComposition> {
+        let item = SqlComposition {
+            position: Some(build_parsed_path_position(
+                "src/tests/include-template.tql".into(),
+                1,
+                0,
+                "SELECT COUNT(foo_id)\nFROM (\n  :compose(src/tests/simple-template.tql)\n);\n",
+            )),
             sql: vec![
-                Sql::Literal(
-                    SqlLiteral::from_span(Span::new("SELECT COUNT(foo_id)\nFROM (\n  ".into()))
-                        .unwrap(),
+                build_parsed_sql_literal(
+                    "SELECT COUNT(foo_id)\nFROM (\n  ",
+                    None,
+                    None,
+                    "SELECT COUNT(foo_id)\nFROM (\n  ",
                 ),
-                Sql::Composition((simple_template_compose_comp(), vec![])),
-                Sql::Literal(SqlLiteral::from_span(Span::new("\n)".into())).unwrap()),
-                Sql::Ending(SqlEnding::from_span(Span::new(";".into())).unwrap()),
+                Sql::Composition((simple_template_compose_comp(Some(2), Some(15)), vec![])),
+                build_parsed_sql_literal("\n)", Some(3), Some(69), "\n)"),
+                build_parsed_sql_ending(";", Some(4), Some(71), ";"),
             ],
             ..Default::default()
-        }
+        };
+
+        build_parsed_item(item, None, None, "")
     }
 
-    fn simple_template_compose_comp() -> SqlComposition {
-        SqlComposition {
-            command: Some("compose".into()),
-            of: simple_aliases(),
+    fn simple_template_compose_comp(
+        shift_line: Option<u32>,
+        shift_offset: Option<usize>,
+    ) -> ParsedItem<SqlComposition> {
+        let shift_line = shift_line.unwrap_or(0);
+        let shift_offset = shift_offset.unwrap_or(0);
+
+        let item = SqlComposition {
+            command: Some(build_parsed_string(
+                "compose",
+                Some(1 + shift_line),
+                Some(16 + shift_offset),
+                "compose",
+            )),
+            of: simple_aliases(Some(0 + shift_line), Some(0 + shift_offset)),
             aliases: simple_alias_hash(),
             ..Default::default()
-        }
+        };
+
+        build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_compose_comp() -> SqlComposition {
-        SqlComposition {
-            command: Some("compose".into()),
+    fn include_template_compose_comp() -> ParsedItem<SqlComposition> {
+        let item = SqlComposition {
+            command: Some(build_parsed_string("compose", None, Some(16), "compose")),
             of: include_aliases(),
             aliases: include_shallow_alias_hash(),
             ..Default::default()
-        }
+        };
+
+        build_parsed_item(item, None, None, "")
     }
 
     #[test]
     fn test_parse_bindvar() {
         let input = ":bind(varname)blah blah blah";
 
-        let out = parse_bindvar(Span::new(input.into()));
+        let out = parse_bindvar(Span::new(input.into())).expect("expected Ok from parse_bindvar");
 
-        let expected = Ok((
-            Span {
-                offset:   14,
-                line:     1,
-                fragment: "blah blah blah".into(),
-            },
-            SqlBinding {
-                name:   "varname".into(),
-                quoted: false,
-            },
-        ));
-        assert_eq!(out, expected);
+        let expected_span = build_span(Some(14), Some(1), "blah blah blah");
+        let expected_item = build_parsed_binding_item("varname", None, Some(6), "varname");
+
+        let (span, item) = out;
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
     }
 
     #[test]
     fn test_parse_sql_end() {
         let input = ";blah blah blah";
 
-        let expected = Ok((
-            Span {
-                offset:   1,
-                line:     1,
-                fragment: "blah blah blah".into(),
-            },
-            SqlEnding { value: ";".into() },
-        ));
+        let expected_span = build_span(Some(1), Some(1), "blah blah blah");
 
-        let out = parse_sql_end(Span::new(input.into()));
+        let expected_item = build_parsed_ending_item(";", None, None, ";");
 
-        assert_eq!(out, expected);
+        let (span, item) =
+            parse_sql_end(Span::new(input.into())).expect("expected Ok from parse_sql_end");
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
     }
 
     #[test]
-    fn parse_sql_until_path() {
+    fn test_parse_sql_until_path() {
         let input = "select * from foo where foo.bar = :bind(varname);";
 
-        let out = parse_sql(Span::new(input.into()));
+        let out = parse_sql(Span::new(input.into())).expect("expected Ok from parse_sql");
 
-        let expected = Ok((
-            Span {
-                offset:   34,
-                line:     1,
-                fragment: ":bind(varname);".into(),
-            },
-            SqlLiteral {
-                value: "select * from foo where foo.bar = ".into(),
-                ..Default::default()
-            },
-        ));
-        assert_eq!(out, expected);
+        let (span, item) = out;
+
+        let expected_span = build_span(Some(34), Some(1), ":bind(varname);");
+
+        let expected = SqlLiteral {
+            value: "select * from foo where foo.bar = ".into(),
+            ..Default::default()
+        };
+
+        let expected_item = build_parsed_item(
+            expected,
+            Some(1),
+            Some(0),
+            "select * from foo where foo.bar = ",
+        );
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
     }
 
     #[test]
@@ -492,33 +516,26 @@ mod tests {
         let input =
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = parse_template(Span::new(input.into()), None);
+        let (span, item) =
+            parse_template(Span::new(input.into()), None).expect("expected Ok from parse_template");
 
-        let expected = Ok((
-            Span {
-                offset:   86,
-                line:     1,
-                fragment: "".into(),
-            },
-            SqlComposition {
-                sql: vec![
-                    Sql::Literal(
-                        SqlLiteral::from_span(Span::new("SELECT * FROM (".into())).unwrap(),
-                    ),
-                    Sql::Composition((simple_template_compose_comp(), vec![])),
-                    Sql::Literal(
-                        SqlLiteral::from_span(Span::new(") WHERE name = ".into())).unwrap(),
-                    ),
-                    Sql::Binding(
-                        SqlBinding::from_quoted_span(Span::new("bindvar".into())).unwrap(),
-                    ),
-                    Sql::Ending(SqlEnding::from_span(Span::new(";".into())).unwrap()),
-                ],
-                ..Default::default()
-            },
-        ));
+        let expected_span = build_span(Some(86), Some(1), "");
 
-        assert_eq!(out, expected);
+        let expected_item = SqlComposition {
+            sql: vec![
+                build_parsed_sql_literal("SELECT * FROM (".into(), None, None, "SELECT * FROM ("),
+                Sql::Composition((simple_template_compose_comp(None, None), vec![])),
+                build_parsed_sql_literal(") WHERE name = ", None, Some(54), ") WHERE name = "),
+                build_parsed_sql_quoted_binding("bindvar", None,  Some(76),"bindvar"),
+                build_parsed_sql_ending(";", None, Some(85), ";"),
+            ],
+            ..Default::default()
+        };
+
+        let expected_item = build_parsed_item(expected_item, None, None, "");
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
     }
 
     #[test]
@@ -527,44 +544,38 @@ mod tests {
 
         let out = parse_template(Span::new(input.into()), None);
 
-        let expected = Ok((
-            Span {
-                offset:   87,
-                line:     1,
-                fragment: "".into(),
-            },
-            SqlComposition {
-                sql: vec![
-                    Sql::Literal(
-                        SqlLiteral::from_span(Span::new("SELECT * FROM (".into())).unwrap(),
-                    ),
-                    Sql::Composition((include_template_compose_comp(), vec![])),
-                    Sql::Literal(
-                        SqlLiteral::from_span(Span::new(") WHERE name = ".into())).unwrap(),
-                    ),
-                    Sql::Binding(
-                        SqlBinding::from_quoted_span(Span::new("bindvar".into())).unwrap(),
-                    ),
-                    Sql::Ending(SqlEnding::from_span(Span::new(";".into())).unwrap()),
-                ],
-                ..Default::default()
-            },
-        ));
+        let expected_span = build_span(Some(87), Some(1), "");
 
-        assert_eq!(out, expected);
+        let expected_comp = SqlComposition {
+            sql: vec![
+                build_parsed_sql_literal("SELECT * FROM (", None, None, "SELECT * FROM ("),
+                Sql::Composition((include_template_compose_comp(), vec![])),
+                build_parsed_sql_literal(") WHERE name = ", None, Some(55), ") WHERE name = "),
+                build_parsed_sql_quoted_binding("bindvar", None, Some(77), "bindvar"),
+                build_parsed_sql_ending(";".into(), None, Some(86), ";"),
+            ],
+            ..Default::default()
+        };
+
+        let expected_comp = build_parsed_item(expected_comp, None, None, "");
+
+        assert_eq!(out, Ok((expected_span, expected_comp)));
     }
 
     #[test]
     fn test_parse_file_template() {
-        let stmt = SqlComposition::from_path(Path::new("src/tests/simple-template.tql")).unwrap();
-        let expected = simple_template_comp();
+        let stmt = SqlComposition::from_path(Path::new("src/tests/simple-template.tql"))
+            .expect("expected Ok from from_path");
+
+        let expected = simple_template_comp(None, None);
 
         assert_eq!(stmt, expected);
     }
 
     #[test]
     fn test_parse_file_inclusive_template() {
-        let stmt = SqlComposition::from_path(Path::new("src/tests/include-template.tql")).unwrap();
+        let stmt = SqlComposition::from_path(Path::new("src/tests/include-template.tql"))
+            .expect("expected Ok from from_path");
         let expected = include_template_comp();
 
         assert_eq!(stmt, expected);
@@ -584,19 +595,32 @@ mod tests {
             },
             (
                 SqlComposition {
-                    command: Some("count".into()),
-                    path: None,
-                    distinct: true,
-                    columns: Some(vec!["col1".into(), "col2".into()]),
+                    command: Some(build_parsed_string("count", None, Some(1), "count")),
+                    position: None,
+                    distinct: Some(build_parsed_item(true, None, Some(7), "distinct")),
+                    columns: Some(vec![
+                        build_parsed_string("col1", None, Some(16), "col1"),
+                        build_parsed_string("col2", None, Some(22), "col2"),
+                    ]),
                     of: vec![
-                        SqlCompositionAlias {
-                            name: None,
-                            path: Some("src/tests/simple-template.tql".into()),
-                        },
-                        SqlCompositionAlias {
-                            name: None,
-                            path: Some("src/tests/include-template.tql".into()),
-                        },
+                        build_parsed_item(
+                            SqlCompositionAlias {
+                                name: None,
+                                path: Some("src/tests/simple-template.tql".into()),
+                            },
+                            None,
+                            Some(30),
+                            "src/tests/simple-template.tql",
+                        ),
+                        build_parsed_item(
+                            SqlCompositionAlias {
+                                name: None,
+                                path: Some("src/tests/include-template.tql".into()),
+                            },
+                            None,
+                            Some(61),
+                            "src/tests/include-template.tql",
+                        ),
                     ],
                     aliases: include_alias_hash(),
                     ..Default::default()
@@ -616,19 +640,72 @@ mod tests {
 
         println!("final comp: {}", comp);
 
-        let expected = SqlComposition {
-            command: Some("count".into()),
-            path: None,
-            of: vec![SqlCompositionAlias {
-                name: None,
-                path: Some("src/tests/simple-template.tql".into()),
-            }],
-            aliases: simple_alias_hash(),
-            sql: vec![Sql::Ending(SqlEnding { value: ";".into() })],
-            ..Default::default()
-        };
+        let expected = build_parsed_item(
+            SqlComposition {
+                command: Some(build_parsed_string("count", None, Some(1), "count")),
+                position: None,
+                of: vec![build_parsed_item(
+                    SqlCompositionAlias {
+                        name: None,
+                        path: Some("src/tests/simple-template.tql".into()),
+                    },
+                    None,
+                    Some(7),
+                    "src/tests/simple-template.tql",
+                )],
+                aliases: simple_alias_hash(),
+                sql: vec![Sql::Ending(build_parsed_item(
+                    SqlEnding { value: ";".into() },
+                    None,
+                    Some(37),
+                    ";",
+                ))],
+                ..Default::default()
+            },
+            None,
+            None,
+            "",
+        );
 
         assert_eq!(comp, expected);
     }
 
+    #[test]
+    fn test_parse_single_column_list() {
+        let input = "col_1 of ";
+
+        let expected_span = build_span(Some(9), Some(1), "");
+
+        let expected_item = vec![build_parsed_item(
+            "col_1".to_string(),
+            None,
+            None,
+            "col_1",
+        )];
+
+        let (span, item) =
+            column_list(Span::new(input.into())).expect("expected Ok from column_list");
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
+
+    #[test]
+    fn test_parse_multi_column_list() {
+        let input = "col_1, col_2, col_3 of ";
+
+        let expected_span = build_span(Some(23), Some(1), "");
+
+        let expected_item = vec![
+            build_parsed_item("col_1".to_string(), None, Some(0), "col_1"),
+            build_parsed_item("col_2".to_string(), None, Some(7), "col_2"),
+            build_parsed_item("col_3".to_string(), None, Some(14), "col_3"),
+        ];
+
+        let (span, item) =
+            column_list(Span::new(input.into())).expect("expected Ok from column_list");
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
 }

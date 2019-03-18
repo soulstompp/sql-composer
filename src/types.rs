@@ -465,17 +465,17 @@ pub struct SqlBinding {
 }
 
 impl SqlBinding {
-    pub fn new(s: Span) -> Result<Self> {
+    pub fn new(s: String) -> Result<Self> {
         Ok(Self {
-            name:      s.fragment.to_string(),
+            name:      s,
             quoted:    false,
             generated: false,
         })
     }
 
-    pub fn new_quoted(s: Span) -> Result<Self> {
+    pub fn new_quoted(s: String) -> Result<Self> {
         Ok(Self {
-            name:      s.fragment.to_string(),
+            name:      s,
             quoted:    true,
             generated: false,
         })

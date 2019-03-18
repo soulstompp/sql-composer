@@ -118,7 +118,7 @@ mod tests {
             .insert("time_created".into(), vec![&person.time_created]);
         composer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, _bindings) = composer.compose(&insert_stmt);
+        let (bound_sql, _bindings) = composer.compose(&insert_stmt.item);
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -133,7 +133,7 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "nothing remaining");
 
-        let (bound_sql, _bindings) = composer.compose(&select_stmt);
+        let (bound_sql, _bindings) = composer.compose(&select_stmt.item);
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

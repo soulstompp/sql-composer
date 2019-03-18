@@ -79,7 +79,7 @@ impl<'a> Composer for MysqlComposer<'a> {
 mod tests {
     use super::{Composer, MysqlComposer};
     use crate::parser::parse_template;
-    use crate::types::{Span, SqlComposition};
+    use crate::types::{ParsedItem, Span, SqlComposition};
     use mysql::{from_row, Pool, Row};
 
     use std::collections::{BTreeMap, HashMap};
@@ -134,7 +134,7 @@ mod tests {
         composer.values.insert("name".into(), vec![&person.name]);
         composer.values.insert("data".into(), vec![&person.data]);
 
-        let (bound_sql, bindings) = composer.compose(&insert_stmt);
+        let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES (?, ?);";
 
@@ -151,7 +151,7 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = composer.compose(&select_stmt);
+        let (bound_sql, bindings) = composer.compose(&select_stmt.item);
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = ? AND name = ?;";
 
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(found.data, person.data, "person's data");
     }
 
-    fn parse(input: &str) -> SqlComposition {
+    fn parse(input: &str) -> ParsedItem<SqlComposition> {
         let (_remaining, stmt) = parse_template(Span::new(input.into()), None).unwrap();
 
         stmt
@@ -222,10 +222,10 @@ mod tests {
         mock_values[0].insert("col_3".into(), &"c_value");
         mock_values[0].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
         composer.root_mock_values = mock_values;
 
-        let (mock_bound_sql, mock_bindings) = composer.compose(&stmt);
+        let (mock_bound_sql, mock_bindings) = composer.compose(&stmt.item);
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -285,8 +285,9 @@ mod tests {
         mock_values[1].insert("col_3".into(), &"c_value");
         mock_values[1].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&stmt, &mock_values, 0);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (mut mock_bound_sql, mock_bindings) =
+            composer.mock_compose(&stmt.item, &mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -359,8 +360,9 @@ mod tests {
         mock_values[2].insert("col_3".into(), &"c_value");
         mock_values[2].insert("col_4".into(), &"d_value");
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&stmt, &mock_values, 1);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (mut mock_bound_sql, mock_bindings) =
+            composer.mock_compose(&stmt.item, &mock_values, 1);
 
         mock_bound_sql.push(';');
 
@@ -432,7 +434,7 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -482,7 +484,7 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 
@@ -531,7 +533,7 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
 
-        let (bound_sql, bindings) = composer.compose(&stmt);
+        let (bound_sql, bindings) = composer.compose(&stmt.item);
 
         println!("bound_sql: {}", bound_sql);
 

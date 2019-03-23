@@ -404,6 +404,7 @@ pub enum Sql {
     Binding(ParsedItem<SqlBinding>),
     Composition((ParsedItem<SqlComposition>, Vec<SqlCompositionAlias>)),
     Ending(ParsedItem<SqlEnding>),
+    DbObject(ParsedItem<SqlDbObject>),
 }
 
 impl fmt::Display for Sql {
@@ -413,6 +414,7 @@ impl fmt::Display for Sql {
             Sql::Binding(b) => write!(f, "{}", b)?,
             Sql::Composition(w) => write!(f, "{:?}", w)?,
             Sql::Ending(e) => write!(f, "{}", e)?,
+            Sql::DbObject(ft) => write!(f, "{}", ft)?,
         }
 
         write!(f, "")
@@ -433,6 +435,31 @@ impl SqlEnding {
 impl fmt::Display for SqlEnding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.value)
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Clone)]
+pub struct SqlDbObject {
+    pub object_name: String,
+    pub object_alias: Option<String>,
+}
+
+impl SqlDbObject {
+    pub fn new(name: String, alias: Option<String>) -> Result<Self> {
+        Ok(Self { object_name: name, object_alias: alias })
+    }
+}
+
+impl fmt::Display for SqlDbObject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FROM {}", self.object_name);
+
+        if let Some(alias) = &self.object_alias {
+            write!(f, " AS {}", alias)
+        }
+        else {
+            write!(f, "")
+        }
     }
 }
 

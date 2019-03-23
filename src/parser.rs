@@ -150,17 +150,7 @@ named!(
     terminated!(
         do_parse!(
             position!() >>
-            column: take_while!(|u| {
-                let c = u as char;
-
-                match c {
-                    'a'...'z' => true,
-                    'A'...'Z' => true,
-                    '0'...'9' => true,
-                    '_' => true,
-                    _ => false,
-                }
-            }) >>
+            column: take_while_name_char >>
             ({
                 let p = ParsedItem::from_span(
                     column.fragment.to_string(),
@@ -281,6 +271,7 @@ named!(
 
                 match c {
                     'a'...'z' => true,
+                    'A'...'Z' => true,
                     '0'...'9' => true,
                     '-' | '_' => true,
                     '.' | '/' | '\\' => true,
@@ -308,6 +299,7 @@ named!(
 
         match c {
             'a'...'z' => true,
+            'A'...'Z' => true,
             '0'...'9' => true,
             '_' | '-' | '.' | '/' => true,
             _ => false,

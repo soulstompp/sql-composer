@@ -133,10 +133,10 @@ pub fn build_parsed_path_position(
     Position::Parsed(span)
 }
 
-pub fn build_span(offset: Option<usize>, line: Option<u32>, fragment: &str) -> Span {
+pub fn build_span(line: Option<u32>, offset: Option<usize>, fragment: &str) -> Span {
     Span {
-        offset:   offset.unwrap(),
         line:     line.unwrap(),
+        offset:   offset.unwrap(),
         fragment: CompleteStr(fragment),
     }
 }

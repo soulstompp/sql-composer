@@ -549,7 +549,7 @@ mod tests {
 
         let out = parse_bindvar(Span::new(input.into())).expect("expected Ok from parse_bindvar");
 
-        let expected_span = build_span(Some(14), Some(1), "blah blah blah");
+        let expected_span = build_span(Some(1), Some(14), "blah blah blah");
         let expected_item = build_parsed_binding_item("varname", None, Some(6), "varname");
 
         let (span, item) = out;
@@ -581,7 +581,7 @@ mod tests {
 
         let (span, item) = out;
 
-        let expected_span = build_span(Some(34), Some(1), ":bind(varname);");
+        let expected_span = build_span(Some(1), Some(34), ":bind(varname);");
 
         let expected = SqlLiteral {
             value: "select * from foo where foo.bar = ".into(),
@@ -607,7 +607,7 @@ mod tests {
         let (span, item) =
             parse_template(Span::new(input.into()), None).expect("expected Ok from parse_template");
 
-        let expected_span = build_span(Some(86), Some(1), "");
+        let expected_span = build_span(Some(1), Some(86), "");
 
         let expected_item = SqlComposition {
             sql: vec![
@@ -632,7 +632,7 @@ mod tests {
 
         let out = parse_template(Span::new(input.into()), None);
 
-        let expected_span = build_span(Some(87), Some(1), "");
+        let expected_span = build_span(Some(1), Some(87), "");
 
         let expected_comp = SqlComposition {
             sql: vec![
@@ -760,7 +760,7 @@ mod tests {
     fn test_parse_single_column_list() {
         let input = "col_1 of ";
 
-        let expected_span = build_span(Some(9), Some(1), "");
+        let expected_span = build_span(Some(1), Some(9), "");
 
         let expected_item = vec![build_parsed_item(
             "col_1".to_string(),
@@ -780,7 +780,7 @@ mod tests {
     fn test_parse_multi_column_list() {
         let input = "col_1, col_2, col_3 of ";
 
-        let expected_span = build_span(Some(23), Some(1), "");
+        let expected_span = build_span(Some(1), Some(23), "");
 
         let expected_item = vec![
             build_parsed_item("col_1".to_string(), None, Some(0), "col_1"),
@@ -799,7 +799,7 @@ mod tests {
     fn test_parse_db_object_alias_with_as() {
         let input = "AS tt WHERE 1";
         
-        let expected_span = build_span(Some(3), Some(1), "tt");
+        let expected_span = build_span(Some(1), Some(3), "tt");
         
         let (leftover_span, span) = db_object_alias_sql(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
@@ -810,7 +810,7 @@ mod tests {
     fn test_parse_db_object_alias_with_as_preceeding_space() {
         let input = " AS tt WHERE 1";
         
-        let expected_span = build_span(Some(4), Some(1), "tt");
+        let expected_span = build_span(Some(1), Some(4), "tt");
         
         let (leftover_span, span) = db_object_alias_sql(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
@@ -821,7 +821,7 @@ mod tests {
     fn test_parse_db_object_alias_without_as() {
         let input = "tt WHERE 1";
         
-        let expected_span = build_span(Some(0), Some(1), "tt");
+        let expected_span = build_span(Some(1), Some(0), "tt");
         
         let (leftover_span, span) = db_object_alias_sql(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
@@ -832,7 +832,7 @@ mod tests {
     fn test_parse_db_object_alias_without_as_preceeding_space() {
         let input = "tt WHERE 1";
         
-        let expected_span = build_span(Some(0), Some(1), "tt");
+        let expected_span = build_span(Some(1), Some(0), "tt");
         
         let (leftover_span, span) = db_object_alias_sql(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
@@ -854,7 +854,7 @@ mod tests {
     fn test_parse_db_object_with_no_alias() {
         let input = "FROM t1 WHERE 1";
         
-        let expected_span = build_span(Some(8), Some(1), "WHERE 1");
+        let expected_span = build_span(Some(1), Some(8), "WHERE 1");
 
         let expected = SqlDbObject {
             object_name: "t1".into(),
@@ -873,7 +873,7 @@ mod tests {
     fn test_parse_db_object_with_alias() {
         let input = "FROM t1 tt WHERE 1";
         
-        let expected_span = build_span(Some(11), Some(1), "WHERE 1");
+        let expected_span = build_span(Some(1), Some(11), "WHERE 1");
 
         let expected = SqlDbObject {
             object_name: "t1".into(),
@@ -892,7 +892,7 @@ mod tests {
     fn test_parse_db_object_with_as_alias() {
         let input = "FROM t1 tt WHERE 1";
         
-        let expected_span = build_span(Some(11), Some(1), "WHERE 1");
+        let expected_span = build_span(Some(1), Some(11), "WHERE 1");
         
         let expected = SqlDbObject {
             object_name: "t1".into(),

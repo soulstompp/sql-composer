@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 pub use nom::types::CompleteStr;
 
-use nom_locate::LocatedSpan;
+pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<CompleteStr<'a>>;
 
@@ -405,6 +405,7 @@ pub enum Sql {
     Composition((ParsedItem<SqlComposition>, Vec<SqlCompositionAlias>)),
     Ending(ParsedItem<SqlEnding>),
     DbObject(ParsedItem<SqlDbObject>),
+    Keyword(ParsedItem<SqlKeyword>)
 }
 
 impl fmt::Display for Sql {
@@ -415,6 +416,7 @@ impl fmt::Display for Sql {
             Sql::Composition(w) => write!(f, "{:?}", w)?,
             Sql::Ending(e) => write!(f, "{}", e)?,
             Sql::DbObject(ft) => write!(f, "{}", ft)?,
+            Sql::Keyword(k) => write!(f, "{}", k)?,
         }
 
         write!(f, "")
@@ -462,6 +464,24 @@ impl fmt::Display for SqlDbObject {
         }
     }
 }
+
+#[derive(Debug, Default, PartialEq, Clone)]
+pub struct SqlKeyword {
+    pub value: String,
+}
+
+impl SqlKeyword {
+    pub fn new(v: String) -> Result<Self> {
+        Ok(Self { value: v })
+    }
+}
+
+impl fmt::Display for SqlKeyword {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct SqlLiteral {

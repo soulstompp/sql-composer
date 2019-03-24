@@ -1,5 +1,5 @@
-use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
-                   SqlComposition, SqlCompositionAlias, SqlEnding, SqlDbObject, SqlLiteral};
+use crate::types::{CompleteStr, LocatedSpan, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
+                   SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
 use nom::{multispace, IResult};
 use std::path::PathBuf;
@@ -12,31 +12,34 @@ named!(
     _parse_template(Span) -> ParsedItem<SqlComposition>,
     fold_many1!(
         alt_complete!(
-            do_parse!(position!() >> e: parse_sql_end >> (Sql::Ending(e)))
-            //TODO: collect aliases properly
-            | do_parse!(position!() >> q: parse_quoted_bindvar >> (Sql::Binding(q)))
-            | do_parse!(position!() >> b: parse_bindvar >> (Sql::Binding(b)))
-            | do_parse!(position!() >> sc: parse_composer_macro >> (Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"), sc.1))))
-            | do_parse!(position!() >> s: parse_sql >> (Sql::Literal(s)))
+            do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)]))
+            | do_parse!(position!() >> q: parse_quoted_bindvar >> (vec![Sql::Binding(q)]))
+            | do_parse!(position!() >> b: parse_bindvar >> (vec![Sql::Binding(b)]))
+            | do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"), sc.1))]))
+            | do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
+            | do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)]))
+            | do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
         ),
-        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"),
-        |mut acc: ParsedItem<SqlComposition>, item: Sql| {
-            match item {
-                Sql::Composition((mut sc, aliases)) => {
-                    for alias in &aliases {
-                        let stmt_path = alias.path().expect("expected alias path");
+        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in _parse_template parser"),
+        |mut acc: ParsedItem<SqlComposition>, items: Vec<Sql>| {
+            for item in items {
+                match item {
+                    Sql::Composition((mut sc, aliases)) => {
+                        for alias in &aliases {
+                            let stmt_path = alias.path().expect("expected alias path");
 
-                        sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
+                            sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
+                        }
+
+                        if acc.item.sql.len() == 0 {
+                            return sc;
+                        }
+
+                        acc.item.push_sql(Sql::Composition((sc, aliases)));
                     }
-
-                    if acc.item.sql.len() == 0 {
-                        return sc;
+                    _ => {
+                        acc.item.push_sql(item);
                     }
-
-                    acc.item.push_sql(Sql::Composition((sc, aliases)));
-                }
-                _ => {
-                    acc.item.push_sql(item);
                 }
             }
 
@@ -183,10 +186,25 @@ named!(take_while_name_char(Span) -> Span,
     )
 );
 
-named!(reserved_keyword_sql(Span) -> Span,
+named!(
+    keyword(Span) -> ParsedItem<SqlKeyword>,
+    do_parse!(
+        position!() >>
+        keyword: keyword_sql >>
+        (
+            ParsedItem::from_span(
+                SqlKeyword::new(keyword.fragment.to_string()).expect("SqlKeyword::new() failed unexpectedly from keyword parser"),
+                keyword,
+                None
+            ).expect("expected Ok from ParsedItem::from_span in keyword parser")
+        )
+    )
+);
+
+named!(keyword_sql(Span) -> Span,
     do_parse!(
         keyword: alt_complete!(
-            command_keyword_sql |
+            command_sql |
             db_object_pre_sql |
             db_object_post_sql
         ) >>
@@ -194,10 +212,10 @@ named!(reserved_keyword_sql(Span) -> Span,
     )
 );
 
-named!(command_keyword_sql(Span) -> Span,
+named!(command_sql(Span) -> Span,
     alt_complete!(
         tag_no_case!("SELECT") |
-        tag_no_case!("INSERT") |
+        tag_no_case!("INSERT INTO") |
         tag_no_case!("UPDATE") |
         tag_no_case!("WHERE")
     )
@@ -222,7 +240,7 @@ named!(db_object_alias_sql(Span) -> Span,
         opt_multispace >>
         opt!(tag_no_case!("AS")) >>
         opt_multispace >>
-        not!(peek!(reserved_keyword_sql)) >>
+        not!(peek!(keyword_sql)) >>
         alias: take_while_name_char >>
         opt_multispace >>
         (
@@ -232,31 +250,41 @@ named!(db_object_alias_sql(Span) -> Span,
 );
 
 named!(
-    db_object(Span) -> ParsedItem<SqlDbObject>,
+    db_object(Span) -> (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>),
     do_parse!(
-        db_object_pre_sql >>
+        opt_multispace >>
+        keyword: db_object_pre_sql >>
         opt_multispace >>
         position!() >>
         table: db_object_alias_sql >>
         opt_multispace >>
-        // NOT  WHERE, etc.
         position!() >>
         alias: opt!(db_object_alias_sql) >> 
         ({
+            let k = SqlKeyword {
+                value: keyword.fragment.to_string()
+            };
+
+            let pk = ParsedItem::from_span(
+                k,
+                keyword,
+                None
+            ).expect("unable to build ParsedItem of SqlDbObject in db_object parser");
+
             let object_alias = alias.and_then(|a| Some(a.fragment.to_string()));
 
-            let item = SqlDbObject {
+            let object = SqlDbObject {
                 object_name: table.fragment.to_string(),
                 object_alias
             };
 
-            let p = ParsedItem::from_span(
-                item,
+            let po = ParsedItem::from_span(
+                object,
                 table,
                 None
-            );
+            ).expect("unable to build ParsedItem of SqlDbObject in db_object parser");
 
-            p.expect("unable to build ParsedItem of SqlDbObject in db_object parser")
+            (pk, po)
         })
      )
 );
@@ -339,16 +367,19 @@ named!(
 
 named!(
     parse_sql(Span) -> ParsedItem<SqlLiteral>,
-    do_parse!(
-        position!() >>
-        literal: take_until_either!(":;'") >>
-        (
-            ParsedItem::from_span(
-                SqlLiteral::new(literal.fragment.to_string()).expect("SqlLiteral::new() failed unexpectedly from parse_sql"),
-                literal,
-                None
-            ).expect("expected Ok from ParsedItem::from_span in parse_sql")
-        )
+    fold_many1!(
+        do_parse!(
+            not!(peek!(tag!(":"))) >>
+            not!(peek!(tag!(";"))) >>
+            not!(peek!(db_object_pre_sql)) >>
+            literal: take!(1) >>
+            (literal)
+        ),
+        ParsedItem::from_span(SqlLiteral::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in parse_sql parser"),
+        |mut acc: ParsedItem<SqlLiteral>, item: Span| {
+            acc.item.value.push_str(*item.fragment);
+            acc
+        }
     )
 );
 
@@ -377,9 +408,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::tests::{build_parsed_binding_item, build_parsed_ending_item, build_parsed_item,
-                       build_parsed_literal_item, build_parsed_path_position,
+                       build_parsed_keyword_item, build_parsed_literal_item, build_parsed_path_position,
                        build_parsed_quoted_binding_item, build_parsed_sql_binding,
-                       build_parsed_sql_ending, build_parsed_sql_literal,
+                       build_parsed_sql_ending, build_parsed_sql_keyword, build_parsed_sql_literal,
                        build_parsed_sql_quoted_binding, build_parsed_string, build_span};
 
     use nom::types::CompleteStr;
@@ -470,11 +501,17 @@ mod tests {
                 "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n",
             )),
             sql: vec![
+                build_parsed_sql_keyword(
+                    "SELECT",
+                    None,
+                    None,
+                    "SELECT",
+                ),
                 build_parsed_sql_literal(
-                    "SELECT foo_id, bar FROM foo WHERE foo.bar = ",
+                    "foo_id, bar FROM foo WHERE foo.bar = ",
                     None,
                     None,
-                    "SELECT foo_id, bar FROM foo WHERE foo.bar = ",
+                    "foo_id, bar FROM foo WHERE foo.bar = ",
                 ),
                 build_parsed_sql_binding("varname", None, Some(50), "varname"),
                 build_parsed_sql_ending(";", None, Some(58), ";"),
@@ -611,7 +648,10 @@ mod tests {
 
         let expected_item = SqlComposition {
             sql: vec![
-                build_parsed_sql_literal("SELECT * FROM (".into(), None, None, "SELECT * FROM ("),
+                build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
+                build_parsed_sql_literal("*");
+                build_parsed_sql_keyword("FROM", None, None, "FROM"),
+                build_parsed_sql_literal("(");
                 Sql::Composition((simple_template_compose_comp(None, None), vec![])),
                 build_parsed_sql_literal(") WHERE name = ", None, Some(54), ") WHERE name = "),
                 build_parsed_sql_quoted_binding("bindvar", None,  Some(76),"bindvar"),
@@ -856,16 +896,16 @@ mod tests {
         
         let expected_span = build_span(Some(1), Some(8), "WHERE 1");
 
-        let expected = SqlDbObject {
+        let expected_dbo = SqlDbObject {
             object_name: "t1".into(),
             object_alias: None
         };
             
-        let expected_item = build_parsed_item(expected, None, Some(5), "t1");
+        let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, item) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
+        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
-        assert_eq!(item, expected_item, "items match");
+        assert_eq!(dbo_item, expected_dbo_item, "items match");
         assert_eq!(span, expected_span, "spans match");
     }
     
@@ -875,16 +915,16 @@ mod tests {
         
         let expected_span = build_span(Some(1), Some(11), "WHERE 1");
 
-        let expected = SqlDbObject {
+        let expected_dbo = SqlDbObject {
             object_name: "t1".into(),
             object_alias: Some("tt".into())
         };
             
-        let expected_item = build_parsed_item(expected, None, Some(5), "t1");
+        let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, item) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
+        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
-        assert_eq!(item, expected_item, "items match");
+        assert_eq!(dbo_item, expected_dbo_item, "DbObject items match");
         assert_eq!(span, expected_span, "spans match");
     }
     
@@ -894,16 +934,16 @@ mod tests {
         
         let expected_span = build_span(Some(1), Some(11), "WHERE 1");
         
-        let expected = SqlDbObject {
+        let expected_dbo = SqlDbObject {
             object_name: "t1".into(),
             object_alias: Some("tt".into())
         };
             
-        let expected_item = build_parsed_item(expected, None, Some(5), "t1");
+        let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, item) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
+        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into())).expect(&format!("expected Ok from parsing {}", input));
 
-        assert_eq!(item, expected_item, "items match");
+        assert_eq!(dbo_item, expected_dbo_item, "items match");
         assert_eq!(span, expected_span, "spans match");
     }
     

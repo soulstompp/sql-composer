@@ -53,6 +53,7 @@ pub trait Composer: Sized {
                     }
                 },
                 Sql::DbObject(ft) => (ft.to_string(), vec![]),
+                Sql::Keyword(k) => (k.to_string(), vec![]),
             };
 
             sql.push_str(&sub_sql);

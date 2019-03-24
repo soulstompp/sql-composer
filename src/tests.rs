@@ -1,5 +1,5 @@
 use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
-                   SqlCompositionAlias, SqlEnding, SqlLiteral};
+                   SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
 use std::fmt;
 use std::fmt::Debug;
@@ -15,8 +15,8 @@ pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
     let fs = fragment.to_string();
 
     let span = Span {
-        offset:   offset.unwrap_or(0),
         line:     line.unwrap_or(1),
+        offset:   offset.unwrap_or(0),
         fragment: CompleteStr(&fs),
     };
 
@@ -95,6 +95,48 @@ pub fn build_parsed_sql_literal(
     Sql::Literal(build_parsed_literal_item(item, line, offset, fragment))
 }
 
+pub fn build_parsed_db_object_item(
+    item: &str,
+    alias: Option<String>,
+    line: Option<u32>,
+    offset: Option<usize>,
+    fragment: &str,
+) -> ParsedItem<SqlDbObject> {
+    let object = SqlDbObject::new(item.to_string(), alias).unwrap();
+
+    build_parsed_item(object, line, offset, fragment)
+}
+
+pub fn build_parsed_sql_db_object(
+    item: &str,
+    alias: Option<String>,
+    line: Option<u32>,
+    offset: Option<usize>,
+    fragment: &str,
+) -> Sql {
+    Sql::DbObject(build_parsed_db_object_item(item, alias, line, offset, fragment))
+}
+
+pub fn build_parsed_keyword_item(
+    item: &str,
+    line: Option<u32>,
+    offset: Option<usize>,
+    fragment: &str,
+) -> ParsedItem<SqlKeyword> {
+    let keyword = SqlKeyword::new(item.to_string()).unwrap();
+
+    build_parsed_item(keyword, line, offset, fragment)
+}
+
+pub fn build_parsed_sql_keyword(
+    item: &str,
+    line: Option<u32>,
+    offset: Option<usize>,
+    fragment: &str,
+) -> Sql {
+    Sql::Keyword(build_parsed_keyword_item(item, line, offset, fragment))
+}
+
 pub fn build_parsed_ending_item(
     item: &str,
     line: Option<u32>,
@@ -135,8 +177,8 @@ pub fn build_parsed_path_position(
 
 pub fn build_span(line: Option<u32>, offset: Option<usize>, fragment: &str) -> Span {
     Span {
-        line:     line.unwrap(),
-        offset:   offset.unwrap(),
+        line:     line.unwrap_or(1),
+        offset:   offset.unwrap_or(0),
         fragment: CompleteStr(fragment),
     }
 }

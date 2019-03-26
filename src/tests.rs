@@ -107,14 +107,16 @@ pub fn build_parsed_db_object_item(
     build_parsed_item(object, line, offset, fragment)
 }
 
-pub fn build_parsed_sql_db_object(
+pub fn build_parsed_db_object(
     item: &str,
     alias: Option<String>,
     line: Option<u32>,
     offset: Option<usize>,
     fragment: &str,
 ) -> Sql {
-    Sql::DbObject(build_parsed_db_object_item(item, alias, line, offset, fragment))
+    Sql::DbObject(build_parsed_db_object_item(
+        item, alias, line, offset, fragment,
+    ))
 }
 
 pub fn build_parsed_keyword_item(

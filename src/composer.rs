@@ -35,26 +35,50 @@ pub trait Composer: Sized {
 
         let mut values: Vec<Self::Value> = vec![];
 
+        println!("sc: {}", sc);
+
         if sc.item.command.is_some() {
             return self.compose_wrapper(&sc, i, true).unwrap();
         }
 
+        let mut pad = true;
+        let mut skip_this = false;
+        let mut skip_next = false;
+
         for c in &sc.item.sql {
+            pad = true;
+            skip_this = skip_next;
+            skip_next = false;
+
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
                 Sql::Binding(b) => self.bind_values(b.item.name.to_string(), i),
                 Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true),
                 Sql::Ending(e) => {
+                    pad = false;
+
                     if child {
                         ("".to_string(), vec![])
                     }
                     else {
                         (e.to_string(), vec![])
                     }
-                },
+                }
                 Sql::DbObject(ft) => (ft.to_string(), vec![]),
                 Sql::Keyword(k) => (k.to_string(), vec![]),
             };
+
+            if sub_sql.len() == 0 {
+                continue;
+            }
+
+            if sub_sql == "," {
+                skip_this = true;
+            }
+
+            if !skip_this && pad && sql.len() > 0 {
+                sql.push(' ');
+            }
 
             sql.push_str(&sub_sql);
 
@@ -80,18 +104,20 @@ pub trait Composer: Sized {
                     name @ "count" => {
                         let mut out = SqlComposition::default();
 
-                        out.push_generated_literal("SELECT COUNT(", Some(name.into()));
+                        let mut select = String::from("SELECT COUNT(");
 
                         let columns = composition.item.column_list().unwrap();
 
                         if let Some(c) = columns {
-                            out.push_generated_literal(&c, Some(name.into()));
+                            select.push_str(&c);
                         }
                         else {
-                            out.push_generated_literal("1", Some(name.into()));
+                            select.push('1');
                         }
 
-                        out.push_generated_literal(") FROM ", Some(name.into()));
+                        select.push_str(") FROM ");
+
+                        out.push_generated_literal(&select, Some(name.into()));
 
                         for position in composition.item.of.iter() {
                             out.push_generated_literal("(", Some(name.into()));
@@ -166,7 +192,7 @@ pub trait Composer: Sized {
 
         for position in composition.item.of.iter() {
             if i > 0 {
-                out.push_generated_literal(" UNION ", Some("UNION".into()));
+                out.push_generated_literal("UNION ", Some("UNION".into()));
             }
 
             match composition.item.aliases.get(&position.item()) {

@@ -176,8 +176,8 @@ impl fmt::Display for SqlCompositionAlias {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ParsedItem<T: Debug + Default + PartialEq + Clone> {
-    pub item: T,
-    position: Position,
+    pub item:     T,
+    pub position: Position,
 }
 
 impl<T: Debug + Default + PartialEq + Clone> ParsedItem<T> {
@@ -405,7 +405,7 @@ pub enum Sql {
     Composition((ParsedItem<SqlComposition>, Vec<SqlCompositionAlias>)),
     Ending(ParsedItem<SqlEnding>),
     DbObject(ParsedItem<SqlDbObject>),
-    Keyword(ParsedItem<SqlKeyword>)
+    Keyword(ParsedItem<SqlKeyword>),
 }
 
 impl fmt::Display for Sql {
@@ -442,19 +442,22 @@ impl fmt::Display for SqlEnding {
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlDbObject {
-    pub object_name: String,
+    pub object_name:  String,
     pub object_alias: Option<String>,
 }
 
 impl SqlDbObject {
     pub fn new(name: String, alias: Option<String>) -> Result<Self> {
-        Ok(Self { object_name: name, object_alias: alias })
+        Ok(Self {
+            object_name:  name,
+            object_alias: alias,
+        })
     }
 }
 
 impl fmt::Display for SqlDbObject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FROM {}", self.object_name);
+        write!(f, "{}", self.object_name);
 
         if let Some(alias) = &self.object_alias {
             write!(f, " AS {}", alias)
@@ -478,10 +481,10 @@ impl SqlKeyword {
 
 impl fmt::Display for SqlKeyword {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        println!("keyword: {}", self.value);
         write!(f, "{}", self.value)
     }
 }
-
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct SqlLiteral {
@@ -500,7 +503,7 @@ impl SqlLiteral {
 
 impl fmt::Display for SqlLiteral {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.value)
+        write!(f, "{}", &self.value.trim_end_matches(" "))
     }
 }
 

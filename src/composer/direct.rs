@@ -123,7 +123,7 @@ mod tests {
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
         let expected_bound_sql = format!(
-            "INSERT INTO person (name, time_created, data) VALUES ('{}', '{}', {});",
+            "INSERT INTO person (name, time_created, data) VALUES ( '{}', '{}', {} );",
             "Steven", now_value, "NULL"
         );
 

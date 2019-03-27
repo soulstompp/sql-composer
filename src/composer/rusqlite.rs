@@ -6,12 +6,14 @@ use std::path::PathBuf;
 
 use super::{Composer, ComposerConfig};
 
+use crate::types::{SqlCompositionAlias};
+
 #[derive(Default)]
 struct RusqliteComposer<'a> {
     config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToSql>>>,
+    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
 impl<'a> RusqliteComposer<'a> {
@@ -71,7 +73,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
         &self.root_mock_values
     }
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>> {
+    fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
 
@@ -86,7 +88,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
 mod tests {
     use super::{Composer, RusqliteComposer};
 
-    use crate::types::{Span, SqlComposition};
+    use crate::types::{Span, SqlComposition, SqlCompositionAlias};
 
     use crate::parser::parse_template;
 
@@ -665,12 +667,12 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
-        let mut mock_values: HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
+        let mut mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
             HashMap::new();
 
         {
             let path_entry = mock_values
-                .entry(PathBuf::from("src/tests/values/include.tql"))
+                .entry(SqlCompositionAlias::Path("src/tests/values/include.tql".into()))
                 .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
@@ -741,12 +743,12 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
-        let mut mock_values: HashMap<PathBuf, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
+        let mut mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<std::string::String, &dyn ToSql>>> =
             HashMap::new();
 
         {
             let path_entry = mock_values
-                .entry(PathBuf::from("src/tests/values/double-include.tql"))
+                .entry(SqlCompositionAlias::Path("src/tests/values/double-include.tql".into()))
                 .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());

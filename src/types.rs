@@ -96,10 +96,10 @@ impl fmt::Display for ParsedSpan {
     }
 }
 
-#[derive(Debug, Default, Eq, Hash, PartialEq, Clone)]
-pub struct SqlCompositionAlias {
-    pub name: Option<String>,
-    pub path: Option<PathBuf>,
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
+pub enum SqlCompositionAlias {
+    Path(PathBuf),
+    DbObject(SqlDbObject),
 }
 
 impl SqlCompositionAlias {
@@ -122,55 +122,46 @@ impl SqlCompositionAlias {
             acc
         });
 
-        if is_path {
-            Ok(Self {
-                name: None,
-                path: Some(PathBuf::from(&s)),
-            })
-        }
-        else if is_name {
-            Ok(Self {
-                name: Some(s.to_string()),
-                path: None,
-            })
-        }
-        else {
-            //TODO: better error handling
-            panic!("invalid path");
-        }
+        Ok(SqlCompositionAlias::Path(PathBuf::from(&s)))
     }
 
     pub fn from_path(p: &Path) -> Self {
-        Self {
-            path: Some(p.into()),
-            name: None,
-        }
+        SqlCompositionAlias::Path(p.into())
     }
 
     pub fn path(&self) -> Option<PathBuf> {
         //! Returns the path as a PathBuf
-        match &self.path {
-            Some(p) => Some(p.to_path_buf()),
-            None => None,
+        if let SqlCompositionAlias::Path(p) = self {
+            Some(p.to_path_buf())
         }
+        else {
+            None
+        }
+    }
+}
+
+impl Default for SqlCompositionAlias {
+    fn default() -> Self {
+        //TODO: better default
+        SqlCompositionAlias::DbObject(
+            SqlDbObject {
+                object_name: "DUAL".to_string(),
+                object_alias: None
+            }
+        )
     }
 }
 
 impl fmt::Display for SqlCompositionAlias {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let name = match &self.name {
-            Some(n) => n,
-            None => "<None>",
-        };
-
-        write!(f, "name: {}", name)?;
-
-        let path = match &self.path {
-            Some(p) => p.to_string_lossy(),
-            None => "<None>".into(),
-        };
-
-        write!(f, ", path: {}", path)
+        match self {
+            SqlCompositionAlias::Path(p) => {
+                write!(f, ", {}", p.to_string_lossy())
+            },
+            SqlCompositionAlias::DbObject(dbo) =>  {
+                write!(f, ", {}", dbo)
+            },
+        }
     }
 }
 
@@ -291,7 +282,7 @@ impl SqlComposition {
         for parsed_alias in &self.of {
             let alias = &parsed_alias.item;
 
-            if let Some(path) = &alias.path {
+            if let Some(path) = &alias.path() {
                 self.aliases
                     .entry(alias.clone())
                     .or_insert(SqlComposition::from_path(path)?);
@@ -440,7 +431,7 @@ impl fmt::Display for SqlEnding {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Hash, Eq, PartialEq, Clone)]
 pub struct SqlDbObject {
     pub object_name:  String,
     pub object_alias: Option<String>,

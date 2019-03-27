@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod rusqlite;
 
 pub use super::parser::parse_template;
-use crate::types::{ParsedItem, Sql, SqlComposition};
+use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -117,23 +117,23 @@ pub trait Composer: Sized {
 
                         select.push_str(") FROM ");
 
-                        out.push_generated_literal(&select, Some(name.into()));
+                        out.push_generated_literal(&select, Some(name.into())).unwrap();
 
                         for position in composition.item.of.iter() {
-                            out.push_generated_literal("(", Some(name.into()));
+                            out.push_generated_literal("(", Some(name.into())).unwrap();
                             match composition.item.aliases.get(&position.item()) {
                                 Some(sc) => {
-                                    out.push_sub_comp(sc.clone());
+                                    out.push_sub_comp(sc.clone()).unwrap();
                                 }
                                 None => {
                                     panic!("no position found with position: {:?}", position);
                                 }
                             }
 
-                            out.push_generated_literal(") AS count_main", Some(name.into()));
+                            out.push_generated_literal(") AS count_main", Some(name.into())).unwrap();
                         }
 
-                        out.push_generated_end(Some(name.into()));
+                        out.push_generated_end(Some(name.into())).unwrap();
 
                         let item = ParsedItem::generated(out, Some("COUNT".into())).unwrap();
 
@@ -145,7 +145,7 @@ pub trait Composer: Sized {
                         out.item.command = None;
 
                         match &out.item.of[0].item().path() {
-                            Some(path) => match self.mock_values().get(path) {
+                            Some(path) => match self.mock_values().get(&SqlCompositionAlias::Path(path.into())) {
                                 Some(e) => Ok(self.mock_compose(
                                     &out.item.aliases.get(&out.item.of[0].item()).unwrap().item,
                                     e,
@@ -228,7 +228,7 @@ pub trait Composer: Sized {
 
     fn root_mock_values(&self) -> &Vec<BTreeMap<String, Self::Value>>;
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>>;
+    fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>;
 
     fn mock_compose(
         &self,

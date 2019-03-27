@@ -449,10 +449,7 @@ mod tests {
         let shift_line = shift_line.unwrap_or(0);
         let shift_offset = shift_offset.unwrap_or(0);
 
-        let item = SqlCompositionAlias {
-            name: None,
-            path: Some("src/tests/simple-template.tql".into()),
-        };
+        let item = SqlCompositionAlias::Path("src/tests/simple-template.tql".into());
 
         vec![build_parsed_item(
             item,
@@ -463,10 +460,7 @@ mod tests {
     }
 
     fn include_aliases() -> Vec<ParsedItem<SqlCompositionAlias>> {
-        let item = SqlCompositionAlias {
-            name: None,
-            path: Some("src/tests/include-template.tql".into()),
-        };
+        let item = SqlCompositionAlias::Path("src/tests/include-template.tql".into());
 
         vec![build_parsed_item(
             item,
@@ -764,19 +758,13 @@ mod tests {
                     ]),
                     of: vec![
                         build_parsed_item(
-                            SqlCompositionAlias {
-                                name: None,
-                                path: Some("src/tests/simple-template.tql".into()),
-                            },
+                            SqlCompositionAlias::Path("src/tests/simple-template.tql".into()),
                             None,
                             Some(30),
                             "src/tests/simple-template.tql",
                         ),
                         build_parsed_item(
-                            SqlCompositionAlias {
-                                name: None,
-                                path: Some("src/tests/include-template.tql".into()),
-                            },
+                            SqlCompositionAlias::Path("src/tests/include-template.tql".into()),
                             None,
                             Some(61),
                             "src/tests/include-template.tql",
@@ -803,10 +791,7 @@ mod tests {
                 command: Some(build_parsed_string("count", None, Some(1), "count")),
                 position: None,
                 of: vec![build_parsed_item(
-                    SqlCompositionAlias {
-                        name: None,
-                        path: Some("src/tests/simple-template.tql".into()),
-                    },
+                    SqlCompositionAlias::Path("src/tests/simple-template.tql".into()),
                     None,
                     Some(7),
                     "src/tests/simple-template.tql",

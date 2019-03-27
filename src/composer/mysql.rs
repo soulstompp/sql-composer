@@ -4,6 +4,8 @@ use mysql::prelude::ToValue;
 
 use super::{Composer, ComposerConfig};
 
+use crate::types::SqlCompositionAlias;
+
 use std::path::PathBuf;
 
 #[derive(Default)]
@@ -11,7 +13,7 @@ struct MysqlComposer<'a> {
     config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
-    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a ToValue>>>,
+    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToValue>>>,
 }
 
 impl<'a> MysqlComposer<'a> {
@@ -70,7 +72,7 @@ impl<'a> Composer for MysqlComposer<'a> {
         &self.root_mock_values
     }
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>> {
+    fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
 }
@@ -79,7 +81,7 @@ impl<'a> Composer for MysqlComposer<'a> {
 mod tests {
     use super::{Composer, MysqlComposer};
     use crate::parser::parse_template;
-    use crate::types::{ParsedItem, Span, SqlComposition};
+    use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias};
     use mysql::{from_row, Pool, Row};
 
     use std::collections::{BTreeMap, HashMap};
@@ -202,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bind_simple_template() {
+    fn test_mock_bind_simple_template() {
         let pool = setup_db();
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
@@ -592,13 +594,13 @@ mod tests {
             .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
         let mut mock_values: HashMap<
-            PathBuf,
+            SqlCompositionAlias,
             Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>>,
         > = HashMap::new();
 
         {
             let path_entry = mock_values
-                .entry(PathBuf::from("src/tests/values/include.tql"))
+                .entry(SqlCompositionAlias::Path("src/tests/values/include.tql".into()))
                 .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());
@@ -660,13 +662,13 @@ mod tests {
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
         let mut mock_values: HashMap<
-            PathBuf,
+            SqlCompositionAlias,
             Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>>,
         > = HashMap::new();
 
         {
             let path_entry = mock_values
-                .entry(PathBuf::from("src/tests/values/double-include.tql"))
+                .entry(SqlCompositionAlias::Path("src/tests/values/double-include.tql".into()))
                 .or_insert(Vec::new());
 
             path_entry.push(BTreeMap::new());

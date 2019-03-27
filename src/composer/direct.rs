@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::{Composer, ComposerConfig};
 
+use crate::types::SqlCompositionAlias;
+
 use crate::types::value::ToValue;
 
 use std::path::PathBuf;
@@ -11,7 +13,7 @@ struct DirectComposer<'a> {
     config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
-    mock_values:      HashMap<PathBuf, Vec<BTreeMap<String, &'a str>>>,
+    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
 }
 
 impl<'a> DirectComposer<'a> {
@@ -67,7 +69,7 @@ impl<'a> Composer for DirectComposer<'a> {
         &self.root_mock_values
     }
 
-    fn mock_values(&self) -> &HashMap<PathBuf, Vec<BTreeMap<String, Self::Value>>> {
+    fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
 

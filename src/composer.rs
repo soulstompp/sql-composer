@@ -5,7 +5,7 @@ pub mod postgres;
 pub mod rusqlite;
 
 pub use super::parser::parse_template;
-use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -64,7 +64,25 @@ pub trait Composer: Sized {
                         (e.to_string(), vec![])
                     }
                 }
-                Sql::DbObject(ft) => (ft.to_string(), vec![]),
+                Sql::DbObject(dbo) => {
+                    let dbo_alias = SqlCompositionAlias::DbObject(
+                        SqlDbObject::new(dbo.item.object_name.to_string(), None).unwrap(),
+                    );
+
+                    if let Some(mv) = self.mock_values().get(&dbo_alias) {
+                        let (mock_sql, mock_values) =
+                            self.mock_compose(&SqlComposition::default(), mv, i);
+
+                        //TODO: this should call the alias function on dbo_alias, which uses
+                        //object_alias but falls back to object_name
+                        let mock_sql = format!("( {} ) AS {}", mock_sql, dbo.item.object_name);
+
+                        (mock_sql, mock_values)
+                    }
+                    else {
+                        (dbo.to_string(), vec![])
+                    }
+                }
                 Sql::Keyword(k) => (k.to_string(), vec![]),
             };
 
@@ -117,7 +135,8 @@ pub trait Composer: Sized {
 
                         select.push_str(") FROM ");
 
-                        out.push_generated_literal(&select, Some(name.into())).unwrap();
+                        out.push_generated_literal(&select, Some(name.into()))
+                            .unwrap();
 
                         for position in composition.item.of.iter() {
                             out.push_generated_literal("(", Some(name.into())).unwrap();
@@ -130,7 +149,8 @@ pub trait Composer: Sized {
                                 }
                             }
 
-                            out.push_generated_literal(") AS count_main", Some(name.into())).unwrap();
+                            out.push_generated_literal(") AS count_main", Some(name.into()))
+                                .unwrap();
                         }
 
                         out.push_generated_end(Some(name.into())).unwrap();
@@ -145,7 +165,10 @@ pub trait Composer: Sized {
                         out.item.command = None;
 
                         match &out.item.of[0].item().path() {
-                            Some(path) => match self.mock_values().get(&SqlCompositionAlias::Path(path.into())) {
+                            Some(path) => match self
+                                .mock_values()
+                                .get(&SqlCompositionAlias::Path(path.into()))
+                            {
                                 Some(e) => Ok(self.mock_compose(
                                     &out.item.aliases.get(&out.item.of[0].item()).unwrap().item,
                                     e,

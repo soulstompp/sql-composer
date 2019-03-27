@@ -6,8 +6,6 @@ use crate::types::SqlCompositionAlias;
 
 use crate::types::value::ToValue;
 
-use std::path::PathBuf;
-
 #[derive(Default)]
 struct DirectComposer<'a> {
     config:           ComposerConfig,

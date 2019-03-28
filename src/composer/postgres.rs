@@ -219,7 +219,7 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&stmt.item, &mock_values, 0);
+            composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -282,7 +282,7 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&stmt.item, &mock_values, 0);
+            composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -356,7 +356,7 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&stmt.item, &mock_values, 0);
+            composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 

@@ -71,7 +71,7 @@ pub trait Composer: Sized {
 
                     if let Some(mv) = self.mock_values().get(&dbo_alias) {
                         let (mock_sql, mock_values) =
-                            self.mock_compose(&SqlComposition::default(), mv, i);
+                            self.mock_compose(mv, i);
 
                         //TODO: this should call the alias function on dbo_alias, which uses
                         //object_alias but falls back to object_name
@@ -170,7 +170,6 @@ pub trait Composer: Sized {
                                 .get(&SqlCompositionAlias::Path(path.into()))
                             {
                                 Some(e) => Ok(self.mock_compose(
-                                    &out.item.aliases.get(&out.item.of[0].item()).unwrap().item,
                                     e,
                                     offset,
                                 )),
@@ -215,12 +214,12 @@ pub trait Composer: Sized {
 
         for position in composition.item.of.iter() {
             if i > 0 {
-                out.push_generated_literal("UNION ", Some("UNION".into()));
+                out.push_generated_literal("UNION ", Some("UNION".into())).unwrap();
             }
 
             match composition.item.aliases.get(&position.item()) {
                 Some(sc) => {
-                    out.push_sub_comp(sc.clone());
+                    out.push_sub_comp(sc.clone()).unwrap();
                 }
                 None => {
                     panic!("no alias found with alias: {:?}", position.item());
@@ -230,7 +229,7 @@ pub trait Composer: Sized {
             i += 1;
         }
 
-        out.push_generated_end(Some("UNION".into()));
+        out.push_generated_end(Some("UNION".into())).unwrap();
 
         let item = ParsedItem::generated(out, Some("UNION".into())).unwrap();
 
@@ -255,7 +254,6 @@ pub trait Composer: Sized {
 
     fn mock_compose(
         &self,
-        _stmt: &SqlComposition,
         mock_values: &Vec<BTreeMap<String, Self::Value>>,
         offset: usize,
     ) -> (String, Vec<Self::Value>) {

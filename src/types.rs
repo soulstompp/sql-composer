@@ -85,11 +85,11 @@ impl ParsedSpan {
 
 impl fmt::Display for ParsedSpan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "character {}, line {}", self.line, self.offset);
+        write!(f, "character {}, line {}", self.line, self.offset)?;
 
         match &self.alias {
-            Some(a) => write!(f, " of {}:", a),
-            None => write!(f, ":"),
+            Some(a) => write!(f, " of {}:", a)?,
+            None => write!(f, ":")?,
         };
 
         write!(f, "{}", self.fragment)
@@ -314,6 +314,7 @@ impl SqlComposition {
     pub fn push_sub_comp(&mut self, value: ParsedItem<SqlComposition>) -> Result<()> {
         self.push_sql(Sql::Composition((value, vec![])))
     }
+
     pub fn push_generated_sub_comp(&mut self, value: SqlComposition) -> Result<()> {
         self.push_sql(Sql::Composition((
             ParsedItem::generated(value, None)?,
@@ -328,9 +329,7 @@ impl SqlComposition {
                 ..Default::default()
             },
             command,
-        )?));
-
-        Ok(())
+        )?))
     }
 
     pub fn push_generated_end(&mut self, command: Option<String>) -> Result<()> {
@@ -352,9 +351,7 @@ impl SqlComposition {
                         None,
                     )
                     .unwrap(),
-                ));
-
-                Ok(())
+                ))
             }
             None => Err(new_incomplete_composition_error(
                 Position::Generated(GeneratedSpan { command: None }),

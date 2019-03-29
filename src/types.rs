@@ -198,13 +198,15 @@ impl<T: fmt::Display + Debug + Default + PartialEq + Clone> fmt::Display for Par
 }
 
 //command - :(command [distinct, all] [column1, column2] of t1.tql, t2.tql)
-//-----------------------------------------------------------------------------
-// examples - :union([all] [distinct] [column1, column2 of] t1.sql [as ut1], t2.tql as [ut2])
-//            :distinct([distinct] [column1, column2 of] t1.sql [as ut1], t2.tql [as ut2])
-//            :except([distinct] [column1, column2 of] t1.sql [as ut1], t2.tql [as ut1])
-//            :expand([column1, column2 of] t1.sql [as ut1] [alias t3])
-//            :count([distinct] [column1, column2 of] t1.sql [as ut1])
-//            :checksum([column1, column3 of] t2.sql [as ut1])
+//----------------------------------|-------------------------------------------
+// examples -
+//
+//            :compose([distinct] [column1, column2 of] t1.sql)
+//            :count([distinct] [column1, column2 of] t1.sql)
+//            :expand([column1, column2 of] t1.sql)
+//            :except([distinct] [column1, column2 of] t1.sql, t2.tql)
+//            :intercept([distinct] [column1, column2 of] t1.sql, t2.tql)
+//            :union([all|distinct] [column1, column2 of] t1.sql, t2.tql)
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct SqlComposition {

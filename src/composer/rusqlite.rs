@@ -2,10 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::types::ToSql;
 
-
 use super::{Composer, ComposerConfig};
 
-use crate::types::{SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 #[derive(Default)]
 struct RusqliteComposer<'a> {
@@ -58,6 +57,24 @@ impl<'a> Composer for RusqliteComposer<'a> {
         };
 
         (sql, new_values)
+    }
+
+    fn compose_count_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
+        self.compose_count_default_command(composition, offset, child)
+    }
+    
+    fn compose_union_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
+        self.compose_union_default_command(composition, offset, child)
     }
 
     fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {

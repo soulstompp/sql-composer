@@ -4,7 +4,7 @@ use postgres::types::ToSql;
 
 use super::{Composer, ComposerConfig};
 
-use crate::types::{SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 #[derive(Default)]
 struct PostgresComposer<'a> {
@@ -58,6 +58,24 @@ impl<'a> Composer for PostgresComposer<'a> {
         };
 
         (sql, new_values)
+    }
+
+    fn compose_count_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
+        self.compose_count_default_command(composition, offset, child)
+    }
+
+    fn compose_union_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
+        self.compose_union_default_command(composition, offset, child)
     }
 
     fn get_values(&self, name: String) -> Option<&Vec<Self::Value>> {
@@ -218,8 +236,7 @@ mod tests {
         mock_values[0].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -281,8 +298,7 @@ mod tests {
         mock_values[1].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -355,8 +371,7 @@ mod tests {
         mock_values[2].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 

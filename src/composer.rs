@@ -35,10 +35,8 @@ pub trait Composer: Sized {
 
         let mut values: Vec<Self::Value> = vec![];
 
-        println!("sc: {}", sc);
-
         if sc.item.command.is_some() {
-            return self.compose_wrapper(&sc, i, true).unwrap();
+            return self.compose_command(&sc, i, true).unwrap();
         }
 
         let mut pad = true;
@@ -70,8 +68,7 @@ pub trait Composer: Sized {
                     );
 
                     if let Some(mv) = self.mock_values().get(&dbo_alias) {
-                        let (mock_sql, mock_values) =
-                            self.mock_compose(mv, i);
+                        let (mock_sql, mock_values) = self.mock_compose(mv, i);
 
                         //TODO: this should call the alias function on dbo_alias, which uses
                         //object_alias but falls back to object_name
@@ -110,7 +107,7 @@ pub trait Composer: Sized {
         (sql, values)
     }
 
-    fn compose_wrapper<'c>(
+    fn compose_command<'c>(
         &self,
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
@@ -119,46 +116,6 @@ pub trait Composer: Sized {
         match &composition.item.command {
             Some(s) => {
                 match s.item().to_lowercase().as_str() {
-                    name @ "count" => {
-                        let mut out = SqlComposition::default();
-
-                        let mut select = String::from("SELECT COUNT(");
-
-                        let columns = composition.item.column_list().unwrap();
-
-                        if let Some(c) = columns {
-                            select.push_str(&c);
-                        }
-                        else {
-                            select.push('1');
-                        }
-
-                        select.push_str(") FROM ");
-
-                        out.push_generated_literal(&select, Some(name.into()))
-                            .unwrap();
-
-                        for position in composition.item.of.iter() {
-                            out.push_generated_literal("(", Some(name.into())).unwrap();
-                            match composition.item.aliases.get(&position.item()) {
-                                Some(sc) => {
-                                    out.push_sub_comp(sc.clone()).unwrap();
-                                }
-                                None => {
-                                    panic!("no position found with position: {:?}", position);
-                                }
-                            }
-
-                            out.push_generated_literal(") AS count_main", Some(name.into()))
-                                .unwrap();
-                        }
-
-                        out.push_generated_end(Some(name.into())).unwrap();
-
-                        let item = ParsedItem::generated(out, Some("COUNT".into())).unwrap();
-
-                        Ok(self.compose_statement(&item, offset, child))
-                    }
                     "compose" => {
                         let mut out = composition.clone();
 
@@ -169,10 +126,7 @@ pub trait Composer: Sized {
                                 .mock_values()
                                 .get(&SqlCompositionAlias::Path(path.into()))
                             {
-                                Some(e) => Ok(self.mock_compose(
-                                    e,
-                                    offset,
-                                )),
+                                Some(e) => Ok(self.mock_compose(e, offset)),
                                 None => Ok(self.compose_statement(
                                     &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                     offset,
@@ -186,7 +140,8 @@ pub trait Composer: Sized {
                             )),
                         }
                     }
-                    "union" => self.union_compose(composition, offset, child),
+                    "count" => self.compose_count_command(composition, offset, child),
+                    "union" => self.compose_union_command(composition, offset, child),
                     // TODO: handle this error better
                     _ => panic!("unknown call"),
                 }
@@ -195,7 +150,68 @@ pub trait Composer: Sized {
         }
     }
 
-    fn union_compose(
+    fn compose_count_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()>;
+
+    fn compose_count_default_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
+        let mut out = SqlComposition::default();
+
+        let mut select = String::from("SELECT COUNT(");
+
+        let columns = composition.item.column_list().unwrap();
+
+        if let Some(c) = columns {
+            select.push_str(&c);
+        }
+        else {
+            select.push('1');
+        }
+
+        select.push_str(") FROM ");
+
+        out.push_generated_literal(&select, Some("COUNT".into()))
+            .unwrap();
+
+        for position in composition.item.of.iter() {
+            out.push_generated_literal("(", Some("COUNT".into()))
+                .unwrap();
+            match composition.item.aliases.get(&position.item()) {
+                Some(sc) => {
+                    out.push_sub_comp(sc.clone()).unwrap();
+                }
+                None => {
+                    panic!("no position found with position: {:?}", position);
+                }
+            }
+
+            out.push_generated_literal(") AS count_main", Some("COUNT".into()))
+                .unwrap();
+        }
+
+        out.push_generated_end(Some("COUNT".into())).unwrap();
+
+        let item = ParsedItem::generated(out, Some("COUNT".into())).unwrap();
+
+        Ok(self.compose_statement(&item, offset, child))
+    }
+
+    fn compose_union_command(
+        &self,
+        composition: &ParsedItem<SqlComposition>,
+        offset: usize,
+        child: bool,
+    ) -> Result<(String, Vec<Self::Value>), ()>;
+
+    fn compose_union_default_command(
         &self,
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
@@ -214,7 +230,8 @@ pub trait Composer: Sized {
 
         for position in composition.item.of.iter() {
             if i > 0 {
-                out.push_generated_literal("UNION ", Some("UNION".into())).unwrap();
+                out.push_generated_literal("UNION ", Some("UNION".into()))
+                    .unwrap();
             }
 
             match composition.item.aliases.get(&position.item()) {

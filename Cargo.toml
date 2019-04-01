@@ -1,14 +1,5 @@
-[package]
-name = "sql-composer"
-version = "0.1.0"
-authors = ["Kenny Flegal <soulstompp@gmail.com>"]
-edition = '2018'
-
-[dependencies]
-nom = "4.1.1"
-nom_locate = "0.3.1"
-time = "0.1.40"
-rusqlite = "0.15.0"
-postgres = "0.15.2"
-mysql = "14.1.1"
-chrono = "0.4"
+[workspace]
+members = [
+  "sql-composer",
+  "sql-composer-cli"  
+]

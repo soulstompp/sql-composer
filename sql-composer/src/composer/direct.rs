@@ -4,10 +4,15 @@ use super::{Composer, ComposerConfig};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::types::value::ToValue;
+use crate::types::value::{Rows, ToValue, Value};
+
+use serde::ser::Serializer;
+
+
+pub struct Connection();
 
 #[derive(Default)]
-struct DirectComposer<'a> {
+pub struct DirectComposer<'a> {
     config:           ComposerConfig,
     values:           HashMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
@@ -15,7 +20,7 @@ struct DirectComposer<'a> {
 }
 
 impl<'a> DirectComposer<'a> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             config: Self::config(),
             values: HashMap::new(),
@@ -26,6 +31,7 @@ impl<'a> DirectComposer<'a> {
 
 impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
+    type Connection = &'a Connection;
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
@@ -94,6 +100,14 @@ impl<'a> Composer for DirectComposer<'a> {
         self.values.get(&name)
     }
     */
+
+    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
+        unimplemented!("direct composer will never support execute!");
+    }
+    
+    fn from_uri(uri: &ToString) -> Result<Self, ()> {
+        unimplemented!("direct composer will never support from_uri!");
+    }
 }
 
 #[cfg(test)]

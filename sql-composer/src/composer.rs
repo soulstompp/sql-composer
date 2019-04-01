@@ -9,6 +9,22 @@ use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbOb
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
+use serde::Deserializer;
+
+use self::mysql::MysqlComposer;
+use self::postgres::PostgresComposer;
+use self::rusqlite::RusqliteComposer;
+
+use serde::ser::Serialize;
+
+use crate::types::value::{Rows, Value};
+
+pub enum ComposerDriver<'a> {
+    Mysql(MysqlComposer<'a>),
+    Postgres(PostgresComposer<'a>),
+    Rusqlite(RusqliteComposer<'a>),
+}
+
 #[derive(Default)]
 pub struct ComposerConfig {
     start: usize,
@@ -16,6 +32,7 @@ pub struct ComposerConfig {
 
 pub trait Composer: Sized {
     type Value: Copy;
+    type Connection;
 
     fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
         let item = ParsedItem::generated(s.clone(), None).unwrap();
@@ -328,5 +345,29 @@ pub trait Composer: Sized {
         }
 
         (sql, values)
+    }
+
+    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()>;
+
+    fn from_uri<'a>(uri: &ToString) -> Result<Self, ()>;
+}
+
+pub fn from_uri<'a>(uri: &ToString) -> Result<ComposerDriver<'a>, ()> {
+    let uri = uri.to_string();
+
+    if uri.starts_with("mysql://") {
+        Ok(ComposerDriver::Mysql(MysqlComposer::from_uri(&uri).unwrap()))
+    }
+    else if uri.starts_with("postgres://") {
+        Ok(ComposerDriver::Postgres(PostgresComposer::from_uri(&uri).unwrap()))
+    }
+    else if &uri == "sqlite://:memory:" {
+        Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+    }
+    else if uri.starts_with("sqlite://") {
+        Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+    }
+    else {
+        panic!("bad uri prefix: {}", uri);
     }
 }

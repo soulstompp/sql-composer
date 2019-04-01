@@ -1,0 +1,14 @@
+[package]
+name = "sql-composer-cli"
+version = "0.1.0"
+authors = ["Kenny Flegal <soulstompp@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "sqlc"
+path = "src/main.rs"
+
+[dependencies]
+quicli = "0.4.0"
+sql-composer={ path="../sql-composer" }
+structopt = "0.2.15"

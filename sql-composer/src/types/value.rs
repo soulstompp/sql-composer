@@ -150,3 +150,80 @@ from_nullable!(i64);
 from_nullable!(f64);
 from_nullable!(String);
 from_nullable!(Vec<u8>);
+
+pub struct
+Rows {
+   rows: Vec<Row>,
+   column_names: Vec<String>,
+}
+
+impl Rows {
+   pub fn new(cn: Vec<String>) -> Self {
+       Rows {
+           rows: vec![],
+           column_names: cn,
+       }
+   }
+
+   pub fn push_row(&mut self, r: Row) -> Result<(), ()> {
+       self.rows.push(r);
+
+       Ok(())
+   }
+
+   pub fn rows(&self) -> impl Iterator<Item = &Row> {
+       self.rows.iter()
+   }
+
+   pub fn grid(&self)  -> Vec<Vec<&Value>> {
+       self.rows().fold(Vec::new(), |mut acc, r| {
+           let row = r.columns().fold(Vec::new(), |mut racc, c| {
+               racc.push(&c.value);
+
+               racc
+           });
+
+           acc.push(row);
+
+           acc
+       })
+   }
+}
+
+pub struct Row {
+    columns: Vec<Column>
+}
+
+impl Row {
+   pub fn new(cn: Vec<String>) -> Self {
+       Row {
+           columns: vec![],
+       }
+   }
+
+   pub fn push_column(&mut self, c: Column) -> Result<(), ()> {
+       self.columns.push(c);
+
+       Ok(())
+   }
+
+   pub fn columns(&self) -> impl Iterator<Item = &Column> {
+       self.columns.iter()
+   }
+}
+
+pub struct Column {
+    value: Value,
+}
+
+impl Column {
+   pub fn new(v: Value) -> Self {
+       Column {
+           value: v,
+       }
+   }
+
+   pub fn value(&self) -> Value {
+       self.value.clone()
+   }
+}

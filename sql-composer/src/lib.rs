@@ -32,8 +32,8 @@ extern crate mysql;
 extern crate postgres;
 extern crate rusqlite;
 
-mod composer;
-mod error;
-mod parser;
+pub mod composer;
+pub mod error;
+pub mod parser;
 mod tests;
-mod types;
+pub mod types;

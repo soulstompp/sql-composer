@@ -15,7 +15,7 @@ use mysql::{from_row, Pool};
 pub struct MysqlComposer<'a> {
     config:           ComposerConfig,
     connection: Option<Pool>,
-    values:           HashMap<String, Vec<&'a ToValue>>,
+    values:           BTreeMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToValue>>>,
 }
@@ -25,7 +25,7 @@ impl<'a> MysqlComposer<'a> {
         Self {
             config: Self::config(),
             connection: Some(c),
-            values: HashMap::new(),
+            values: BTreeMap::new(),
             root_mock_values: vec![],
             mock_values: HashMap::new(),
         }

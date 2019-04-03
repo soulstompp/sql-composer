@@ -14,7 +14,7 @@ use crate::types::value::{Rows, Row, Column, Value};
 pub struct RusqliteComposer<'a> {
     config:           ComposerConfig,
     connection:       Option<Connection>,  
-    values:           HashMap<String, Vec<&'a ToSql>>,
+    values:           BTreeMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
 }
@@ -24,7 +24,7 @@ impl<'a> RusqliteComposer<'a> {
         Self {
             config: Self::config(),
             connection: Some(c),
-            values: HashMap::new(),
+            values: BTreeMap::new(),
             root_mock_values: vec![],
             mock_values: HashMap::new()
         }

@@ -15,7 +15,7 @@ use crate::types::value::{Rows, Value};
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
     config:           ComposerConfig,
-    values:           HashMap<String, Vec<&'a ToSql>>,
+    values:           BTreeMap<String, Vec<&'a ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
 }
@@ -24,7 +24,7 @@ impl<'a> PostgresComposer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
-            values:           HashMap::new(),
+            values:           BTreeMap::new(),
             root_mock_values: Vec::new(),
             mock_values:      HashMap::new(),
         }

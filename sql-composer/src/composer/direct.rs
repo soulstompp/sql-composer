@@ -14,7 +14,7 @@ pub struct Connection();
 #[derive(Default)]
 pub struct DirectComposer<'a> {
     config:           ComposerConfig,
-    values:           HashMap<String, Vec<&'a ToValue>>,
+    values:           BTreeMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
 }
@@ -23,7 +23,7 @@ impl<'a> DirectComposer<'a> {
     pub fn new() -> Self {
         Self {
             config: Self::config(),
-            values: HashMap::new(),
+            values: BTreeMap::new(),
             ..Default::default()
         }
     }

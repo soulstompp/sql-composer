@@ -2,8 +2,14 @@ use crate::types::{CompleteStr, LocatedSpan, ParsedItem, ParsedSpan, Position, S
                    SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding,
                    SqlKeyword, SqlLiteral};
 
-use nom::{multispace, IResult};
+use nom::{digit, double, multispace, IResult};
 use std::path::PathBuf;
+
+use crate::types::value::Value;
+
+use std::collections::{BTreeMap, HashMap};
+
+use std::str::FromStr;
 
 named!(opt_multispace(Span) -> Option<Span>,
     opt!(complete!(multispace))
@@ -422,13 +428,243 @@ named!(
     )
 );
 
+named!(
+    bind_value_text(Span) -> Value,
+    do_parse!(
+        char!('\'') >>
+        t: take_while1!(|c| {
+            match c {
+                '\'' => false,
+                ']' => false,
+                _ => true,
+            }
+        }) >>
+        char!('\'') >>
+        check_bind_value_ending >>
+        ({
+            println!("text string: {:?}", t);
+
+            Value::Text(t.to_string())
+        })
+    )
+);
+
+named!(
+    bind_value_integer(Span) -> Value,
+    do_parse!(
+        i: take_while1!(|c| {
+            match c {
+                '0'...'9' => true,
+                _ => false,
+            }
+        }) >>
+        check_bind_value_ending >>
+        ({
+            println!("int string: {:?}", i);
+
+            Value::Integer(i64::from_str(&i.fragment).expect("unable to parse integer found by bind_value_integer"))
+        })
+    )
+);
+
+named!(
+    bind_value_real(Span) -> Value,
+    do_parse!(
+        wi: take_while!(|c| {
+            match c {
+                '0'...'9' => true,
+                _ => false,
+            }
+        }) >>
+        //TODO: support comma decimal format?
+        char!('.') >>
+        fi: take_while!(|c| {
+            match c {
+                '0'...'9' => true,
+                _ => false,
+            }
+        }) >>
+        opt_multispace >>
+        check_bind_value_ending >>
+        opt_multispace >>
+        ({
+            let r = format!("{}.{}", wi.fragment, fi.fragment);
+
+            println!("real string: {:?}", r);
+
+            Value::Real(f64::from_str(&r).expect("unable to parse real value"))
+        })
+    )
+);
+
+named!(
+    check_bind_value_ending(Span) -> Span,
+    alt_complete!(
+        peek!(tag!(")")) |
+        peek!(tag!("]")) |
+        peek!(tag!(",")) |
+        eof!()
+    )
+);
+
+named!(
+    bind_value(Span) -> (Value),
+    do_parse!(
+        value: alt_complete!(
+            do_parse!(t: bind_value_text >> (t)) |
+            do_parse!(r: bind_value_real >> (r)) |
+            do_parse!(i: bind_value_integer >> (i))
+        ) >>
+        ({
+            println!("parsed value: {:?}", value);
+            value
+        })
+    )
+);
+
+named!(
+    bind_value_set(Span) -> Vec<Value>,
+    do_parse!(
+        start: opt!(alt_complete!(tag!("[") | tag!("("))) >>
+        list: fold_many1!(
+            do_parse!(
+                value: bind_value >>
+                opt_multispace >>
+                opt!(tag!(",")) >>
+                opt_multispace >>
+                (value)
+            ),
+            vec![], |mut acc: Vec<Value>, item: Value| {
+                println!("item: {:?}", item);
+                acc.push(item);
+                acc
+            }) >>
+        end: opt!(alt_complete!(tag!("]") | tag!(")"))) >>
+        ({
+            println!("value set: start: {:?}, list: {:?}, end: {:?}", start, list, end);
+
+            if let Some(s) = start {
+                if let Some(e) = end {
+                    if *s.fragment == "[" && *e.fragment != "]" {
+                        panic!("bind_value_set: no corresponding '[' for ']'");
+                    }
+                    else if *s.fragment == "(" && *e.fragment != ")" {
+                        panic!("bind_value_set: no corresponding ')' for '('");
+                    }
+                }
+                else {
+                    println!("bind_value_set: list: {:?}", list);
+                    panic!("bind_value_set: no matching end found for start: {:?}", s);
+                }
+            }
+            else {
+                if let Some(e) = end {
+                    panic!("bind_value_set: found ending {} with no starter", e.fragment);
+                }
+            }
+
+            list
+        })
+)
+);
+
+//"a:[a_value, aa_value, aaa_value], b:b_value, c: (c_value, cc_value, ccc_value), d: d_value";
+named!(
+    bind_value_kv_pair(Span) -> (Span, Vec<Value>),
+    do_parse!(
+        key: take_while_name_char >>
+        opt_multispace >>
+        tag!(":") >>
+        opt_multispace >>
+        values: bind_value_set >>
+        ({
+            println!("kv_pair k: {:?}, v: {:?}", key, values);
+            (key, values)
+        })
+    )
+);
+
+//"[a:[a_value, aa_value, aaa_value], b:b_value], [...]";
+named!(
+    bind_value_named_set(Span) -> BTreeMap<String, Vec<Value>>,
+    fold_many1!(
+        do_parse!(
+            start: opt!(alt_complete!(tag!("[") | tag!("("))) >>
+            opt_multispace >>
+            kv: separated_list!(
+                do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()),
+                bind_value_kv_pair
+            ) >>
+            opt_multispace >>
+            end: opt!(alt_complete!(tag!("]") | tag!(")"))) >>
+            opt_multispace >>
+            ((start, kv, end))
+        ),
+        BTreeMap::new(), |mut acc: BTreeMap<String, Vec<Value>>, items: (Option<Span>, Vec<(Span, Vec<Value>)>, Option<Span>)| {
+            let start = items.0;
+            let end = items.2;
+
+            println!("value set: start: {:?}, list: {:?}, end: {:?}", start, &items.1, end);
+
+            for (key, values) in items.1 {
+                let key = key.fragment.to_string();
+
+                println!("key: {}, v: {:?}", key, &values);
+                let entry = acc.entry(key).or_insert(vec![]);
+
+                for v in values {
+                    entry.push(v);
+                }
+            }
+
+            if let Some(s) = start {
+                if let Some(e) = end {
+                    if *s.fragment == "[" && *e.fragment != "]" {
+                        panic!("bind_value_named_set: no corresponding '['for ']'");
+                    }
+                    else if *s.fragment == "(" && *e.fragment != ")" {
+                        panic!("bind_value_named_set: no corresponding ')'for '('");
+                    }
+                }
+                else {
+                    panic!("bind_value_named_set: no matching end found for start: {:?}", s);
+                }
+            }
+            else {
+                if let Some(e) = end {
+                    panic!("bind_value_named_set: found ending {} with no starter", e.fragment);
+                }
+            }
+
+            acc
+        }
+    )
+);
+
+named!(
+    bind_value_named_sets(Span) -> Vec<BTreeMap<String, Vec<Value>>>,
+    do_parse!(
+        values: separated_list!(
+            do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()),
+            bind_value_named_set
+        ) >>
+        (
+            values
+        )
+    )
+);
+
 #[cfg(test)]
 mod tests {
-    use super::{column_list, db_object, db_object_alias_sql, parse_bindvar, parse_composer_macro,
+    use super::{bind_value_named_set, bind_value_named_sets, bind_value_set, column_list,
+                db_object, db_object_alias_sql, parse_bindvar, parse_composer_macro,
                 parse_quoted_bindvar, parse_sql, parse_sql_end, parse_template};
     use crate::types::{ParsedItem, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias,
                        SqlDbObject, SqlEnding, SqlLiteral};
-    use std::collections::HashMap;
+
+    use crate::types::value::Value;
+
+    use std::collections::{BTreeMap, HashMap};
     use std::path::{Path, PathBuf};
 
     use crate::tests::{build_parsed_binding_item, build_parsed_db_object,
@@ -974,4 +1210,122 @@ mod tests {
         db_object(Span::new(input.into()))
             .expect_err(&format!("expected error from parsing {}", input));
     }
+
+    fn build_expected_bind_values() -> BTreeMap<String, Vec<Value>> {
+        let mut expected_values: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+
+        expected_values.insert(
+            "a".into(),
+            vec![
+                Value::Text("a".into()),
+                Value::Text("aa".into()),
+                Value::Text("aaa".into()),
+            ],
+        );
+
+        expected_values.insert("b".into(), vec![Value::Text("b".into())]);
+
+        expected_values.insert(
+            "c".into(),
+            vec![
+                Value::Integer(2),
+                Value::Real(2.25),
+                Value::Text("a".into()),
+            ],
+        );
+
+        expected_values.insert("d".into(), vec![Value::Integer(2)]);
+
+        expected_values.insert("e".into(), vec![Value::Real(2.234566)]);
+
+        expected_values
+    }
+
+    #[test]
+    fn test_bind_value_set() {
+        let input = "['a', 'aa', 'aaa']";
+
+        let (remaining, output) = bind_value_set(Span::new(CompleteStr(input))).unwrap();
+
+        let expected_output = vec![
+            Value::Text("a".into()),
+            Value::Text("aa".into()),
+            Value::Text("aaa".into()),
+        ];
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(*remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    fn test_bind_single_undelimited_value_set() {
+        let input = "'a'";
+
+        let (remaining, output) = bind_value_set(Span::new(CompleteStr(input))).unwrap();
+
+        let expected_output = vec![Value::Text("a".into())];
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(*remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    fn test_bind_value_named_set() {
+        //TODO: this should work but "single" values chokes up the parser
+        //TOOD: doesn't like spaces between keys still either
+        //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
+        let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
+
+        println!("from input: {}", input);
+
+        let (remaining, output) = bind_value_named_set(Span::new(CompleteStr(input))).unwrap();
+
+        let expected_output = build_expected_bind_values();
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(*remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    fn test_bind_value_named_sets() {
+        //TODO: this should work but "single" values chokes up the parser
+        //TOOD: doesn't like spaces between keys still either
+        //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a: ['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
+        let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]], [a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
+
+        println!("from input: {}", input);
+
+        let (remaining, output) = bind_value_named_sets(Span::new(CompleteStr(input))).unwrap();
+
+        let expected_output = vec![build_expected_bind_values(), build_expected_bind_values()];
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(*remaining.fragment, "", "nothing remaining");
+    }
+
+    /*
+    #[test]
+    fn test_bind_path_alias_name_value_sets() {
+        let input = "t1.tql: [[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]], t2.tql: [[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]]";
+
+        let (remaining, output) = bind_path_alias_name_value_sets(CompleteStr(input)).unwrap();
+
+        let expected_values = build_expected_bind_values();
+        let mut expected_output: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Vec<Value>>>> =
+            HashMap::new();
+
+        expected_output.insert(
+            SqlCompositionAlias::Path("t1.tql".into()),
+            vec![expected_values.clone(), expected_values.clone()],
+            );
+
+        expected_output.insert(
+            SqlCompositionAlias::Path("t2.tql".into()),
+            vec![expected_values.clone(), expected_values.clone()],
+            );
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(*remaining, "", "nothing remaining");
+    }
+    */
 }

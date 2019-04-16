@@ -3,7 +3,7 @@ use structopt::StructOpt;
 
 
 // use sql_composer::composer::rusqlite::RusqliteComposer;
-use sql_composer::types::SqlComposition;
+use sql_composer::types::{SqlComposition};
 use sql_composer::composer::{from_uri, ComposerDriver, Composer};
 
 #[derive(Debug, StructOpt)]

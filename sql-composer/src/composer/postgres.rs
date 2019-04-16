@@ -9,7 +9,7 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Value};
+use crate::types::value::{Rows, Value, ToValue};
     
 
 #[derive(Default)]
@@ -31,9 +31,14 @@ impl<'a> PostgresComposer<'a> {
     }
 }
 
+
 impl<'a> Composer for PostgresComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
     type Connection = Connection;
+
+    fn connection(uri: String) -> Result<Self::Connection, ()> {
+        unimplemented!("haven't made a connection() yet");
+    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
@@ -111,9 +116,11 @@ impl<'a> Composer for PostgresComposer<'a> {
         unimplemented!("can't support this yet!");
     }
     
-    fn from_uri(uri: &ToString) -> Result<Self, ()> {
+    /*
+    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
         unimplemented!("not here yet");
     }
+    */
 }
 
 #[cfg(test)]

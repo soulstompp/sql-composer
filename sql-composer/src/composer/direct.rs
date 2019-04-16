@@ -29,9 +29,14 @@ impl<'a> DirectComposer<'a> {
     }
 }
 
+
 impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
     type Connection = &'a Connection;
+
+    fn connection(uri: String) -> Result<Self::Connection, ()> {
+        unimplemented!("haven't made a connection() yet");
+    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
@@ -105,9 +110,11 @@ impl<'a> Composer for DirectComposer<'a> {
         unimplemented!("direct composer will never support execute!");
     }
     
-    fn from_uri(uri: &ToString) -> Result<Self, ()> {
-        unimplemented!("direct composer will never support from_uri!");
+    /*
+    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
+        unimplemented!("not here yet");
     }
+    */
 }
 
 #[cfg(test)]
@@ -174,5 +181,4 @@ mod tests {
 
     #[test]
     fn test_union_command() {}
-
 }

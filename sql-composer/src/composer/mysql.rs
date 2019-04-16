@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::prelude::ToValue;
+use mysql::prelude::{ToValue};
 
 use super::{Composer, ComposerConfig};
 
@@ -8,7 +8,7 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Value};
+use crate::types::value::{Rows, Value, ToValue as SelfToValue};
     
 use mysql::{from_row, Pool};
 
@@ -35,6 +35,10 @@ impl<'a> MysqlComposer<'a> {
 impl<'a> Composer for MysqlComposer<'a> {
     type Value = &'a (dyn ToValue + 'a);
     type Connection = Pool;
+
+    fn connection(uri: String) -> Result<Self::Connection, ()> {
+        unimplemented!("haven't made a connection() yet");
+    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
@@ -106,9 +110,15 @@ impl<'a> Composer for MysqlComposer<'a> {
         unimplemented!("can't support this yet!");
     }
     
+    /*
     fn from_uri(uri: &ToString) -> Result<Self, ()> {
         unimplemented!("not here yet");
     }
+
+    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
+        unimplemented!("not here yet");
+    }
+    */
 }
 
 #[cfg(test)]

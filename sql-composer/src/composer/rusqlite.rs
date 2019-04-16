@@ -1,29 +1,46 @@
 use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::{Connection, NO_PARAMS, Rows as DriverRows};
-use rusqlite::types::{ToSql, ValueRef};
+use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
+
+pub use rusqlite::types::{Null, ToSql}; 
 
 use super::{Composer, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use crate::types::{CompleteStr, ParsedItem, Span, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Row, Column, Value};
+use crate::types::value::{Rows, Row, Column, Value, ToValue};
+
+use crate::parser::{parse_template, bind_value_named_set};
+
+use std::convert::From;
+
+impl ToSql for Value {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        match self {
+            Value::Text(t) => Ok(ToSqlOutput::from(t.as_str())),
+            Value::Integer(i) => Ok(ToSqlOutput::from(*i)),
+            Value::Real(r) => Ok(ToSqlOutput::from(*r)),
+            _ => unimplemented!("unsupported type")
+        }
+    }
+}
 
 pub struct RusqliteComposer<'a> {
-    config:           ComposerConfig,
-    connection:       Option<Connection>,  
-    values:           BTreeMap<String, Vec<&'a ToSql>>,
-    root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
+    pub config:           ComposerConfig,
+    pub connection:       Option<Connection>,  
+    pub values:           BTreeMap<String, Vec<&'a ToSql>>,
+    pub root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
+    pub mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
 }
 
 impl<'a> RusqliteComposer<'a> {
-    pub fn new(c: Connection) -> Self {
+    pub fn new() -> Self {
         Self {
             config: Self::config(),
-            connection: Some(c),
+            connection: None,
             values: BTreeMap::new(),
             root_mock_values: vec![],
             mock_values: HashMap::new()
@@ -34,6 +51,10 @@ impl<'a> RusqliteComposer<'a> {
 impl<'a> Composer for RusqliteComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
     type Connection = Connection;
+
+    fn connection(uri: String) -> Result<Self::Connection, ()> {
+        Ok(Connection::open_in_memory().unwrap())
+    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
@@ -147,13 +168,6 @@ impl<'a> Composer for RusqliteComposer<'a> {
             panic!("unable to query without connection!");
         }
     }
-
-    fn from_uri(uri: &ToString) -> Result<Self, ()> {
-        //TODO: use URI properly
-        let conn = Connection::open_in_memory().unwrap();
-    
-        Ok(Self::new(conn))
-    }
 }
 
 #[cfg(test)]
@@ -213,13 +227,26 @@ mod tests {
         println!("remaining: {}", remaining.to_string());
         assert_eq!(*remaining.fragment, "", "nothing remaining");
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        /*
+        let mut composer = ComposerBuilder::default();
 
-        composer.values.insert("name".into(), vec![&person.name]);
-        composer
-            .values
-            .insert("time_created".into(), vec![&person.time_created]);
-        composer.values.insert("data".into(), vec![&person.data]);
+        composer.uri("sqlite://:memory")
+            .bind("name".into(), vec![&person.name])
+            .bind("time_created".into(), vec![&person.time_created])
+            .bind("data".into(), vec![&person.data]);
+
+        composer = composer.build();
+        */
+
+                let mut composer = RusqliteComposer::new();
+         
+                composer.values.insert("name".into(), vec![&person.name]);
+                composer
+                        .values
+                        .insert("time_created".into(), vec![&person.time_created]);
+                composer.values.insert("data".into(), vec![&person.data]);
+
+
 
         let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
 
@@ -243,7 +270,7 @@ mod tests {
 
         let expected_bound_sql = "SELECT id, name, time_created, data FROM person WHERE name = ?1 AND time_created = ?2 AND name = ?3 AND time_created = ?4";
 
-        assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
+        assert_eq!(&bound_sql, expected_bound_sql, "select multi-use bindings");
 
         let mut stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -291,7 +318,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -364,7 +391,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -448,7 +475,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/double-include.tql").unwrap();
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer =  RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -545,7 +572,7 @@ mod tests {
         ];
 
         println!("setup composer");
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -604,7 +631,7 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 ) AS count_main";
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -656,7 +683,7 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 UNION SELECT ?13 AS col_1, ?14 AS col_2, ?15 AS col_3, ?16 AS col_4 UNION ALL SELECT ?17 AS col_1, ?18 AS col_2, ?19 AS col_3, ?20 AS col_4 UNION SELECT ?21 AS col_1, ?22 AS col_2, ?23 AS col_3, ?24 AS col_4 UNION ALL SELECT ?25 AS col_1, ?26 AS col_2, ?27 AS col_3, ?28 AS col_4 UNION ALL SELECT ?29 AS col_1, ?30 AS col_2, ?31 AS col_3, ?32 AS col_4";
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -723,7 +750,7 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -803,7 +830,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -895,7 +922,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = RusqliteComposer::new(Connection::open_in_memory().unwrap());
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);

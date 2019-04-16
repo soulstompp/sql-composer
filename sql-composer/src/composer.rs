@@ -4,8 +4,8 @@ pub mod mysql;
 pub mod postgres;
 pub mod rusqlite;
 
-pub use super::parser::parse_template;
-use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
+pub use crate::parser::{parse_template, bind_value_named_set};
+use crate::types::{CompleteStr, ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ use serde::Deserializer;
 
 use self::mysql::MysqlComposer;
 use self::postgres::PostgresComposer;
-use self::rusqlite::RusqliteComposer;
+use self::rusqlite::{RusqliteComposer, ToSql};
 
 use serde::ser::Serialize;
 
@@ -33,6 +33,8 @@ pub struct ComposerConfig {
 pub trait Composer: Sized {
     type Value: Copy;
     type Connection;
+
+    fn connection(uri: String) -> Result<Self::Connection, ()>;
 
     fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
         let item = ParsedItem::generated(s.clone(), None).unwrap();
@@ -349,10 +351,23 @@ pub trait Composer: Sized {
 
     fn query(&self, sc: &SqlComposition) -> Result<Rows, ()>;
 
-    fn from_uri<'a>(uri: &ToString) -> Result<Self, ()>;
+    /*
+    fn set_bind_values(&mut self, s: &str) -> Result<(), ()> {
+        let (remainding, mut bvs) = bind_value_named_set(Span::new(CompleteStr(s))).unwrap();
+
+        self.set_parsed_bind_values(bvs);
+
+        Ok(())
+    }
+    */
+
+    // fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()>;
 }
 
+
 pub fn from_uri<'a>(uri: &ToString) -> Result<ComposerDriver<'a>, ()> {
+    panic!("going away by next commit");
+    /*
     let uri = uri.to_string();
 
     if uri.starts_with("mysql://") {
@@ -369,5 +384,96 @@ pub fn from_uri<'a>(uri: &ToString) -> Result<ComposerDriver<'a>, ()> {
     }
     else {
         panic!("bad uri prefix: {}", uri);
+    }
+    */
+}
+
+struct ComposerBuilder {
+    uri: Option<String>,
+    values: BTreeMap<String, Vec<Value>>,
+    root_mock_values: Vec<BTreeMap<String, Value>>,
+    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Value>>>,
+}
+
+impl Default for ComposerBuilder {
+    fn default() -> ComposerBuilder {
+        ComposerBuilder {
+            uri: None,
+            values: BTreeMap::new(),
+            root_mock_values: vec![],
+            mock_values: HashMap::new()
+        }
+    }
+}
+
+impl ComposerBuilder {
+    fn uri(&mut self, url: &str) -> &mut Self {
+        self.uri = Some(url.to_string());
+
+        self
+    }
+
+    fn bind(&mut self, name: &str, values: Vec<Value>) -> &mut Self {
+        let entry = self.values.entry(name.to_string()).or_insert(vec![]);
+        *entry = values;
+
+        self
+    }
+
+    pub fn build(&self) -> Result<ComposerDriver<'_>, ()> {
+        if let Some(uri) = &self.uri {
+            if uri.starts_with("mysql://") {
+                unimplemented!("not ready yet");
+                /*
+                Ok(ComposerDriver::Mysql(
+                        MysqlComposer {
+                            connection: uri,
+                            values: self.build_values_vec(),
+                            root_mock_values: vec![],
+                            mock_values: HashMap::new(),
+                        }
+                ))
+                */
+            }
+            else if uri.starts_with("postgres://") {
+                //Ok(ComposerDriver::Postgres(PostgresComposer::new(&uri).unwrap()))
+                unimplemented!("not ready yet");
+            }
+            else if uri.as_str() == "sqlite://:memory:" {
+                //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+                unimplemented!("not ready yet");
+            }
+            else if uri.starts_with("sqlite://") {
+                //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+                Ok(ComposerDriver::Rusqlite(
+                        RusqliteComposer {
+                            config: RusqliteComposer::config(),
+                            connection: Some(RusqliteComposer::connection(uri.to_string()).unwrap()),
+                            values: self.values.iter().fold(BTreeMap::new(), |mut acc, (k, vv)| {
+                                let e = acc.entry(k.to_string()).or_insert(vec![]);
+
+                                *e = vv.iter().map(|v| 
+                                                   match v{
+                                                       Value::Text(t) => t as &rusqlite::ToSql,
+                                                       Value::Real(r) => r as &rusqlite::ToSql,
+                                                       Value::Integer(i) => i as &rusqlite::ToSql,
+                                                       _ => unimplemented!("don't know what to do yet!"),
+                                                   }
+                                ).collect();
+
+                                acc
+                            }),
+                            root_mock_values: vec![],
+                            mock_values: HashMap::new(),
+                        }
+                ))
+            }
+            else {
+                panic!("bad uri prefix: {}", uri);
+            }
+        }
+        else {
+            unimplemented!("building without uri currently unsupported");
+        }
     }
 }

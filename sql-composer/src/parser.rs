@@ -586,7 +586,7 @@ named!(
 
 //"[a:[a_value, aa_value, aaa_value], b:b_value], [...]";
 named!(
-    bind_value_named_set(Span) -> BTreeMap<String, Vec<Value>>,
+    pub bind_value_named_set(Span) -> BTreeMap<String, Vec<Value>>,
     fold_many1!(
         do_parse!(
             start: opt!(alt_complete!(tag!("[") | tag!("("))) >>

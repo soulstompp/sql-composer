@@ -46,9 +46,7 @@ enum Cli {
 }
 
 /*
-target/debug/sqlc fetch --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind a:a_value;b:b_value;c:c_value;d:d_value
---mock-table table [a:a_value;b:b_value;c:c_value;d:d_value], [a:a_value;b:b_value;c:c_value;d:d_value]
---mock-path ./path.tmpl [a:a_value;b:b_value;c:c_value;d:d_value], [a:a_value;b:b_value;c:c_value;d:d_value]
+../target/debug/sqlc query --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
 */
 fn main() -> CliResult {
     let args = Cli::from_args();
@@ -71,19 +69,13 @@ fn parse(args: QueryArgs) -> CliResult {
 
     let comp = SqlComposition::from_str(&args.path);
 
-    println!("{:?}", comp);
-
     Ok(())
 }
 
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
 
-    println!("args.bind: {:?}", args.bind);
-    println!("path: {}", args.path);
     let comp = SqlComposition::from_path_name(&args.path).unwrap();
-
-    println!("comp: {:?}", comp);
 
     let uri = args.uri;
 
@@ -92,7 +84,6 @@ fn query(args: QueryArgs) -> CliResult {
     builder.uri(&uri);
 
     if let Some(b) = args.bind {
-        println!("got bind args");
         builder.bind_named_set(&b).expect(&format!("unable to bind named set: {}", b));
     }
 

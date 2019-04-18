@@ -128,25 +128,18 @@ impl<'a> Composer for RusqliteComposer<'a> {
     }
     */
 
-
     fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
-        let (bound_sql, bindings) = self.compose(&sc);
-
         if let Some(conn) = &self.connection {
+            let (bound_sql, bindings) = self.compose(&sc);
+
             let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
-            println!("prepared: {:?}", prep_stmt);
+            let mut rows = Rows::new(vec![]);
 
-            let rows = Rows::new(vec![]);
-
-            prep_stmt.query_map(&bindings, |driver_row| {
-                println!("driver row found");
-
+            let driver_rows = prep_stmt.query_map(&bindings, |driver_row| {
                 (0..driver_row.column_count()).fold(Ok(Row::new(vec![])), |acc, i| {
                     if let Ok(mut acc) = acc {
                         let raw = driver_row.get_raw(i);
-
-                        println!("i: {}", i);
 
                         let v = match raw {
                             ValueRef::Null => Value::Null,
@@ -170,7 +163,9 @@ impl<'a> Composer for RusqliteComposer<'a> {
             })
             .unwrap();
 
-            println!("no more rows!");
+            for driver_row in driver_rows {
+                rows.push_row(driver_row.unwrap());
+            }
 
             Ok(rows)
         }

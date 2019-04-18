@@ -4,7 +4,7 @@ use structopt::StructOpt;
 
 // use sql_composer::composer::rusqlite::RusqliteComposer;
 use sql_composer::types::{SqlComposition};
-use sql_composer::composer::{from_uri, ComposerDriver, Composer};
+use sql_composer::composer::{Composer, ComposerBuilder, ComposerDriver};
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -18,7 +18,7 @@ struct QueryArgs {
     path: String,
     /// a comma seperated list of key:value pairs
     #[structopt(long = "bind", short = "b")]
-    bind: String,
+    bind: Option<String>,
     /// values to use in place of a path, made up of a comma seperated list of [] containing key:value pairs
     #[structopt(long = "mock-path")]
     mock_path: Vec<String>,
@@ -46,7 +46,7 @@ enum Cli {
 }
 
 /*
-target/debug/sqlc fetch --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind a:a_value;b:b_value;c:c_value;d:d_value 
+target/debug/sqlc fetch --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind a:a_value;b:b_value;c:c_value;d:d_value
 --mock-table table [a:a_value;b:b_value;c:c_value;d:d_value], [a:a_value;b:b_value;c:c_value;d:d_value]
 --mock-path ./path.tmpl [a:a_value;b:b_value;c:c_value;d:d_value], [a:a_value;b:b_value;c:c_value;d:d_value]
 */
@@ -54,7 +54,7 @@ fn main() -> CliResult {
     let args = Cli::from_args();
 
     match args {
-        Cli::Query(r) => { 
+        Cli::Query(r) => {
             query(r)
         },
     }
@@ -79,32 +79,37 @@ fn parse(args: QueryArgs) -> CliResult {
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
 
-    let uri = args.uri;
-
-    let driver = from_uri(&uri).expect(&format!("bad uri in fetch: {}", uri)); 
-
+    println!("args.bind: {:?}", args.bind);
     println!("path: {}", args.path);
     let comp = SqlComposition::from_path_name(&args.path).unwrap();
 
-    match driver {
-        ComposerDriver::Rusqlite(c) => {
-            let rows = c.query(&comp.item).unwrap();
+    println!("comp: {:?}", comp);
 
-            Ok(())
-        },
-        ComposerDriver::Mysql(c) => {
-            let rows = c.query(&comp.item).unwrap();
+    let uri = args.uri;
 
-            unimplemented!("haven't gotten here yet");
-            
-            Ok(())
-        },
-        ComposerDriver::Postgres(c) => {
-            let rows = c.query(&comp.item).unwrap();
+    let mut builder = ComposerBuilder::default();
 
-            unimplemented!("haven't gotten here yet");
-    
-            Ok(())
-        }
+    builder.uri(&uri);
+
+    if let Some(b) = args.bind {
+        println!("got bind args");
+        builder.bind_named_set(&b).expect(&format!("unable to bind named set: {}", b));
     }
+
+    let driver = builder.build().expect("unable to build composer");
+
+    match driver {
+        ComposerDriver::Rusqlite(c) =>{
+            let rows = c.query(&comp.item).expect("could run query");
+
+
+            for row in rows.rows() {
+                println!("row: {:?}", row);
+            }
+        },
+        _ => panic!("unsupported driver")
+    };
+
+
+    Ok(())
 }

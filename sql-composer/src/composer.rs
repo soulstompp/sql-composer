@@ -351,44 +351,9 @@ pub trait Composer: Sized {
 
     fn query(&self, sc: &SqlComposition) -> Result<Rows, ()>;
 
-    /*
-    fn set_bind_values(&mut self, s: &str) -> Result<(), ()> {
-        let (remainding, mut bvs) = bind_value_named_set(Span::new(CompleteStr(s))).unwrap();
-
-        self.set_parsed_bind_values(bvs);
-
-        Ok(())
-    }
-    */
-
-    // fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()>;
 }
 
-
-pub fn from_uri<'a>(uri: &ToString) -> Result<ComposerDriver<'a>, ()> {
-    panic!("going away by next commit");
-    /*
-    let uri = uri.to_string();
-
-    if uri.starts_with("mysql://") {
-        Ok(ComposerDriver::Mysql(MysqlComposer::from_uri(&uri).unwrap()))
-    }
-    else if uri.starts_with("postgres://") {
-        Ok(ComposerDriver::Postgres(PostgresComposer::from_uri(&uri).unwrap()))
-    }
-    else if &uri == "sqlite://:memory:" {
-        Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
-    }
-    else if uri.starts_with("sqlite://") {
-        Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
-    }
-    else {
-        panic!("bad uri prefix: {}", uri);
-    }
-    */
-}
-
-struct ComposerBuilder {
+pub struct ComposerBuilder {
     uri: Option<String>,
     values: BTreeMap<String, Vec<Value>>,
     root_mock_values: Vec<BTreeMap<String, Value>>,
@@ -407,18 +372,32 @@ impl Default for ComposerBuilder {
 }
 
 impl ComposerBuilder {
-    fn uri(&mut self, url: &str) -> &mut Self {
+    pub fn uri(&mut self, url: &str) -> &mut Self {
         self.uri = Some(url.to_string());
 
         self
     }
 
-    fn bind(&mut self, name: &str, values: Vec<Value>) -> &mut Self {
+    pub fn bind(&mut self, name: &str, values: Vec<Value>) -> &mut Self {
         let entry = self.values.entry(name.to_string()).or_insert(vec![]);
         *entry = values;
 
         self
     }
+
+    pub fn bind_named_set(&mut self, s: &str) -> Result<(), ()> {
+        let (remaining, bvs) = bind_value_named_set(Span::new(CompleteStr(s))).unwrap();
+
+        println!("remaining: {:?}, bvs: {:?}", remaining, bvs);
+
+        for (key, values) in bvs {
+            let entry = self.values.entry(key).or_insert(vec![]);
+            *entry = values;
+        }
+
+        Ok(())
+    }
+
 
     pub fn build(&self) -> Result<ComposerDriver<'_>, ()> {
         if let Some(uri) = &self.uri {
@@ -441,10 +420,7 @@ impl ComposerBuilder {
             }
             else if uri.as_str() == "sqlite://:memory:" {
                 //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
-                unimplemented!("not ready yet");
-            }
-            else if uri.starts_with("sqlite://") {
-                //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+                println!("values to bind: {:?}\n", self.values);
                 Ok(ComposerDriver::Rusqlite(
                         RusqliteComposer {
                             config: RusqliteComposer::config(),
@@ -452,7 +428,7 @@ impl ComposerBuilder {
                             values: self.values.iter().fold(BTreeMap::new(), |mut acc, (k, vv)| {
                                 let e = acc.entry(k.to_string()).or_insert(vec![]);
 
-                                *e = vv.iter().map(|v| 
+                                *e = vv.iter().map(|v|
                                                    match v{
                                                        Value::Text(t) => t as &rusqlite::ToSql,
                                                        Value::Real(r) => r as &rusqlite::ToSql,
@@ -468,6 +444,10 @@ impl ComposerBuilder {
                         }
                 ))
             }
+            else if uri.starts_with("sqlite://") {
+                unimplemented!("not ready yet");
+                //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+            }
             else {
                 panic!("bad uri prefix: {}", uri);
             }
@@ -476,4 +456,6 @@ impl ComposerBuilder {
             unimplemented!("building without uri currently unsupported");
         }
     }
+
+    // fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()>;
 }

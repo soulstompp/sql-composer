@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use rusqlite::{Connection, NO_PARAMS, Rows as DriverRows};
 use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
 
-pub use rusqlite::types::{Null, ToSql}; 
+pub use rusqlite::types::{Null, ToSql};
 
 use super::{Composer, ComposerConfig};
 
@@ -30,7 +30,7 @@ impl ToSql for Value {
 
 pub struct RusqliteComposer<'a> {
     pub config:           ComposerConfig,
-    pub connection:       Option<Connection>,  
+    pub connection:       Option<Connection>,
     pub values:           BTreeMap<String, Vec<&'a ToSql>>,
     pub root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
     pub mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
@@ -96,7 +96,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
     ) -> Result<(String, Vec<Self::Value>), ()> {
         self.compose_count_default_command(composition, offset, child)
     }
-    
+
     fn compose_union_command(
         &self,
         composition: &ParsedItem<SqlComposition>,
@@ -128,22 +128,24 @@ impl<'a> Composer for RusqliteComposer<'a> {
     }
     */
 
-   
+
     fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
         let (bound_sql, bindings) = self.compose(&sc);
 
         if let Some(conn) = &self.connection {
-            conn.execute(&bound_sql, &bindings).unwrap();
-
             let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+
+            println!("prepared: {:?}", prep_stmt);
 
             let rows = Rows::new(vec![]);
 
             prep_stmt.query_map(&bindings, |driver_row| {
-                let rows = Rows::new(vec![]);
+                println!("driver row found");
 
                 (0..driver_row.column_count()).fold(Row::new(vec![]), |mut acc, i| {
                     let raw = driver_row.get_raw(i);
+
+                    println!("i: {}", i);
 
                     let v = match raw {
                         ValueRef::Null => Value::Null,
@@ -155,12 +157,14 @@ impl<'a> Composer for RusqliteComposer<'a> {
 
                     let c = Column::new(v);
 
-                    acc.push_column(c);
+                    acc.push_column(c).unwrap();
 
                     acc
                 })
             })
             .unwrap();
+
+            println!("no more rows!");
 
             Ok(rows)
         }
@@ -239,7 +243,7 @@ mod tests {
         */
 
                 let mut composer = RusqliteComposer::new();
-         
+
                 composer.values.insert("name".into(), vec![&person.name]);
                 composer
                         .values

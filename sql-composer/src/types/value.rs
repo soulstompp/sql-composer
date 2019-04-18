@@ -151,6 +151,7 @@ from_nullable!(f64);
 from_nullable!(String);
 from_nullable!(Vec<u8>);
 
+#[derive(Clone, Debug)]
 pub struct
 Rows {
    rows: Vec<Row>,
@@ -190,6 +191,7 @@ impl Rows {
    }
 }
 
+#[derive(Clone, Debug)]
 pub struct Row {
     columns: Vec<Column>
 }
@@ -212,6 +214,7 @@ impl Row {
    }
 }
 
+#[derive(Clone, Debug)]
 pub struct Column {
     value: Value,
 }

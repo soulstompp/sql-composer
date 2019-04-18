@@ -142,24 +142,30 @@ impl<'a> Composer for RusqliteComposer<'a> {
             prep_stmt.query_map(&bindings, |driver_row| {
                 println!("driver row found");
 
-                (0..driver_row.column_count()).fold(Row::new(vec![]), |mut acc, i| {
-                    let raw = driver_row.get_raw(i);
+                (0..driver_row.column_count()).fold(Ok(Row::new(vec![])), |acc, i| {
+                    if let Ok(mut acc) = acc {
+                        let raw = driver_row.get_raw(i);
 
-                    println!("i: {}", i);
+                        println!("i: {}", i);
 
-                    let v = match raw {
-                        ValueRef::Null => Value::Null,
-                        ValueRef::Integer(int) => Value::Integer(int),
-                        ValueRef::Real(r) => Value::Real(r),
-                        ValueRef::Text(t)  => Value::Text(t.to_string()),
-                        ValueRef::Blob(vc) => Value::Blob(vc.to_vec())
-                    };
+                        let v = match raw {
+                            ValueRef::Null => Value::Null,
+                            ValueRef::Integer(int) => Value::Integer(int),
+                            ValueRef::Real(r) => Value::Real(r),
+                            ValueRef::Text(t)  => Value::Text(t.to_string()),
+                            ValueRef::Blob(vc) => Value::Blob(vc.to_vec())
+                        };
 
-                    let c = Column::new(v);
+                        let c = Column::new(v);
 
-                    acc.push_column(c).unwrap();
+                        acc.push_column(c).unwrap();
 
-                    acc
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
+                    
                 })
             })
             .unwrap();
@@ -284,12 +290,12 @@ mod tests {
         });
 
         let person_iter = stmt
-            .query_map(&rebindings, |row| Person {
-                id:           row.get(0),
-                name:         row.get(1),
-                time_created: row.get(2),
-                data:         row.get(3),
-            })
+            .query_map(&rebindings, |row| Ok(Person {
+                id:           row.get(0).unwrap(),
+                name:         row.get(1).unwrap(),
+                time_created: row.get(2).unwrap(),
+                data:         row.get(3).unwrap(),
+            }))
             .unwrap();
 
         let mut people: Vec<Person> = vec![];
@@ -311,7 +317,7 @@ mod tests {
 
     fn get_row_values(row: Row) -> Vec<String> {
         (0..4).fold(Vec::new(), |mut acc, i| {
-            acc.push(row.get(i));
+            acc.push(row.get(i).unwrap());
             acc
         })
     }
@@ -354,9 +360,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -374,9 +385,14 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&mock_rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -436,9 +452,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -458,9 +479,14 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&mock_rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -525,9 +551,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -547,9 +578,14 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -607,9 +643,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -666,7 +707,7 @@ mod tests {
         });
 
         let rows = prep_stmt
-            .query_map(&rebindings, |row| vec![row.get(0)])
+            .query_map(&rebindings, |row| Ok(vec![row.get(0).unwrap()]))
             .unwrap();
 
         for row in rows {
@@ -719,9 +760,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -805,9 +851,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -897,9 +948,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();
@@ -989,9 +1045,14 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Vec::new(), |mut acc, i| {
-                    acc.push(row.get(i));
-                    acc
+                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                    if let Ok(mut acc) = acc {
+                        acc.push(row.get(i).unwrap());
+                        Ok(acc)
+                    }
+                    else {
+                        acc
+                    }
                 })
             })
             .unwrap();

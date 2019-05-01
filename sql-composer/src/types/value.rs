@@ -152,66 +152,63 @@ from_nullable!(String);
 from_nullable!(Vec<u8>);
 
 #[derive(Clone, Debug)]
-pub struct
-Rows {
-   rows: Vec<Row>,
-   column_names: Vec<String>,
+pub struct Rows {
+    rows:         Vec<Row>,
+    column_names: Vec<String>,
 }
 
 impl Rows {
-   pub fn new(cn: Vec<String>) -> Self {
-       Rows {
-           rows: vec![],
-           column_names: cn,
-       }
-   }
+    pub fn new(cn: Vec<String>) -> Self {
+        Rows {
+            rows:         vec![],
+            column_names: cn,
+        }
+    }
 
-   pub fn push_row(&mut self, r: Row) -> Result<(), ()> {
-       self.rows.push(r);
+    pub fn push_row(&mut self, r: Row) -> Result<(), ()> {
+        self.rows.push(r);
 
-       Ok(())
-   }
+        Ok(())
+    }
 
-   pub fn rows(&self) -> impl Iterator<Item = &Row> {
-       self.rows.iter()
-   }
+    pub fn rows(&self) -> impl Iterator<Item = &Row> {
+        self.rows.iter()
+    }
 
-   pub fn grid(&self)  -> Vec<Vec<&Value>> {
-       self.rows().fold(Vec::new(), |mut acc, r| {
-           let row = r.columns().fold(Vec::new(), |mut racc, c| {
-               racc.push(&c.value);
+    pub fn grid(&self) -> Vec<Vec<&Value>> {
+        self.rows().fold(Vec::new(), |mut acc, r| {
+            let row = r.columns().fold(Vec::new(), |mut racc, c| {
+                racc.push(&c.value);
 
-               racc
-           });
+                racc
+            });
 
-           acc.push(row);
+            acc.push(row);
 
-           acc
-       })
-   }
+            acc
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Row {
-    columns: Vec<Column>
+    columns: Vec<Column>,
 }
 
 impl Row {
-   pub fn new(cn: Vec<String>) -> Self {
-       Row {
-           columns: vec![],
-       }
-   }
+    pub fn new(cn: Vec<String>) -> Self {
+        Row { columns: vec![] }
+    }
 
-   pub fn push_column(&mut self, c: Column) -> Result<(), ()> {
-       self.columns.push(c);
+    pub fn push_column(&mut self, c: Column) -> Result<(), ()> {
+        self.columns.push(c);
 
-       Ok(())
-   }
+        Ok(())
+    }
 
-   pub fn columns(&self) -> impl Iterator<Item = &Column> {
-       self.columns.iter()
-   }
+    pub fn columns(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -220,13 +217,11 @@ pub struct Column {
 }
 
 impl Column {
-   pub fn new(v: Value) -> Self {
-       Column {
-           value: v,
-       }
-   }
+    pub fn new(v: Value) -> Self {
+        Column { value: v }
+    }
 
-   pub fn value(&self) -> Value {
-       self.value.clone()
-   }
+    pub fn value(&self) -> Value {
+        self.value.clone()
+    }
 }

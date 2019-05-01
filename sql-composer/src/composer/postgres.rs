@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use postgres::{Connection, TlsMode};
 use postgres::types::ToSql;
+use postgres::{Connection, TlsMode};
 
 use super::{Composer, ComposerConfig};
 
@@ -9,8 +9,7 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Value, ToValue};
-    
+use crate::types::value::{Rows, ToValue, Value};
 
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
@@ -30,7 +29,6 @@ impl<'a> PostgresComposer<'a> {
         }
     }
 }
-
 
 impl<'a> Composer for PostgresComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
@@ -112,10 +110,6 @@ impl<'a> Composer for PostgresComposer<'a> {
     }
     */
 
-    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
-        unimplemented!("can't support this yet!");
-    }
-    
     /*
     fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
         unimplemented!("not here yet");

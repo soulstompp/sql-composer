@@ -4,8 +4,9 @@ pub mod mysql;
 pub mod postgres;
 pub mod rusqlite;
 
-pub use crate::parser::{parse_template, bind_value_named_set};
-use crate::types::{CompleteStr, ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
+pub use crate::parser::{bind_value_named_set, parse_template};
+use crate::types::{CompleteStr, ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias,
+                   SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -348,9 +349,6 @@ pub trait Composer: Sized {
 
         (sql, values)
     }
-
-    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()>;
-
 }
 
 pub struct ComposerBuilder {
@@ -366,7 +364,7 @@ impl Default for ComposerBuilder {
             uri: None,
             values: BTreeMap::new(),
             root_mock_values: vec![],
-            mock_values: HashMap::new()
+            mock_values: HashMap::new(),
         }
     }
 }
@@ -398,21 +396,20 @@ impl ComposerBuilder {
         Ok(())
     }
 
-
     pub fn build(&self) -> Result<ComposerDriver<'_>, ()> {
         if let Some(uri) = &self.uri {
             if uri.starts_with("mysql://") {
                 unimplemented!("not ready yet");
-                /*
-                Ok(ComposerDriver::Mysql(
-                        MysqlComposer {
-                            connection: uri,
-                            values: self.build_values_vec(),
-                            root_mock_values: vec![],
-                            mock_values: HashMap::new(),
-                        }
-                ))
-                */
+            /*
+            Ok(ComposerDriver::Mysql(
+                    MysqlComposer {
+                        connection: uri,
+                        values: self.build_values_vec(),
+                        root_mock_values: vec![],
+                        mock_values: HashMap::new(),
+                    }
+            ))
+            */
             }
             else if uri.starts_with("postgres://") {
                 //Ok(ComposerDriver::Postgres(PostgresComposer::new(&uri).unwrap()))
@@ -421,32 +418,34 @@ impl ComposerBuilder {
             else if uri.as_str() == "sqlite://:memory:" {
                 //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
                 println!("values to bind: {:?}\n", self.values);
-                Ok(ComposerDriver::Rusqlite(
-                        RusqliteComposer {
-                            config: RusqliteComposer::config(),
-                            connection: Some(RusqliteComposer::connection(uri.to_string()).unwrap()),
-                            values: self.values.iter().fold(BTreeMap::new(), |mut acc, (k, vv)| {
-                                let e = acc.entry(k.to_string()).or_insert(vec![]);
+                Ok(ComposerDriver::Rusqlite(RusqliteComposer {
+                    config:           RusqliteComposer::config(),
+                    connection:       Some(RusqliteComposer::connection(uri.to_string()).unwrap()),
+                    values:           self.values.iter().fold(
+                        BTreeMap::new(),
+                        |mut acc, (k, vv)| {
+                            let e = acc.entry(k.to_string()).or_insert(vec![]);
 
-                                *e = vv.iter().map(|v|
-                                                   match v{
-                                                       Value::Text(t) => t as &rusqlite::ToSql,
-                                                       Value::Real(r) => r as &rusqlite::ToSql,
-                                                       Value::Integer(i) => i as &rusqlite::ToSql,
-                                                       _ => unimplemented!("don't know what to do yet!"),
-                                                   }
-                                ).collect();
+                            *e = vv
+                                .iter()
+                                .map(|v| match v {
+                                    Value::Text(t) => t as &rusqlite::ToSql,
+                                    Value::Real(r) => r as &rusqlite::ToSql,
+                                    Value::Integer(i) => i as &rusqlite::ToSql,
+                                    _ => unimplemented!("don't know what to do yet!"),
+                                })
+                                .collect();
 
-                                acc
-                            }),
-                            root_mock_values: vec![],
-                            mock_values: HashMap::new(),
-                        }
-                ))
+                            acc
+                        },
+                    ),
+                    root_mock_values: vec![],
+                    mock_values:      HashMap::new(),
+                }))
             }
             else if uri.starts_with("sqlite://") {
                 unimplemented!("not ready yet");
-                //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
+            //Ok(ComposerDriver::Rusqlite(RusqliteComposer::from_uri(&uri).unwrap()))
             }
             else {
                 panic!("bad uri prefix: {}", uri);

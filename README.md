@@ -14,7 +14,7 @@ The compositions sql-composer build allow you to efficiently interact with your 
 
 ## Macros
 
-All macros in sql-composer are called using the syntax  . These calls are processed as commands to the `Composer` and effect the resulting SQL passed along to the DB driver and the shape of the bind variables passed along for the driver’s query execution. 
+All macros in sql-composer are called using the syntax `:command()`. These calls are processed as commands to the `Composer` and effect the resulting SQL passed along to the DB driver and the shape of the bind variables passed along for the driver’s query execution. 
 
 The `Composer` only supports two type of macros, one which produces complete statements and the other which provides query bindings. Outside of these two types of compositions the SQL provided will not be altered by the `Composer`.
 

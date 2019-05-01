@@ -12,3 +12,4 @@ path = "src/main.rs"
 quicli = "0.4.0"
 sql-composer={ path="../sql-composer" }
 structopt = "0.2.15"
+rusqlite = "0.17.0"

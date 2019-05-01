@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::{Connection, NO_PARAMS, Rows as DriverRows};
 use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
+use rusqlite::{Connection, Rows as DriverRows, NO_PARAMS};
 
 pub use rusqlite::types::{Null, ToSql};
 
@@ -11,9 +11,9 @@ use crate::types::{CompleteStr, ParsedItem, Span, SqlComposition, SqlComposition
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Row, Column, Value, ToValue};
+use crate::types::value::{Column, Row, Rows, ToValue, Value};
 
-use crate::parser::{parse_template, bind_value_named_set};
+use crate::parser::{bind_value_named_set, parse_template};
 
 use std::convert::From;
 
@@ -23,7 +23,7 @@ impl ToSql for Value {
             Value::Text(t) => Ok(ToSqlOutput::from(t.as_str())),
             Value::Integer(i) => Ok(ToSqlOutput::from(*i)),
             Value::Real(r) => Ok(ToSqlOutput::from(*r)),
-            _ => unimplemented!("unsupported type")
+            _ => unimplemented!("unsupported type"),
         }
     }
 }
@@ -39,11 +39,11 @@ pub struct RusqliteComposer<'a> {
 impl<'a> RusqliteComposer<'a> {
     pub fn new() -> Self {
         Self {
-            config: Self::config(),
-            connection: None,
-            values: BTreeMap::new(),
+            config:           Self::config(),
+            connection:       None,
+            values:           BTreeMap::new(),
             root_mock_values: vec![],
-            mock_values: HashMap::new()
+            mock_values:      HashMap::new(),
         }
     }
 }
@@ -127,52 +127,6 @@ impl<'a> Composer for RusqliteComposer<'a> {
         self.values.get(&name)
     }
     */
-
-    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
-        if let Some(conn) = &self.connection {
-            let (bound_sql, bindings) = self.compose(&sc);
-
-            let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
-
-            let mut rows = Rows::new(vec![]);
-
-            let driver_rows = prep_stmt.query_map(&bindings, |driver_row| {
-                (0..driver_row.column_count()).fold(Ok(Row::new(vec![])), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        let raw = driver_row.get_raw(i);
-
-                        let v = match raw {
-                            ValueRef::Null => Value::Null,
-                            ValueRef::Integer(int) => Value::Integer(int),
-                            ValueRef::Real(r) => Value::Real(r),
-                            ValueRef::Text(t)  => Value::Text(t.to_string()),
-                            ValueRef::Blob(vc) => Value::Blob(vc.to_vec())
-                        };
-
-                        let c = Column::new(v);
-
-                        acc.push_column(c).unwrap();
-
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                    
-                })
-            })
-            .unwrap();
-
-            for driver_row in driver_rows {
-                rows.push_row(driver_row.unwrap());
-            }
-
-            Ok(rows)
-        }
-        else {
-            panic!("unable to query without connection!");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -243,15 +197,13 @@ mod tests {
         composer = composer.build();
         */
 
-                let mut composer = RusqliteComposer::new();
+        let mut composer = RusqliteComposer::new();
 
-                composer.values.insert("name".into(), vec![&person.name]);
-                composer
-                        .values
-                        .insert("time_created".into(), vec![&person.time_created]);
-                composer.values.insert("data".into(), vec![&person.data]);
-
-
+        composer.values.insert("name".into(), vec![&person.name]);
+        composer
+            .values
+            .insert("time_created".into(), vec![&person.time_created]);
+        composer.values.insert("data".into(), vec![&person.data]);
 
         let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
 
@@ -285,12 +237,14 @@ mod tests {
         });
 
         let person_iter = stmt
-            .query_map(&rebindings, |row| Ok(Person {
-                id:           row.get(0).unwrap(),
-                name:         row.get(1).unwrap(),
-                time_created: row.get(2).unwrap(),
-                data:         row.get(3).unwrap(),
-            }))
+            .query_map(&rebindings, |row| {
+                Ok(Person {
+                    id:           row.get(0).unwrap(),
+                    name:         row.get(1).unwrap(),
+                    time_created: row.get(2).unwrap(),
+                    data:         row.get(3).unwrap(),
+                })
+            })
             .unwrap();
 
         let mut people: Vec<Person> = vec![];
@@ -338,8 +292,7 @@ mod tests {
         mock_values[0].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -429,8 +382,7 @@ mod tests {
         mock_values[1].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 
@@ -500,7 +452,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/double-include.tql").unwrap();
 
-        let mut composer =  RusqliteComposer::new();
+        let mut composer = RusqliteComposer::new();
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -530,8 +482,7 @@ mod tests {
         mock_values[2].insert("col_4".into(), &"d_value");
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        let (mut mock_bound_sql, _mock_bindings) =
-            composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, _mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
 

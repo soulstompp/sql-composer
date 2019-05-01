@@ -143,24 +143,18 @@ impl SqlCompositionAlias {
 impl Default for SqlCompositionAlias {
     fn default() -> Self {
         //TODO: better default
-        SqlCompositionAlias::DbObject(
-            SqlDbObject {
-                object_name: "DUAL".to_string(),
-                object_alias: None
-            }
-        )
+        SqlCompositionAlias::DbObject(SqlDbObject {
+            object_name:  "DUAL".to_string(),
+            object_alias: None,
+        })
     }
 }
 
 impl fmt::Display for SqlCompositionAlias {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SqlCompositionAlias::Path(p) => {
-                write!(f, ", {}", p.to_string_lossy())
-            },
-            SqlCompositionAlias::DbObject(dbo) =>  {
-                write!(f, ", {}", dbo)
-            },
+            SqlCompositionAlias::Path(p) => write!(f, ", {}", p.to_string_lossy()),
+            SqlCompositionAlias::DbObject(dbo) => write!(f, ", {}", dbo),
         }
     }
 }
@@ -343,18 +337,16 @@ impl SqlComposition {
     pub fn end(&mut self, value: &str, span: Span) -> Result<()> {
         //TODO: check if this has already ended
         match self.sql.last() {
-            Some(last) => {
-                self.push_sql(Sql::Ending(
-                    ParsedItem::from_span(
-                        SqlEnding {
-                            value: value.into(),
-                        },
-                        span,
-                        None,
-                    )
-                    .unwrap(),
-                ))
-            }
+            Some(last) => self.push_sql(Sql::Ending(
+                ParsedItem::from_span(
+                    SqlEnding {
+                        value: value.into(),
+                    },
+                    span,
+                    None,
+                )
+                .unwrap(),
+            )),
             None => Err(new_incomplete_composition_error(
                 Position::Generated(GeneratedSpan { command: None }),
                 self.clone(),

@@ -8,7 +8,6 @@ use crate::types::value::{Rows, ToValue, Value};
 
 use serde::ser::Serializer;
 
-
 pub struct Connection();
 
 #[derive(Default)]
@@ -28,7 +27,6 @@ impl<'a> DirectComposer<'a> {
         }
     }
 }
-
 
 impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
@@ -78,7 +76,7 @@ impl<'a> Composer for DirectComposer<'a> {
     ) -> Result<(String, Vec<Self::Value>), ()> {
         self.compose_count_default_command(composition, offset, child)
     }
-    
+
     fn compose_union_command(
         &self,
         composition: &ParsedItem<SqlComposition>,
@@ -106,10 +104,6 @@ impl<'a> Composer for DirectComposer<'a> {
     }
     */
 
-    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
-        unimplemented!("direct composer will never support execute!");
-    }
-    
     /*
     fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
         unimplemented!("not here yet");

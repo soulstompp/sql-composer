@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::prelude::{ToValue};
+use mysql::prelude::ToValue;
 
 use super::{Composer, ComposerConfig};
 
@@ -8,13 +8,13 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
-use crate::types::value::{Rows, Value, ToValue as SelfToValue};
-    
+use crate::types::value::{Rows, ToValue as SelfToValue, Value};
+
 use mysql::{from_row, Pool};
 
 pub struct MysqlComposer<'a> {
     config:           ComposerConfig,
-    connection: Option<Pool>,
+    connection:       Option<Pool>,
     values:           BTreeMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToValue>>>,
@@ -23,11 +23,11 @@ pub struct MysqlComposer<'a> {
 impl<'a> MysqlComposer<'a> {
     pub fn new(c: Pool) -> Self {
         Self {
-            config: Self::config(),
-            connection: Some(c),
-            values: BTreeMap::new(),
+            config:           Self::config(),
+            connection:       Some(c),
+            values:           BTreeMap::new(),
             root_mock_values: vec![],
-            mock_values: HashMap::new(),
+            mock_values:      HashMap::new(),
         }
     }
 }
@@ -106,10 +106,6 @@ impl<'a> Composer for MysqlComposer<'a> {
         &self.mock_values
     }
 
-    fn query(&self, sc: &SqlComposition) -> Result<Rows, ()> {
-        unimplemented!("can't support this yet!");
-    }
-    
     /*
     fn from_uri(uri: &ToString) -> Result<Self, ()> {
         unimplemented!("not here yet");
@@ -166,7 +162,9 @@ mod tests {
             data: None,
         };
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         let (remaining, insert_stmt) = parse_template(
             Span::new("INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));".into()),
@@ -252,7 +250,9 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -307,7 +307,9 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -374,7 +376,9 @@ mod tests {
         let stmt =
             SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -462,7 +466,9 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -512,7 +518,9 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -561,7 +569,9 @@ mod tests {
         println!("made it through parse");
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -619,7 +629,9 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -689,7 +701,9 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);
@@ -771,7 +785,9 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new(Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap());
+        let mut composer = MysqlComposer::new(
+            Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
+        );
 
         composer.values.insert("a".into(), vec![&"a_value"]);
         composer.values.insert("b".into(), vec![&"b_value"]);

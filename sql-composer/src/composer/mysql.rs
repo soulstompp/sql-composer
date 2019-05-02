@@ -14,7 +14,6 @@ use mysql::{from_row, Pool};
 
 pub struct MysqlComposer<'a> {
     config:           ComposerConfig,
-    connection:       Option<Pool>,
     values:           BTreeMap<String, Vec<&'a ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToValue>>>,
@@ -24,7 +23,6 @@ impl<'a> MysqlComposer<'a> {
     pub fn new(c: Pool) -> Self {
         Self {
             config:           Self::config(),
-            connection:       Some(c),
             values:           BTreeMap::new(),
             root_mock_values: vec![],
             mock_values:      HashMap::new(),
@@ -35,10 +33,6 @@ impl<'a> MysqlComposer<'a> {
 impl<'a> Composer for MysqlComposer<'a> {
     type Value = &'a (dyn ToValue + 'a);
     type Connection = Pool;
-
-    fn connection(uri: String) -> Result<Self::Connection, ()> {
-        unimplemented!("haven't made a connection() yet");
-    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }

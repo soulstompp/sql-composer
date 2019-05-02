@@ -35,8 +35,6 @@ pub trait Composer: Sized {
     type Value: Copy;
     type Connection;
 
-    fn connection(uri: String) -> Result<Self::Connection, ()>;
-
     fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
         let item = ParsedItem::generated(s.clone(), None).unwrap();
 
@@ -403,7 +401,6 @@ impl ComposerBuilder {
             /*
             Ok(ComposerDriver::Mysql(
                     MysqlComposer {
-                        connection: uri,
                         values: self.build_values_vec(),
                         root_mock_values: vec![],
                         mock_values: HashMap::new(),
@@ -420,7 +417,6 @@ impl ComposerBuilder {
                 println!("values to bind: {:?}\n", self.values);
                 Ok(ComposerDriver::Rusqlite(RusqliteComposer {
                     config:           RusqliteComposer::config(),
-                    connection:       Some(RusqliteComposer::connection(uri.to_string()).unwrap()),
                     values:           self.values.iter().fold(
                         BTreeMap::new(),
                         |mut acc, (k, vv)| {

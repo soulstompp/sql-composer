@@ -34,10 +34,6 @@ impl<'a> Composer for PostgresComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
     type Connection = Connection;
 
-    fn connection(uri: String) -> Result<Self::Connection, ()> {
-        unimplemented!("haven't made a connection() yet");
-    }
-
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
     }

@@ -32,10 +32,6 @@ impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
     type Connection = &'a Connection;
 
-    fn connection(uri: String) -> Result<Self::Connection, ()> {
-        unimplemented!("haven't made a connection() yet");
-    }
-
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
     }

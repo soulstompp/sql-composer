@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
 use rusqlite::{Connection, Rows as DriverRows, NO_PARAMS};
 
+
 pub use rusqlite::types::{Null, ToSql};
 
 use super::{Composer, ComposerConfig};
@@ -30,7 +31,6 @@ impl ToSql for Value {
 
 pub struct RusqliteComposer<'a> {
     pub config:           ComposerConfig,
-    pub connection:       Option<Connection>,
     pub values:           BTreeMap<String, Vec<&'a ToSql>>,
     pub root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
     pub mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
@@ -40,7 +40,6 @@ impl<'a> RusqliteComposer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
-            connection:       None,
             values:           BTreeMap::new(),
             root_mock_values: vec![],
             mock_values:      HashMap::new(),
@@ -51,10 +50,6 @@ impl<'a> RusqliteComposer<'a> {
 impl<'a> Composer for RusqliteComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
     type Connection = Connection;
-
-    fn connection(uri: String) -> Result<Self::Connection, ()> {
-        Ok(Connection::open_in_memory().unwrap())
-    }
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }

@@ -32,7 +32,6 @@ impl<'a> MysqlComposer<'a> {
 
 impl<'a> Composer for MysqlComposer<'a> {
     type Value = &'a (dyn ToValue + 'a);
-    type Connection = Pool;
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }

@@ -30,7 +30,6 @@ impl<'a> DirectComposer<'a> {
 
 impl<'a> Composer for DirectComposer<'a> {
     type Value = &'a str;
-    type Connection = &'a Connection;
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }

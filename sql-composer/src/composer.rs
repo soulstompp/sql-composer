@@ -33,7 +33,6 @@ pub struct ComposerConfig {
 
 pub trait Composer: Sized {
     type Value: Copy;
-    type Connection;
 
     fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
         let item = ParsedItem::generated(s.clone(), None).unwrap();

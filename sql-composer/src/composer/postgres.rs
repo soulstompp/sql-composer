@@ -32,7 +32,6 @@ impl<'a> PostgresComposer<'a> {
 
 impl<'a> Composer for PostgresComposer<'a> {
     type Value = &'a (dyn ToSql + 'a);
-    type Connection = Connection;
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }

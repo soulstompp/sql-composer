@@ -20,6 +20,15 @@ use serde::ser::Serialize;
 
 use crate::types::value::{Rows, Value};
 
+trait ComposerConnection<'a> {
+    type Composer;
+    //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
+    type Value;
+    type Statement;
+
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
+}
+
 pub enum ComposerDriver<'a> {
     Mysql(MysqlComposer<'a>),
     Postgres(PostgresComposer<'a>),

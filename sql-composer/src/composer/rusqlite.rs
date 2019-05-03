@@ -6,7 +6,7 @@ use rusqlite::{Connection, Rows, Statement, NO_PARAMS};
 
 pub use rusqlite::types::{Null, ToSql};
 
-use super::{Composer, ComposerConfig};
+use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{CompleteStr, ParsedItem, Span, SqlComposition, SqlCompositionAlias};
 
@@ -14,27 +14,24 @@ use serde::ser::Serialize;
 
 use crate::types::value::{Column, Row, ToValue, Value};
 
-
 use std::convert::From;
-
-trait ComposerConnection<'a> {
-    type Composer;
-    //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
-    type Value;
-    type Statement;
-
-    fn compose_prepare(&'a self, c: Self::Composer,  s: &SqlComposition) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
-}
 
 impl <'a>ComposerConnection<'a> for Connection {
     type Composer = RusqliteComposer<'a>;
     type Value = &'a (dyn ToSql + 'a);
     type Statement = Statement<'a>;
 
-    fn compose_prepare(&'a self, c: Self::Composer,  s: &SqlComposition) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+        let c = RusqliteComposer {
+            config: RusqliteComposer::config(),
+            values,
+            root_mock_values,
+            mock_values,
+        };
+
         let (sql, bind_vars) = c.compose(s);
 
-        println!("compose_prepare bind sql: {}", sql);
+        println!("compose bind sql: {}", sql);
 
         //TODO: support a DriverError type to handle this better
         let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
@@ -1031,29 +1028,22 @@ mod tests {
     }
 
     #[test]
-    fn it_prepares_from_connection() {
+    fn it_composes_from_connection() {
         let conn = setup_db();
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
         let mut composer = RusqliteComposer::new();
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
+        let mut values: BTreeMap<String, Vec<&ToSql>> = BTreeMap::new();
+        values.insert("a".into(), vec![&"a_value"]);
+        values.insert("b".into(), vec![&"b_value"]);
+        values.insert("c".into(), vec![&"c_value"]);
+        values.insert("d".into(), vec![&"d_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToSql>> = vec![BTreeMap::new()];
-
-        mock_values[0].insert("col_1".into(), &"a_value");
-        mock_values[0].insert("col_2".into(), &"b_value");
-        mock_values[0].insert("col_3".into(), &"c_value");
-        mock_values[0].insert("col_4".into(), &"d_value");
-
-        let (mut prep_stmt, bindings) = conn.compose_prepare(composer, &stmt.item).unwrap();
+        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
-        let mut mock_values: Vec<Vec<String>> = vec![];
 
         let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
             acc.push(*x);

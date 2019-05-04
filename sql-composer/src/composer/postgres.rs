@@ -2,15 +2,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
 use postgres::types::ToSql;
-use postgres::{Connection, TlsMode};
+use postgres::Connection;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
-
-use serde::ser::Serialize;
-
-use crate::types::value::{Rows, ToValue, Value};
 
 impl <'a>ComposerConnection<'a> for Connection {
     type Composer = PostgresComposer<'a>;
@@ -123,18 +119,6 @@ impl<'a> Composer for PostgresComposer<'a> {
     fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
-
-    /*
-    fn get_mock_values(&self, name: String) -> Option<&BTreeMap<String, Self::Value>> {
-        self.values.get(&name)
-    }
-    */
-
-    /*
-    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
-        unimplemented!("not here yet");
-    }
-    */
 }
 
 #[cfg(test)]
@@ -842,7 +826,7 @@ mod tests {
         values.insert("c".into(), vec![&"c_value"]);
         values.insert("d".into(), vec![&"d_value"]);
 
-        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+        let (prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 

@@ -6,11 +6,7 @@ use super::{Composer, ComposerConnection, ComposerConfig};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use serde::ser::Serialize;
-
-use crate::types::value::{Rows, ToValue as SelfToValue, Value};
-
-use mysql::{from_row, Pool};
+use mysql::Pool;
 
 impl <'a>ComposerConnection<'a> for Pool {
     type Composer = MysqlComposer<'a>;

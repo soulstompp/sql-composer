@@ -13,7 +13,7 @@ use self::mysql::MysqlComposer;
 use self::postgres::PostgresComposer;
 use self::rusqlite::{RusqliteComposer, ToSql};
 
-use crate::types::value::{Rows, Value};
+use crate::types::value::{Value};
 
 pub trait ComposerConnection<'a> {
     type Composer;

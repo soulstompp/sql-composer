@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::prelude::ToValue;
+use mysql::{Stmt, prelude::ToValue};
 
-use super::{Composer, ComposerConfig};
+use super::{Composer, ComposerConnection, ComposerConfig};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
@@ -11,6 +11,30 @@ use serde::ser::Serialize;
 use crate::types::value::{Rows, ToValue as SelfToValue, Value};
 
 use mysql::{from_row, Pool};
+
+impl <'a>ComposerConnection<'a> for Pool {
+    type Composer = MysqlComposer<'a>;
+    type Value = &'a (dyn ToValue + 'a);
+    type Statement = Stmt<'a>;
+
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+        let c = MysqlComposer {
+            config: MysqlComposer::config(),
+            values,
+            root_mock_values,
+            mock_values,
+        };
+
+        let (sql, bind_vars) = c.compose(s);
+
+        println!("compose bind sql: {}", sql);
+
+        //TODO: support a DriverError type to handle this better
+        let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
+
+        Ok((stmt, bind_vars))
+    }
+}
 
 pub struct MysqlComposer<'a> {
     config:           ComposerConfig,
@@ -112,10 +136,11 @@ impl<'a> Composer for MysqlComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, MysqlComposer};
+    use super::{Composer, ComposerConnection, MysqlComposer};
     use crate::parser::parse_template;
     use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::{from_row, Pool, Row};
+    use mysql::prelude::ToValue;
 
     use std::collections::{BTreeMap, HashMap};
 
@@ -252,7 +277,7 @@ mod tests {
         composer.values.insert("c".into(), vec![&"c_value"]);
         composer.values.insert("d".into(), vec![&"d_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
             vec![BTreeMap::new()];
 
         mock_values[0].insert("col_1".into(), &"a_value");
@@ -310,7 +335,7 @@ mod tests {
         composer.values.insert("d".into(), vec![&"d_value"]);
         composer.values.insert("e".into(), vec![&"e_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
             vec![];
 
         mock_values.push(BTreeMap::new());
@@ -380,7 +405,7 @@ mod tests {
         composer.values.insert("e".into(), vec![&"e_value"]);
         composer.values.insert("f".into(), vec![&"f_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>> =
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
             vec![];
 
         mock_values.push(BTreeMap::new());
@@ -641,7 +666,7 @@ mod tests {
 
         let mut mock_values: HashMap<
             SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>>,
+            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
         > = HashMap::new();
 
         {
@@ -713,7 +738,7 @@ mod tests {
 
         let mut mock_values: HashMap<
             SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>>,
+            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
         > = HashMap::new();
 
         {
@@ -797,7 +822,7 @@ mod tests {
 
         let mut mock_values: HashMap<
             SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn mysql::prelude::ToValue>>,
+            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
         > = HashMap::new();
 
         {
@@ -847,5 +872,37 @@ mod tests {
         }
 
         assert_eq!(values, expected_values, "exected values");
+    }
+
+    #[test]
+    fn it_composes_from_connection() {
+        let conn = setup_db();
+
+        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+
+        let mut values: BTreeMap<String, Vec<&ToValue>> = BTreeMap::new();
+        values.insert("a".into(), vec![&"a_value"]);
+        values.insert("b".into(), vec![&"b_value"]);
+        values.insert("c".into(), vec![&"c_value"]);
+        values.insert("d".into(), vec![&"d_value"]);
+
+        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+
+        let mut values: Vec<Vec<String>> = vec![];
+
+        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
+            acc.push(*x);
+            acc
+        });
+
+        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+            values.push(get_row_values(row.unwrap()));
+        }
+
+        let expected: Vec<Vec<String>> = vec![
+            vec!["a_value".into(), "b_value".into(), "c_value".into(), "d_value".into()],
+        ];
+
+        assert_eq!(values, expected, "exected values");
     }
 }

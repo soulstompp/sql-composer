@@ -26,7 +26,7 @@ trait ComposerConnection<'a> {
     type Value;
     type Statement;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
 }
 
 pub enum ComposerDriver<'a> {

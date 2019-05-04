@@ -1,15 +1,40 @@
 use std::collections::{BTreeMap, HashMap};
 
+use postgres::stmt::Statement;
 use postgres::types::ToSql;
 use postgres::{Connection, TlsMode};
 
-use super::{Composer, ComposerConfig};
+use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use serde::ser::Serialize;
 
 use crate::types::value::{Rows, ToValue, Value};
+
+impl <'a>ComposerConnection<'a> for Connection {
+    type Composer = PostgresComposer<'a>;
+    type Value = &'a (dyn ToSql + 'a);
+    type Statement = Statement<'a>;
+
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+        let c = PostgresComposer {
+            config: PostgresComposer::config(),
+            values,
+            root_mock_values,
+            mock_values,
+        };
+
+        let (sql, bind_vars) = c.compose(s);
+
+        println!("compose bind sql: {}", sql);
+
+        //TODO: support a DriverError type to handle this better
+        let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
+
+        Ok((stmt, bind_vars))
+    }
+}
 
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
@@ -114,7 +139,7 @@ impl<'a> Composer for PostgresComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, PostgresComposer};
+    use super::{Composer, ComposerConnection, PostgresComposer};
 
     use crate::parser::parse_template;
 
@@ -803,5 +828,37 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
+    }
+
+    #[test]
+    fn it_composes_from_connection() {
+        let conn = setup_db();
+
+        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+
+        let mut values: BTreeMap<String, Vec<&ToSql>> = BTreeMap::new();
+        values.insert("a".into(), vec![&"a_value"]);
+        values.insert("b".into(), vec![&"b_value"]);
+        values.insert("c".into(), vec![&"c_value"]);
+        values.insert("d".into(), vec![&"d_value"]);
+
+        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+
+        let mut values: Vec<Vec<String>> = vec![];
+
+        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
+            acc.push(*x);
+            acc
+        });
+
+        for row in &prep_stmt.query(&rebindings).unwrap() {
+            values.push(get_row_values(row));
+        }
+
+        let expected: Vec<Vec<String>> = vec![
+            vec!["a_value".into(), "b_value".into(), "c_value".into(), "d_value".into()],
+        ];
+
+        assert_eq!(values, expected, "exected values");
     }
 }

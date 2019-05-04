@@ -8,19 +8,14 @@ pub use crate::parser::{bind_value_named_set, parse_template};
 use crate::types::{CompleteStr, ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias,
                    SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
-
-use serde::Deserializer;
 
 use self::mysql::MysqlComposer;
 use self::postgres::PostgresComposer;
 use self::rusqlite::{RusqliteComposer, ToSql};
 
-use serde::ser::Serialize;
-
 use crate::types::value::{Rows, Value};
 
-trait ComposerConnection<'a> {
+pub trait ComposerConnection<'a> {
     type Composer;
     //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
     type Value;
@@ -433,9 +428,9 @@ impl ComposerBuilder {
                             *e = vv
                                 .iter()
                                 .map(|v| match v {
-                                    Value::Text(t) => t as &rusqlite::ToSql,
-                                    Value::Real(r) => r as &rusqlite::ToSql,
-                                    Value::Integer(i) => i as &rusqlite::ToSql,
+                                    Value::Text(t) => t as &ToSql,
+                                    Value::Real(r) => r as &ToSql,
+                                    Value::Integer(i) => i as &ToSql,
                                     _ => unimplemented!("don't know what to do yet!"),
                                 })
                                 .collect();

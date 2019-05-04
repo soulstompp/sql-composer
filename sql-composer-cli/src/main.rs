@@ -4,10 +4,15 @@ use quicli::prelude::*;
 use structopt::StructOpt;
 
 // use sql_composer::composer::rusqlite::RusqliteComposer;
-use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
+use rusqlite::types::{ValueRef};
 use rusqlite::Connection;
-use sql_composer::composer::{Composer, ComposerBuilder, ComposerDriver};
-use sql_composer::types::SqlComposition;
+pub use rusqlite::types::{Null, ToSql};
+use sql_composer::composer::{ComposerBuilder, ComposerConnection};
+use sql_composer::types::{SqlComposition, value::Value};
+use std::collections::{BTreeMap, HashMap};
+
+use sql_composer::parser::bind_value_named_set;
+use sql_composer::types::{CompleteStr, Span};
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -87,22 +92,30 @@ fn query(args: QueryArgs) -> CliResult {
 
     builder.uri(&uri);
 
-    if let Some(b) = args.bind {
-        builder
-            .bind_named_set(&b)
-            .expect(&format!("unable to bind named set: {}", b));
-    }
-
-    let driver = builder.build().expect("unable to build composer");
-
-    match driver {
-        ComposerDriver::Rusqlite(c) => {
-            let (bound_sql, bindings) = c.compose(&comp);
-
+    if uri.starts_with("sqlite://") {
             //TODO: base off of uri
-            let conn = Connection::open_in_memory().unwrap();
+            let conn = match uri.as_str() {
+                "sqlite://:memory:" => Connection::open_in_memory().unwrap(),
+                _ => unimplemented!("not currently passing uri correctly")
+            };
 
-            let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
+            let mut parsed_values: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            let mut values:BTreeMap<String, Vec<&ToSql>> = BTreeMap::new();
+
+            if let Some(b) = args.bind {
+              let (remaining, bvns) = bind_value_named_set(Span::new(CompleteStr(&b))).unwrap();
+
+              parsed_values = bvns;
+            }
+
+            values = parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+                *entry = v.iter().map(|x| x as &ToSql).collect();
+
+                acc
+            });
+
+            let (mut prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
             let driver_rows = prep_stmt
                 .query_map(&bindings, |driver_row| {
@@ -144,9 +157,14 @@ fn query(args: QueryArgs) -> CliResult {
             for row in rows {
                 println!("row: {:?}", row);
             }
-        }
-        _ => panic!("unsupported driver"),
-    };
+
+    }
+    else if uri.starts_with("postgres://") {
+        unimplemented!("postgres cli query in progress");
+    }
+    else {
+        panic!("unknown uri type: {}", uri);
+    }
 
     Ok(())
 }

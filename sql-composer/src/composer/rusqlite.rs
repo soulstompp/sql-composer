@@ -21,7 +21,7 @@ impl <'a>ComposerConnection<'a> for Connection {
     type Value = &'a (dyn ToSql + 'a);
     type Statement = Statement<'a>;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = RusqliteComposer {
             config: RusqliteComposer::config(),
             values,
@@ -98,7 +98,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
                     new_values.push(*iv);
                 }
             }
-            None => panic!("no value for binding: {}", i),
+            None => panic!("no value for binding {} of {}", i, name),
         };
 
         (sql, new_values)

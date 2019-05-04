@@ -1,13 +1,12 @@
-use crate::types::{CompleteStr, LocatedSpan, ParsedItem, ParsedSpan, Position, Span, Sql,
+use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql,
                    SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding,
                    SqlKeyword, SqlLiteral};
 
-use nom::{digit, double, multispace, IResult};
-use std::path::PathBuf;
+use nom::{multispace, IResult};
 
 use crate::types::value::Value;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap};
 
 use std::str::FromStr;
 
@@ -42,10 +41,10 @@ named!(
                             return sc;
                         }
 
-                        acc.item.push_sql(Sql::Composition((sc, aliases)));
+                        acc.item.push_sql(Sql::Composition((sc, aliases))).unwrap();
                     }
                     _ => {
-                        acc.item.push_sql(item);
+                        acc.item.push_sql(item).unwrap();
                     }
                 }
             }
@@ -64,7 +63,7 @@ pub fn parse_template(
     res.and_then(|(remaining, mut comp)| {
         if let Some(a) = alias {
             comp.item
-                .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))));
+                .set_position(Position::Parsed(ParsedSpan::new(span, Some(a)))).expect("unable to set position in parse_template");
         }
 
         Ok((remaining, comp))
@@ -659,7 +658,7 @@ mod tests {
     use super::{bind_value_named_set, bind_value_named_sets, bind_value_set, column_list,
                 db_object, db_object_alias_sql, parse_bindvar, parse_composer_macro,
                 parse_quoted_bindvar, parse_sql, parse_sql_end, parse_template};
-    use crate::types::{ParsedItem, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias,
+    use crate::types::{ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias,
                        SqlDbObject, SqlEnding, SqlLiteral};
 
     use crate::types::value::Value;
@@ -668,15 +667,14 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::tests::{build_parsed_binding_item, build_parsed_db_object,
-                       build_parsed_ending_item, build_parsed_item, build_parsed_keyword_item,
-                       build_parsed_literal_item, build_parsed_path_position,
+                       build_parsed_ending_item, build_parsed_item,
+                       build_parsed_path_position,
                        build_parsed_quoted_binding_item, build_parsed_sql_binding,
                        build_parsed_sql_ending, build_parsed_sql_keyword,
                        build_parsed_sql_literal, build_parsed_sql_quoted_binding,
                        build_parsed_string, build_span};
 
     use nom::types::CompleteStr;
-    use nom::{multispace, IResult};
 
     fn simple_aliases(
         shift_line: Option<u32>,

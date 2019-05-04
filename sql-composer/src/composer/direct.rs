@@ -4,9 +4,7 @@ use super::{Composer, ComposerConfig};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::types::value::{Rows, ToValue, Value};
-
-use serde::ser::Serializer;
+use crate::types::value::ToValue;
 
 pub struct Connection();
 

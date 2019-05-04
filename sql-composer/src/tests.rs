@@ -1,10 +1,9 @@
 use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
-use std::fmt;
 use std::fmt::Debug;
 
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 
 pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
     item: T,

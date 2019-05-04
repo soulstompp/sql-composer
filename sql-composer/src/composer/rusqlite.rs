@@ -1,27 +1,30 @@
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::types::{ToSqlOutput, Value as DriverValue, ValueRef};
-use rusqlite::{Connection, Rows, Statement, NO_PARAMS};
-
+use rusqlite::types::{ToSqlOutput};
+use rusqlite::{Connection, Statement};
 
 pub use rusqlite::types::{Null, ToSql};
 
 use super::{Composer, ComposerConfig, ComposerConnection};
 
-use crate::types::{CompleteStr, ParsedItem, Span, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use serde::ser::Serialize;
-
-use crate::types::value::{Column, Row, ToValue, Value};
+use crate::types::value::Value;
 
 use std::convert::From;
 
-impl <'a>ComposerConnection<'a> for Connection {
+impl<'a> ComposerConnection<'a> for Connection {
     type Composer = RusqliteComposer<'a>;
     type Value = &'a (dyn ToSql + 'a);
     type Statement = Statement<'a>;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = RusqliteComposer {
             config: RusqliteComposer::config(),
             values,
@@ -147,7 +150,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, RusqliteComposer, ComposerConnection};
+    use super::{Composer, ComposerConnection, RusqliteComposer};
 
     use crate::types::{Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
 
@@ -324,7 +327,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -349,7 +352,7 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&mock_rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -415,7 +418,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -442,7 +445,7 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&mock_rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -513,7 +516,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -540,7 +543,7 @@ mod tests {
 
         let rows = mock_prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -605,7 +608,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -722,7 +725,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -813,7 +816,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -910,7 +913,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -1007,7 +1010,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -1041,7 +1044,9 @@ mod tests {
         values.insert("c".into(), vec![&"c_value"]);
         values.insert("d".into(), vec![&"d_value"]);
 
-        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+        let (mut prep_stmt, bindings) = conn
+            .compose(&stmt.item, values, vec![], HashMap::new())
+            .unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -1052,7 +1057,7 @@ mod tests {
 
         let rows = prep_stmt
             .query_map(&rebindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |mut acc, i| {
+                (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
                         Ok(acc)
@@ -1069,9 +1074,12 @@ mod tests {
             println!("values: {:?}", values);
         }
 
-        let expected: Vec<Vec<String>> = vec![
-            vec!["a_value".into(), "b_value".into(), "c_value".into(), "d_value".into()],
-        ];
+        let expected: Vec<Vec<String>> = vec![vec![
+            "a_value".into(),
+            "b_value".into(),
+            "c_value".into(),
+            "d_value".into(),
+        ]];
 
         assert_eq!(values, expected, "exected values");
     }

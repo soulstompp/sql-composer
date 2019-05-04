@@ -6,8 +6,6 @@ use std::str;
 
 use crate::types::{Position, SqlComposition, SqlCompositionAlias};
 
-use nom::{Err, ErrorKind as NomErrorKind};
-
 use nom::types::CompleteStr;
 use nom_locate::LocatedSpan;
 

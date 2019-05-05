@@ -231,12 +231,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        conn.execute(&bound_sql, &rebindings).unwrap();
+        conn.execute(&bound_sql, &bindings).unwrap();
 
         let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)'".into()), None).unwrap();
 
@@ -250,13 +245,8 @@ mod tests {
 
         let mut stmt = conn.prepare(&bound_sql).unwrap();
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let person_iter = stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 Ok(Person {
                     id:           row.get(0).unwrap(),
                     name:         row.get(1).unwrap(),
@@ -320,13 +310,8 @@ mod tests {
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -345,13 +330,8 @@ mod tests {
 
         let mut mock_prep_stmt = conn.prepare(&mock_bound_sql).unwrap();
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = mock_prep_stmt
-            .query_map(&mock_rebindings, |row| {
+            .query_map(&mock_bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -411,13 +391,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -438,13 +413,8 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = mock_prep_stmt
-            .query_map(&mock_rebindings, |row| {
+            .query_map(&mock_bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -509,13 +479,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -536,13 +501,8 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = mock_prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -601,13 +561,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -666,13 +621,8 @@ mod tests {
 
         let mut values: Vec<Vec<Option<i64>>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| Ok(vec![row.get(0).unwrap()]))
+            .query_map(&bindings, |row| Ok(vec![row.get(0).unwrap()]))
             .unwrap();
 
         for row in rows {
@@ -718,13 +668,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -809,13 +754,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -906,13 +846,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -1003,13 +938,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());
@@ -1050,13 +980,8 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let rows = prep_stmt
-            .query_map(&rebindings, |row| {
+            .query_map(&bindings, |row| {
                 (0..4).fold(Ok(Vec::new()), |acc, i| {
                     if let Ok(mut acc) = acc {
                         acc.push(row.get(i).unwrap());

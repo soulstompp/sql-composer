@@ -187,12 +187,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        conn.execute(&bound_sql, &rebindings).unwrap();
+        conn.execute(&bound_sql, &bindings).unwrap();
 
         let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';".into()), None).unwrap();
 
@@ -208,12 +203,7 @@ mod tests {
 
         let mut people: Vec<Person> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &stmt.query(&rebindings).unwrap() {
+        for row in &stmt.query(&bindings).unwrap() {
             people.push(Person {
                 id:   row.get(0),
                 name: row.get(1),
@@ -265,23 +255,13 @@ mod tests {
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
         let mock_prep_stmt = conn.prepare(&mock_bound_sql).unwrap();
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &mock_prep_stmt.query(&mock_rebindings).unwrap() {
+        for row in &mock_prep_stmt.query(&mock_bindings).unwrap() {
             mock_values.push(get_row_values(row));
         }
 
@@ -328,12 +308,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -341,12 +316,7 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &mock_prep_stmt.query(&mock_rebindings).unwrap() {
+        for row in &mock_prep_stmt.query(&mock_bindings).unwrap() {
             mock_values.push(get_row_values(row));
         }
 
@@ -399,12 +369,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -412,12 +377,7 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &mock_prep_stmt.query(&mock_rebindings).unwrap() {
+        for row in &mock_prep_stmt.query(&mock_bindings).unwrap() {
             mock_values.push(get_row_values(row));
         }
 
@@ -465,12 +425,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
         assert_eq!(values, expected_values, "expected values");
@@ -514,12 +469,7 @@ mod tests {
 
         let mut values: Vec<Vec<Option<i64>>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(vec![row.get(0)]);
         }
 
@@ -562,12 +512,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -639,12 +584,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -720,12 +660,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -801,12 +736,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 
@@ -830,12 +760,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in &prep_stmt.query(&rebindings).unwrap() {
+        for row in &prep_stmt.query(&bindings).unwrap() {
             values.push(get_row_values(row));
         }
 

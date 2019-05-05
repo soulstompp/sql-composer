@@ -197,12 +197,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        let _res = &pool.prep_exec(&bound_sql, &rebindings.as_slice());
+        let _res = &pool.prep_exec(&bound_sql, &bindings.as_slice());
 
         let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';".into()), None).unwrap();
 
@@ -214,13 +209,8 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
         let people: Vec<Person> = pool
-            .prep_exec(&bound_sql, &rebindings.as_slice())
+            .prep_exec(&bound_sql, &bindings.as_slice())
             .map(|result| {
                 result
                     .map(|x| x.unwrap())
@@ -291,23 +281,13 @@ mod tests {
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
         let _mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(mock_rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(mock_bindings.as_slice()).unwrap() {
             mock_values.push(get_row_values(row.unwrap()));
         }
 
@@ -357,12 +337,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -370,12 +345,7 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in mock_prep_stmt.execute(&mock_rebindings.as_slice()).unwrap() {
+        for row in mock_prep_stmt.execute(&mock_bindings.as_slice()).unwrap() {
             mock_values.push(get_row_values(row.unwrap()));
         }
 
@@ -431,12 +401,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -446,12 +411,7 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let mock_rebindings = mock_bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in mock_prep_stmt.execute(&mock_rebindings.as_slice()).unwrap() {
+        for row in mock_prep_stmt.execute(&mock_bindings.as_slice()).unwrap() {
             let mut c: Vec<String> = vec![];
 
             let (col_1, col_2, col_3, col_4) =
@@ -507,12 +467,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -559,12 +514,7 @@ mod tests {
 
         let mut values: Vec<Vec<usize>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
             let count = from_row::<(usize)>(row.unwrap());
             values.push(vec![count]);
         }
@@ -610,12 +560,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -689,12 +634,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -773,12 +713,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -858,12 +793,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(&rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 
@@ -886,12 +816,7 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rebindings = bindings.iter().fold(Vec::new(), |mut acc, x| {
-            acc.push(*x);
-            acc
-        });
-
-        for row in prep_stmt.execute(rebindings.as_slice()).unwrap() {
+        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
             values.push(get_row_values(row.unwrap()));
         }
 

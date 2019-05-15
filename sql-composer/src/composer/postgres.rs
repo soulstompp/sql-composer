@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
-use postgres::types::ToSql;
+use postgres::types::{ToSql, Type, IsNull};
 use postgres::Connection;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias, value::Value};
+
+use std::error::Error;
 
 impl <'a>ComposerConnection<'a> for Connection {
     type Composer = PostgresComposer<'a>;
@@ -30,6 +32,36 @@ impl <'a>ComposerConnection<'a> for Connection {
 
         Ok((stmt, bind_vars))
     }
+}
+
+impl ToSql for Value {
+    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        match self {
+            Value::Text(t) => {
+                <String as ToSql>::to_sql(t, ty, w)?;
+            },
+            Value::Integer(i) => {
+                <i64 as ToSql>::to_sql(i, ty, w)?;
+            },
+            Value::Real(r) => {
+                <f64 as ToSql>::to_sql(r, ty, w)?;
+            },
+            _ => { unimplemented!("unable to convert unexpected Value type") }
+        }
+
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        if <String as ToSql>::accepts(ty) || <i64 as ToSql>::accepts(ty) || <f64 as ToSql>::accepts(ty) {
+            true
+        }
+        else {
+            false
+        }
+    }
+
+    to_sql_checked!();
 }
 
 #[derive(Default)]

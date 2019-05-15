@@ -24,6 +24,8 @@
 extern crate nom;
 #[macro_use]
 extern crate nom_locate;
+#[macro_use]
+extern crate postgres;
 
 pub mod composer;
 pub mod error;

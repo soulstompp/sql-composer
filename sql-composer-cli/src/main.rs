@@ -186,11 +186,9 @@ fn query(args: QueryArgs) -> CliResult {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let mut serializer = serde_json::Serializer::new(io::stdout());
-
         let driver_rows = &prep_stmt.query(&bindings).unwrap();
 
-        for driver_row in driver_rows {
+        let vv = driver_rows.iter().fold(vec![], |mut value_maps, driver_row| {
             let bt: BTreeMap<SerdeValue, SerdeValue> = driver_row
                 .columns()
                 .iter()
@@ -222,12 +220,20 @@ fn query(args: QueryArgs) -> CliResult {
                     acc
                 });
 
-            serde_transcode::transcode(SerdeValue::Map(bt), &mut serializer).unwrap();
-        }
+            value_maps.push(SerdeValue::Map(bt));
+            value_maps
+        });
+
+        output(SerdeValue::Seq(vv));
     }
     else {
         panic!("unknown uri type: {}", uri);
     }
 
     Ok(())
+}
+
+fn output(v: SerdeValue) {
+    let mut serializer = serde_json::Serializer::new(io::stdout());
+    serde_transcode::transcode(v, &mut serializer).unwrap();
 }

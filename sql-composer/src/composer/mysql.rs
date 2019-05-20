@@ -2,12 +2,30 @@ use std::collections::{BTreeMap, HashMap};
 
 use mysql::{Stmt, prelude::ToValue};
 
+use mysql::Value;
+
 use super::{Composer, ComposerConnection, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias, value::Value as ComposerValue};
 
 use mysql::Pool;
 
+impl Into<Value> for ComposerValue {
+    fn into(self) -> Value {
+        match self {
+            ComposerValue::Text(t) => {
+                Value::Bytes(t.into_bytes())
+            },
+            ComposerValue::Integer(i) => {
+                Value::Int(i)
+            },
+            ComposerValue::Real(r) => {
+                Value::Float(r)
+            },
+            _ => { unimplemented!("unable to convert unexpected ComposerValue type") }
+        }
+    }
+}
 impl <'a>ComposerConnection<'a> for Pool {
     type Composer = MysqlComposer<'a>;
     type Value = &'a (dyn ToValue + 'a);

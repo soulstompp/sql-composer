@@ -8,6 +8,10 @@ use std::collections::{BTreeMap, HashMap};
 use sql_composer::parser::bind_value_named_set;
 use sql_composer::types::{CompleteStr, Span};
 
+use mysql::prelude::ToValue as MySqlToSql;
+use mysql::Pool;
+use mysql::Value as MySqlValue;
+
 use postgres::types as pg_types;
 use postgres::types::ToSql as PgToSql;
 use postgres::{Connection as PgConnection, TlsMode as PgTlsMode};
@@ -59,6 +63,8 @@ enum Cli {
 }
 
 /*
+../target/release/sqlc query --uri mysql://vagrant:password@localhost:3306/vagrant --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
+
 ../target/release/sqlc query --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
 
 ../target/release/sqlc query --uri postgres://vagrant:vagrant@localhost:5432 --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
@@ -101,7 +107,10 @@ fn query(args: QueryArgs) -> CliResult {
         parsed_values = bvns;
     }
 
-    if uri.starts_with("sqlite://") {
+    if uri.starts_with("mysql://") {
+        query_mysql(uri, comp, parsed_values)?;
+    }
+    else if uri.starts_with("sqlite://") {
         //TODO: base off of uri
         let conn = match uri.as_str() {
             "sqlite://:memory:" => RusqliteConnection::open_in_memory().unwrap(),
@@ -239,6 +248,97 @@ fn query(args: QueryArgs) -> CliResult {
     else {
         panic!("unknown uri type: {}", uri);
     }
+
+    Ok(())
+}
+
+fn query_mysql(
+    uri: String,
+    comp: SqlComposition,
+    params: BTreeMap<String, Vec<Value>>,
+) -> CliResult {
+    let pool = Pool::new(uri).unwrap();
+
+    let values: BTreeMap<String, Vec<&MySqlToSql>> =
+        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+            let entry = acc.entry(k.to_string()).or_insert(vec![]);
+            *entry = v.iter().map(|x| x as &MySqlToSql).collect();
+
+            acc
+        });
+
+    let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
+
+    let mut values: Vec<Vec<String>> = vec![];
+
+    let driver_rows = prep_stmt.execute(bindings.as_slice()).unwrap();
+
+    let vv = driver_rows
+        .into_iter()
+        .fold(vec![], |mut value_maps, driver_row| {
+            let driver_row = driver_row.unwrap();
+
+            let bt: BTreeMap<SerdeValue, SerdeValue> = driver_row
+                .columns_ref()
+                .iter()
+                .enumerate()
+                .fold(BTreeMap::new(), |mut acc, (i, column)| {
+                    let v = match driver_row.as_ref(i) {
+                        Some(MySqlValue::NULL) => SerdeValue::Unit,
+                        Some(MySqlValue::Bytes(b)) => {
+                            SerdeValue::String(String::from_utf8(b.to_vec()).unwrap())
+                        }
+                        Some(MySqlValue::Int(i)) => SerdeValue::I64(*i),
+                        Some(MySqlValue::UInt(u)) => SerdeValue::U64(*u),
+                        Some(MySqlValue::Float(f)) => SerdeValue::F64(*f),
+                        Some(MySqlValue::Date(
+                            year,
+                            month,
+                            day,
+                            hour,
+                            minutes,
+                            seconds,
+                            micro_seconds,
+                        )) => SerdeValue::Seq(vec![
+                            SerdeValue::U16(*year),
+                            SerdeValue::U8(*month),
+                            SerdeValue::U8(*day),
+                            SerdeValue::U8(*hour),
+                            SerdeValue::U8(*minutes),
+                            SerdeValue::U8(*seconds),
+                            SerdeValue::U32(*micro_seconds),
+                        ]),
+                        Some(MySqlValue::Time(
+                            is_negative,
+                            days,
+                            hours,
+                            minutes,
+                            seconds,
+                            micro_seconds,
+                        )) => SerdeValue::Seq(vec![
+                            SerdeValue::Bool(*is_negative),
+                            SerdeValue::U32(*days),
+                            SerdeValue::U8(*hours),
+                            SerdeValue::U8(*minutes),
+                            SerdeValue::U8(*seconds),
+                            SerdeValue::U32(*micro_seconds),
+                        ]),
+                        None => unreachable!("A none value isn't right"),
+                        _ => unreachable!("unmatched mysql value"),
+                    };
+
+                    let _ = acc
+                        .entry(SerdeValue::String(column.name_str().to_string()))
+                        .or_insert(v);
+
+                    acc
+                });
+
+            value_maps.push(SerdeValue::Map(bt));
+            value_maps
+        });
+
+    output(SerdeValue::Seq(vv));
 
     Ok(())
 }

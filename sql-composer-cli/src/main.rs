@@ -12,6 +12,7 @@ use sql_composer::types::{CompleteStr, Span};
 use serde_value::Value;
 
 use std::io;
+use std::path::Path;
 
 #[cfg(feature = "dbd-mysql")]
 use mysql::prelude::ToValue as MySqlToSql;
@@ -94,12 +95,6 @@ fn setup(verbosity: Verbosity) -> CliResult {
     Ok(())
 }
 
-fn parse(args: QueryArgs) -> CliResult {
-    setup(args.verbosity)?;
-
-    Ok(())
-}
-
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
 
@@ -165,8 +160,6 @@ fn query_mysql(
 
     let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
-    let mut values: Vec<Vec<String>> = vec![];
-
     let driver_rows = prep_stmt.execute(bindings.as_slice()).unwrap();
 
     let vv = driver_rows
@@ -218,7 +211,6 @@ fn query_mysql(
                             Value::U32(*micro_seconds),
                         ]),
                         None => unreachable!("A none value isn't right"),
-                        _ => unreachable!("unmatched mysql value"),
                     };
 
                     let _ = acc
@@ -244,7 +236,7 @@ fn query_postgres(
     comp: SqlComposition,
     params: BTreeMap<String, Vec<SerdeValue>>,
 ) -> CliResult {
-    let conn = PgConnection::connect("postgres://vagrant:vagrant@localhost:5432", PgTlsMode::None)
+    let conn = PgConnection::connect(uri, PgTlsMode::None)
         .unwrap();
 
     let values: BTreeMap<String, Vec<&PgToSql>> =
@@ -255,9 +247,7 @@ fn query_postgres(
             acc
         });
 
-    let (mut prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
-
-    let mut values: Vec<Vec<String>> = vec![];
+    let (prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
     let driver_rows = &prep_stmt.query(&bindings).unwrap();
 
@@ -308,7 +298,16 @@ fn query_rusqlite(
     //TODO: base off of uri
     let conn = match uri.as_str() {
         "sqlite://:memory:" => RusqliteConnection::open_in_memory().unwrap(),
-        _ => unimplemented!("not currently passing uri correctly"),
+        u @ _ => {
+            if u.starts_with("sqlite://") {
+                let (_, path_str) = u.split_at(9);
+
+                RusqliteConnection::open(Path::new(path_str)).unwrap()
+            }
+            else {
+                unreachable!("query_rusqlite called with the wrong type of uri");
+            }
+        }
     };
 
     let values: BTreeMap<String, Vec<&RusqliteToSql>> =

@@ -1,27 +1,35 @@
 use quicli::prelude::*;
 use structopt::StructOpt;
 
-use sql_composer::composer::ComposerConnection;
 use sql_composer::types::{value::Value, SqlComposition};
 use std::collections::{BTreeMap, HashMap};
 
+use sql_composer::composer::ComposerConnection;
 use sql_composer::parser::bind_value_named_set;
 use sql_composer::types::{CompleteStr, Span};
-
-use mysql::prelude::ToValue as MySqlToSql;
-use mysql::Pool;
-use mysql::Value as MySqlValue;
-
-use postgres::types as pg_types;
-use postgres::types::ToSql as PgToSql;
-use postgres::{Connection as PgConnection, TlsMode as PgTlsMode};
-
-pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
-use rusqlite::Connection as RusqliteConnection;
 
 use serde_value::Value as SerdeValue;
 
 use std::io;
+
+#[cfg(feature = "dbd-mysql")]
+use mysql::prelude::ToValue as MySqlToSql;
+#[cfg(feature = "dbd-mysql")]
+use mysql::Pool;
+#[cfg(feature = "dbd-mysql")]
+use mysql::Value as MySqlValue;
+
+#[cfg(feature = "dbd-postgres")]
+use postgres::types as pg_types;
+#[cfg(feature = "dbd-postgres")]
+use postgres::types::ToSql as PgToSql;
+#[cfg(feature = "dbd-postgres")]
+use postgres::{Connection as PgConnection, TlsMode as PgTlsMode};
+
+#[cfg(feature = "dbd-rusqlite")]
+pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
+#[cfg(feature = "dbd-rusqlite")]
+use rusqlite::Connection as RusqliteConnection;
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -63,11 +71,11 @@ enum Cli {
 }
 
 /*
-../target/release/sqlc query --uri mysql://vagrant:password@localhost:3306/vagrant --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
+../target/release/sqlc query --uri mysql://vagrant:password@localhost:3306/vagrant --path /vol/projects/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
 
-../target/release/sqlc query --uri sqlite://:memory: --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
+../target/release/sqlc query --uri sqlite://:memory: --path /vol/projects/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
 
-../target/release/sqlc query --uri postgres://vagrant:vagrant@localhost:5432 --path /vol/projects/sql-composer/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
+../target/release/sqlc query --uri postgres://vagrant:vagrant@localhost:5432 --path /vol/projects/sql-composer/src/tests/values/double-include.tql --bind "[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]" -vvv
 */
 fn main() -> CliResult {
     let args = Cli::from_args();
@@ -108,12 +116,27 @@ fn query(args: QueryArgs) -> CliResult {
     }
 
     if uri.starts_with("mysql://") {
+        if cfg!(feature = "dbd-mysql") == false {
+            panic!("cli not built with dbd-mysql feature");
+        }
+
+        #[cfg(feature = "dbd-mysql")]
         query_mysql(uri, comp, parsed_values)?;
     }
     else if uri.starts_with("postgres://") {
+        if cfg!(feature = "dbd-postgres") == false {
+            panic!("cli not built with dbd-postgres feature");
+        }
+
+        #[cfg(feature = "dbd-postgres")]
         query_postgres(uri, comp, parsed_values)?;
     }
     else if uri.starts_with("sqlite://") {
+        if cfg!(feature = "dbd-rusqlite") == false {
+            panic!("cli not built with dbd-rusqlite feature");
+        }
+
+        #[cfg(feature = "dbd-rusqlite")]
         query_rusqlite(uri, comp, parsed_values)?;
     }
     else {
@@ -123,6 +146,7 @@ fn query(args: QueryArgs) -> CliResult {
     Ok(())
 }
 
+#[cfg(feature = "dbd-mysql")]
 fn query_mysql(
     uri: String,
     comp: SqlComposition,
@@ -214,6 +238,7 @@ fn query_mysql(
     Ok(())
 }
 
+#[cfg(feature = "dbd-postgres")]
 fn query_postgres(
     uri: String,
     comp: SqlComposition,
@@ -279,6 +304,7 @@ fn query_postgres(
     Ok(())
 }
 
+#[cfg(feature = "dbd-rusqlite")]
 fn query_rusqlite(
     uri: String,
     comp: SqlComposition,

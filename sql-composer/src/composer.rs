@@ -1,12 +1,14 @@
 pub mod direct;
 
+#[cfg(feature = "dbd-mysql")]
 pub mod mysql;
+#[cfg(feature = "dbd-postgres")]
 pub mod postgres;
+#[cfg(feature = "dbd-rusqlite")]
 pub mod rusqlite;
 
 pub use crate::parser::{bind_value_named_set, parse_template};
-use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias,
-                   SqlDbObject};
+use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
 pub trait ComposerConnection<'a> {
@@ -15,7 +17,13 @@ pub trait ComposerConnection<'a> {
     type Value;
     type Statement;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
 }
 
 #[derive(Default)]

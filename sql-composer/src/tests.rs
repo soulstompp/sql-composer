@@ -3,7 +3,7 @@ use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, Sql
 
 use std::fmt::Debug;
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
     item: T,

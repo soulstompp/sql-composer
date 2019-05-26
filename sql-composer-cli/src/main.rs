@@ -1,14 +1,15 @@
 use quicli::prelude::*;
 use structopt::StructOpt;
 
-use sql_composer::types::{value::Value, SqlComposition};
+use sql_composer::types::{SerdeValue, SqlComposition};
 use std::collections::{BTreeMap, HashMap};
 
 use sql_composer::composer::ComposerConnection;
+
 use sql_composer::parser::bind_value_named_set;
 use sql_composer::types::{CompleteStr, Span};
 
-use serde_value::Value as SerdeValue;
+use serde_value::Value;
 
 use std::io;
 
@@ -107,7 +108,7 @@ fn query(args: QueryArgs) -> CliResult {
 
     let uri = args.uri;
 
-    let mut parsed_values: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut parsed_values: BTreeMap<String, Vec<SerdeValue>> = BTreeMap::new();
 
     if let Some(b) = args.bind {
         let (_remaining, bvns) = bind_value_named_set(Span::new(CompleteStr(&b))).unwrap();
@@ -150,7 +151,7 @@ fn query(args: QueryArgs) -> CliResult {
 fn query_mysql(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<Value>>,
+    params: BTreeMap<String, Vec<SerdeValue>>,
 ) -> CliResult {
     let pool = Pool::new(uri).unwrap();
 
@@ -173,19 +174,17 @@ fn query_mysql(
         .fold(vec![], |mut value_maps, driver_row| {
             let driver_row = driver_row.unwrap();
 
-            let bt: BTreeMap<SerdeValue, SerdeValue> = driver_row
-                .columns_ref()
-                .iter()
-                .enumerate()
-                .fold(BTreeMap::new(), |mut acc, (i, column)| {
+            let bt: BTreeMap<Value, Value> = driver_row.columns_ref().iter().enumerate().fold(
+                BTreeMap::new(),
+                |mut acc, (i, column)| {
                     let v = match driver_row.as_ref(i) {
-                        Some(MySqlValue::NULL) => SerdeValue::Unit,
+                        Some(MySqlValue::NULL) => Value::Unit,
                         Some(MySqlValue::Bytes(b)) => {
-                            SerdeValue::String(String::from_utf8(b.to_vec()).unwrap())
+                            Value::String(String::from_utf8(b.to_vec()).unwrap())
                         }
-                        Some(MySqlValue::Int(i)) => SerdeValue::I64(*i),
-                        Some(MySqlValue::UInt(u)) => SerdeValue::U64(*u),
-                        Some(MySqlValue::Float(f)) => SerdeValue::F64(*f),
+                        Some(MySqlValue::Int(i)) => Value::I64(*i),
+                        Some(MySqlValue::UInt(u)) => Value::U64(*u),
+                        Some(MySqlValue::Float(f)) => Value::F64(*f),
                         Some(MySqlValue::Date(
                             year,
                             month,
@@ -194,14 +193,14 @@ fn query_mysql(
                             minutes,
                             seconds,
                             micro_seconds,
-                        )) => SerdeValue::Seq(vec![
-                            SerdeValue::U16(*year),
-                            SerdeValue::U8(*month),
-                            SerdeValue::U8(*day),
-                            SerdeValue::U8(*hour),
-                            SerdeValue::U8(*minutes),
-                            SerdeValue::U8(*seconds),
-                            SerdeValue::U32(*micro_seconds),
+                        )) => Value::Seq(vec![
+                            Value::U16(*year),
+                            Value::U8(*month),
+                            Value::U8(*day),
+                            Value::U8(*hour),
+                            Value::U8(*minutes),
+                            Value::U8(*seconds),
+                            Value::U32(*micro_seconds),
                         ]),
                         Some(MySqlValue::Time(
                             is_negative,
@@ -210,30 +209,31 @@ fn query_mysql(
                             minutes,
                             seconds,
                             micro_seconds,
-                        )) => SerdeValue::Seq(vec![
-                            SerdeValue::Bool(*is_negative),
-                            SerdeValue::U32(*days),
-                            SerdeValue::U8(*hours),
-                            SerdeValue::U8(*minutes),
-                            SerdeValue::U8(*seconds),
-                            SerdeValue::U32(*micro_seconds),
+                        )) => Value::Seq(vec![
+                            Value::Bool(*is_negative),
+                            Value::U32(*days),
+                            Value::U8(*hours),
+                            Value::U8(*minutes),
+                            Value::U8(*seconds),
+                            Value::U32(*micro_seconds),
                         ]),
                         None => unreachable!("A none value isn't right"),
                         _ => unreachable!("unmatched mysql value"),
                     };
 
                     let _ = acc
-                        .entry(SerdeValue::String(column.name_str().to_string()))
+                        .entry(Value::String(column.name_str().to_string()))
                         .or_insert(v);
 
                     acc
-                });
+                },
+            );
 
-            value_maps.push(SerdeValue::Map(bt));
+            value_maps.push(Value::Map(bt));
             value_maps
         });
 
-    output(SerdeValue::Seq(vv));
+    output(Value::Seq(vv));
 
     Ok(())
 }
@@ -242,7 +242,7 @@ fn query_mysql(
 fn query_postgres(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<Value>>,
+    params: BTreeMap<String, Vec<SerdeValue>>,
 ) -> CliResult {
     let conn = PgConnection::connect("postgres://vagrant:vagrant@localhost:5432", PgTlsMode::None)
         .unwrap();
@@ -264,42 +264,37 @@ fn query_postgres(
     let vv = driver_rows
         .iter()
         .fold(vec![], |mut value_maps, driver_row| {
-            let bt: BTreeMap<SerdeValue, SerdeValue> = driver_row
-                .columns()
-                .iter()
-                .enumerate()
-                .fold(BTreeMap::new(), |mut acc, (i, column)| {
+            let bt: BTreeMap<Value, Value> = driver_row.columns().iter().enumerate().fold(
+                BTreeMap::new(),
+                |mut acc, (i, column)| {
                     let v = match *column.type_() {
-                        pg_types::BOOL => SerdeValue::Bool(driver_row.get_opt(i).unwrap().unwrap()),
-                        pg_types::CHAR => SerdeValue::I8(driver_row.get_opt(i).unwrap().unwrap()),
-                        pg_types::INT2 => SerdeValue::I16(driver_row.get_opt(i).unwrap().unwrap()),
-                        pg_types::INT4 => SerdeValue::I32(driver_row.get_opt(i).unwrap().unwrap()),
-                        pg_types::OID => SerdeValue::U32(driver_row.get_opt(i).unwrap().unwrap()),
-                        pg_types::INT8 => SerdeValue::I64(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::BOOL => Value::Bool(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::CHAR => Value::I8(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::INT2 => Value::I16(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::INT4 => Value::I32(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::OID => Value::U32(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::INT8 => Value::I64(driver_row.get_opt(i).unwrap().unwrap()),
                         pg_types::VARCHAR | pg_types::TEXT | pg_types::NAME => {
-                            SerdeValue::String(driver_row.get_opt(i).unwrap().unwrap())
+                            Value::String(driver_row.get_opt(i).unwrap().unwrap())
                         }
-                        pg_types::FLOAT4 => {
-                            SerdeValue::F32(driver_row.get_opt(i).unwrap().unwrap())
-                        }
-                        pg_types::FLOAT8 => {
-                            SerdeValue::F64(driver_row.get_opt(i).unwrap().unwrap())
-                        }
+                        pg_types::FLOAT4 => Value::F32(driver_row.get_opt(i).unwrap().unwrap()),
+                        pg_types::FLOAT8 => Value::F64(driver_row.get_opt(i).unwrap().unwrap()),
                         _ => unreachable!("shouldn't get here!"),
                     };
 
                     let _ = acc
-                        .entry(SerdeValue::String(column.name().to_string()))
+                        .entry(Value::String(column.name().to_string()))
                         .or_insert(v);
 
                     acc
-                });
+                },
+            );
 
-            value_maps.push(SerdeValue::Map(bt));
+            value_maps.push(Value::Map(bt));
             value_maps
         });
 
-    output(SerdeValue::Seq(vv));
+    output(Value::Seq(vv));
 
     Ok(())
 }
@@ -308,7 +303,7 @@ fn query_postgres(
 fn query_rusqlite(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<Value>>,
+    params: BTreeMap<String, Vec<SerdeValue>>,
 ) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
@@ -337,19 +332,19 @@ fn query_rusqlite(
             let map = column_names.iter().enumerate().fold(
                 BTreeMap::new(),
                 |mut acc, (i, column_name)| {
-                    let _ = acc
-                        .entry(SerdeValue::String(column_name.to_string()))
-                        .or_insert(match driver_row.get_raw(i) {
-                            RusqliteValueRef::Null => SerdeValue::Unit,
-                            RusqliteValueRef::Integer(int) => SerdeValue::I64(int),
-                            RusqliteValueRef::Real(r) => SerdeValue::F64(r),
-                            RusqliteValueRef::Text(t) => SerdeValue::String(t.to_string()),
+                    let _ = acc.entry(Value::String(column_name.to_string())).or_insert(
+                        match driver_row.get_raw(i) {
+                            RusqliteValueRef::Null => Value::Unit,
+                            RusqliteValueRef::Integer(int) => Value::I64(int),
+                            RusqliteValueRef::Real(r) => Value::F64(r),
+                            RusqliteValueRef::Text(t) => Value::String(t.to_string()),
                             RusqliteValueRef::Blob(vc) => {
                                 let s = std::string::String::from_utf8(vc.to_vec()).unwrap();
 
-                                SerdeValue::String(s)
+                                Value::String(s)
                             }
-                        });
+                        },
+                    );
 
                     acc
                 },
@@ -362,15 +357,15 @@ fn query_rusqlite(
     let mut seq = vec![];
 
     for driver_row in driver_rows {
-        seq.push(SerdeValue::Map(driver_row.unwrap()));
+        seq.push(Value::Map(driver_row.unwrap()));
     }
 
-    output(SerdeValue::Seq(seq));
+    output(Value::Seq(seq));
 
     Ok(())
 }
 
-fn output(v: SerdeValue) {
+fn output(v: Value) {
     let mut serializer = serde_json::Serializer::new(io::stdout());
     serde_transcode::transcode(v, &mut serializer).unwrap();
 }

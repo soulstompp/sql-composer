@@ -1,21 +1,33 @@
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
-use postgres::types::{ToSql, Type, IsNull};
+use postgres::types::{IsNull, ToSql, Type};
 use postgres::Connection;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias, value::Value};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+
+#[cfg(feature = "composer-serde")]
+use crate::types::SerdeValue;
+
+#[cfg(feature = "composer-serde")]
+use serde_value::Value;
 
 use std::error::Error;
 
-impl <'a>ComposerConnection<'a> for Connection {
+impl<'a> ComposerConnection<'a> for Connection {
     type Composer = PostgresComposer<'a>;
     type Value = &'a (dyn ToSql + 'a);
     type Statement = Statement<'a>;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<&'a ToSql>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<&'a ToSql>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = PostgresComposer {
             config: PostgresComposer::config(),
             values,
@@ -34,26 +46,30 @@ impl <'a>ComposerConnection<'a> for Connection {
     }
 }
 
-impl ToSql for Value {
+#[cfg(feature = "composer-serde")]
+impl ToSql for SerdeValue {
     fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        match self {
-            Value::Text(t) => {
-                <String as ToSql>::to_sql(t, ty, w)?;
-            },
-            Value::Integer(i) => {
+        match &self.0 {
+            Value::String(s) => {
+                <String as ToSql>::to_sql(s, ty, w)?;
+            }
+            Value::I64(i) => {
                 <i64 as ToSql>::to_sql(i, ty, w)?;
-            },
-            Value::Real(r) => {
-                <f64 as ToSql>::to_sql(r, ty, w)?;
-            },
-            _ => { unimplemented!("unable to convert unexpected Value type") }
+            }
+            Value::F64(f) => {
+                <f64 as ToSql>::to_sql(f, ty, w)?;
+            }
+            _ => unimplemented!("unable to convert unexpected Value type"),
         }
 
         Ok(IsNull::No)
     }
 
     fn accepts(ty: &Type) -> bool {
-        if <String as ToSql>::accepts(ty) || <i64 as ToSql>::accepts(ty) || <f64 as ToSql>::accepts(ty) {
+        if <String as ToSql>::accepts(ty)
+            || <i64 as ToSql>::accepts(ty)
+            || <f64 as ToSql>::accepts(ty)
+        {
             true
         }
         else {
@@ -788,7 +804,9 @@ mod tests {
         values.insert("c".into(), vec![&"c_value"]);
         values.insert("d".into(), vec![&"d_value"]);
 
-        let (prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+        let (prep_stmt, bindings) = conn
+            .compose(&stmt.item, values, vec![], HashMap::new())
+            .unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -796,9 +814,12 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        let expected: Vec<Vec<String>> = vec![
-            vec!["a_value".into(), "b_value".into(), "c_value".into(), "d_value".into()],
-        ];
+        let expected: Vec<Vec<String>> = vec![vec![
+            "a_value".into(),
+            "b_value".into(),
+            "c_value".into(),
+            "d_value".into(),
+        ]];
 
         assert_eq!(values, expected, "exected values");
     }

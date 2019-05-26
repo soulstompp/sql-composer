@@ -1,37 +1,43 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::{Stmt, prelude::ToValue};
+use mysql::{prelude::ToValue, Stmt};
 
 use mysql::Value;
 
-use super::{Composer, ComposerConnection, ComposerConfig};
+use super::{Composer, ComposerConfig, ComposerConnection};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias, value::Value as ComposerValue};
+use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+
+#[cfg(feature = "composer-serde")]
+use crate::types::SerdeValue;
+
+#[cfg(feature = "composer-serde")]
+use serde_value::Value as SerdeValueEnum;
 
 use mysql::Pool;
 
-impl Into<Value> for ComposerValue {
+impl Into<Value> for SerdeValue {
     fn into(self) -> Value {
-        match self {
-            ComposerValue::Text(t) => {
-                Value::Bytes(t.into_bytes())
-            },
-            ComposerValue::Integer(i) => {
-                Value::Int(i)
-            },
-            ComposerValue::Real(r) => {
-                Value::Float(r)
-            },
-            _ => { unimplemented!("unable to convert unexpected ComposerValue type") }
+        match self.0 {
+            SerdeValueEnum::String(s) => Value::Bytes(s.into_bytes()),
+            SerdeValueEnum::I64(i) => Value::Int(i),
+            SerdeValueEnum::F64(f) => Value::Float(f),
+            _ => unimplemented!("unable to convert unexpected ComposerValue type"),
         }
     }
 }
-impl <'a>ComposerConnection<'a> for Pool {
+impl<'a> ComposerConnection<'a> for Pool {
     type Composer = MysqlComposer<'a>;
     type Value = &'a (dyn ToValue + 'a);
     type Statement = Stmt<'a>;
 
-    fn compose(&'a self, s: &SqlComposition, values: BTreeMap<String, Vec<Self::Value>>, root_mock_values: Vec<BTreeMap<String, Self::Value>>, mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = MysqlComposer {
             config: MysqlComposer::config(),
             values,
@@ -153,8 +159,8 @@ mod tests {
     use super::{Composer, ComposerConnection, MysqlComposer};
     use crate::parser::parse_template;
     use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
-    use mysql::{from_row, Pool, Row};
     use mysql::prelude::ToValue;
+    use mysql::{from_row, Pool, Row};
 
     use std::collections::{BTreeMap, HashMap};
 
@@ -329,8 +335,7 @@ mod tests {
         composer.values.insert("d".into(), vec![&"d_value"]);
         composer.values.insert("e".into(), vec![&"e_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
-            vec![];
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> = vec![];
 
         mock_values.push(BTreeMap::new());
         mock_values[0].insert("col_1".into(), &"e_value");
@@ -389,8 +394,7 @@ mod tests {
         composer.values.insert("e".into(), vec![&"e_value"]);
         composer.values.insert("f".into(), vec![&"f_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
-            vec![];
+        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> = vec![];
 
         mock_values.push(BTreeMap::new());
         mock_values[0].insert("col_1".into(), &"d_value");
@@ -830,7 +834,9 @@ mod tests {
         values.insert("c".into(), vec![&"c_value"]);
         values.insert("d".into(), vec![&"d_value"]);
 
-        let (mut prep_stmt, bindings) = conn.compose(&stmt.item, values, vec![], HashMap::new()).unwrap();
+        let (mut prep_stmt, bindings) = conn
+            .compose(&stmt.item, values, vec![], HashMap::new())
+            .unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
 
@@ -838,9 +844,12 @@ mod tests {
             values.push(get_row_values(row.unwrap()));
         }
 
-        let expected: Vec<Vec<String>> = vec![
-            vec!["a_value".into(), "b_value".into(), "c_value".into(), "d_value".into()],
-        ];
+        let expected: Vec<Vec<String>> = vec![vec![
+            "a_value".into(),
+            "b_value".into(),
+            "c_value".into(),
+            "d_value".into(),
+        ]];
 
         assert_eq!(values, expected, "exected values");
     }

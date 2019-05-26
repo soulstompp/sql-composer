@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::types::{ToSqlOutput};
+use rusqlite::types::ToSqlOutput;
 use rusqlite::{Connection, Statement};
 
 pub use rusqlite::types::{Null, ToSql};
@@ -9,7 +9,11 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::types::value::Value;
+#[cfg(feature = "composer-serde")]
+use crate::types::SerdeValue;
+
+#[cfg(feature = "composer-serde")]
+use serde_value::Value;
 
 use std::convert::From;
 
@@ -43,12 +47,12 @@ impl<'a> ComposerConnection<'a> for Connection {
     }
 }
 
-impl ToSql for Value {
+impl ToSql for SerdeValue {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        match self {
-            Value::Text(t) => Ok(ToSqlOutput::from(t.as_str())),
-            Value::Integer(i) => Ok(ToSqlOutput::from(*i)),
-            Value::Real(r) => Ok(ToSqlOutput::from(*r)),
+        match &self.0 {
+            Value::String(s) => Ok(ToSqlOutput::from(s.as_str())),
+            Value::I64(i) => Ok(ToSqlOutput::from(*i)),
+            Value::F64(f) => Ok(ToSqlOutput::from(*f)),
             _ => unimplemented!("unsupported type"),
         }
     }

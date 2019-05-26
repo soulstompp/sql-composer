@@ -7,7 +7,10 @@ pub mod postgres;
 #[cfg(feature = "dbd-rusqlite")]
 pub mod rusqlite;
 
-pub use crate::parser::{bind_value_named_set, parse_template};
+#[cfg(feature = "composer-serde")]
+pub use crate::parser::bind_value_named_set;
+pub use crate::parser::parse_template;
+
 use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 

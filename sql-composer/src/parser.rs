@@ -669,9 +669,14 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_value_named_set, bind_value_named_sets, bind_value_set, column_list,
+    use super::{column_list,
                 db_object, db_object_alias_sql, parse_bindvar, parse_composer_macro,
                 parse_quoted_bindvar, parse_sql, parse_sql_end, parse_template};
+
+
+    #[cfg(feature = "composer-serde")]
+    use super::{bind_value_named_set, bind_value_named_sets, bind_value_set};
+
     use crate::types::{ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject,
                        SqlEnding, SqlLiteral};
 

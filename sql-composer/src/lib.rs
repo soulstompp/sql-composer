@@ -25,11 +25,13 @@ extern crate nom;
 #[macro_use]
 extern crate nom_locate;
 
+#[macro_use]
+pub mod composer;
+
 #[cfg(feature = "dbd-postgres")]
 #[macro_use]
 extern crate postgres;
 
-pub mod composer;
 pub mod error;
 pub mod parser;
 mod tests;

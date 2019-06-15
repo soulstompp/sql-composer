@@ -4,6 +4,8 @@ use mysql::{prelude::ToValue, Stmt};
 
 use mysql::Value;
 
+use crate::mock_values;
+
 use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
@@ -162,6 +164,8 @@ mod tests {
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
 
+    use crate::mock_values;
+
     use std::collections::{BTreeMap, HashMap};
 
     #[derive(Debug, PartialEq)]
@@ -287,16 +291,8 @@ mod tests {
         composer.values.insert("c".into(), vec![&"c_value"]);
         composer.values.insert("d".into(), vec![&"d_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> =
-            vec![BTreeMap::new()];
-
-        mock_values[0].insert("col_1".into(), &"a_value");
-        mock_values[0].insert("col_2".into(), &"b_value");
-        mock_values[0].insert("col_3".into(), &"c_value");
-        mock_values[0].insert("col_4".into(), &"d_value");
-
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-        composer.root_mock_values = mock_values;
+        composer.root_mock_values = mock_values!(&dyn ToValue: {"col_1" => &"a_value", "col_2" => &"b_value", "col_3" => &"c_value", "col_4" => &"d_value"});
 
         let (mock_bound_sql, mock_bindings) = composer.compose(&stmt.item);
 
@@ -394,25 +390,24 @@ mod tests {
         composer.values.insert("e".into(), vec![&"e_value"]);
         composer.values.insert("f".into(), vec![&"f_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> = vec![];
-
-        mock_values.push(BTreeMap::new());
-        mock_values[0].insert("col_1".into(), &"d_value");
-        mock_values[0].insert("col_2".into(), &"f_value");
-        mock_values[0].insert("col_3".into(), &"b_value");
-        mock_values[0].insert("col_4".into(), &"a_value");
-
-        mock_values.push(BTreeMap::new());
-        mock_values[1].insert("col_1".into(), &"e_value");
-        mock_values[1].insert("col_2".into(), &"d_value");
-        mock_values[1].insert("col_3".into(), &"b_value");
-        mock_values[1].insert("col_4".into(), &"a_value");
-
-        mock_values.push(BTreeMap::new());
-        mock_values[2].insert("col_1".into(), &"a_value");
-        mock_values[2].insert("col_2".into(), &"b_value");
-        mock_values[2].insert("col_3".into(), &"c_value");
-        mock_values[2].insert("col_4".into(), &"d_value");
+        let mut mock_values = mock_values!(&dyn ToValue: {
+        "col_1" => &"d_value",
+        "col_2" => &"f_value",
+        "col_3" => &"b_value",
+        "col_4" => &"a_value"
+        },
+        {
+        "col_1" => &"e_value",
+        "col_2" => &"d_value",
+        "col_3" => &"b_value",
+        "col_4" => &"a_value"
+        },
+        {
+        "col_1" => &"a_value",
+        "col_2" => &"b_value",
+        "col_3" => &"c_value",
+        "col_4" => &"d_value"
+        });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1);

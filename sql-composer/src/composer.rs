@@ -29,6 +29,56 @@ pub trait ComposerConnection<'a> {
     ) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
 }
 
+#[macro_export]
+macro_rules! mock_values(
+    ($to_type:ty: $({$($key:literal => $value:expr), +}), +) => {
+        {
+            let mut mv = vec![];
+
+            $(
+                let mut m = ::std::collections::BTreeMap::new();
+
+                $(
+                    m.insert($key.to_string(), $value as $to_type);
+                )+
+
+                mv.push(m);
+            )+
+
+            mv
+        }
+     };
+);
+
+/*
+#[macro_export]
+macro_rules! btreemap_then_array_of_mock_values(
+    ($to_type:ty: $({$($key:literal => [$($value:expr), +]), +}), +) => {
+        {
+            let mut mv = vec![];
+
+            $(
+                let mut m = ::std::collections::BTreeMap::new();
+
+                $(
+                    let mut v = vec![];
+
+                    $(
+                        v.push($value as $to_type)
+                    )*;
+
+                    m.insert($key.to_string(), v);
+                )+
+
+                mv.push(m);
+            )+
+
+            mv
+        }
+     };
+);
+*/
+
 #[derive(Default)]
 pub struct ComposerConfig {
     start: usize,

@@ -24,7 +24,7 @@ impl<'a> ComposerConnection<'a> for Connection {
     fn compose(
         &'a self,
         s: &SqlComposition,
-        values: BTreeMap<String, Vec<&'a ToSql>>,
+        values: BTreeMap<String, Vec<&'a dyn ToSql>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
@@ -81,9 +81,9 @@ impl ToSql for SerdeValue {
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
     config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a ToSql>>,
-    root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
+    values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
+    root_mock_values: Vec<BTreeMap<String, &'a dyn ToSql>>,
+    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToSql>>>,
 }
 
 impl<'a> PostgresComposer<'a> {
@@ -290,7 +290,7 @@ mod tests {
         "d" => [&"d_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"a_value",
             "col_2" => &"b_value",
             "col_3" => &"c_value",
@@ -337,7 +337,7 @@ mod tests {
         "e" => [&"e_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"e_value",
             "col_2" => &"d_value",
             "col_3" => &"b_value",
@@ -393,7 +393,7 @@ mod tests {
         "f" => [&"f_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"d_value",
             "col_2" => &"f_value",
             "col_3" => &"b_value",
@@ -753,7 +753,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut bind_values = bind_values!(&dyn ToSql:
+        let bind_values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
         "b" => [&"b_value"],
         "c" => [&"c_value"],

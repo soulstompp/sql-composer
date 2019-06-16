@@ -150,10 +150,10 @@ fn query_mysql(
 ) -> CliResult {
     let pool = Pool::new(uri).unwrap();
 
-    let values: BTreeMap<String, Vec<&MySqlToSql>> =
+    let values: BTreeMap<String, Vec<&dyn MySqlToSql>> =
         params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &MySqlToSql).collect();
+            *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
 
             acc
         });
@@ -239,10 +239,10 @@ fn query_postgres(
     let conn = PgConnection::connect(uri, PgTlsMode::None)
         .unwrap();
 
-    let values: BTreeMap<String, Vec<&PgToSql>> =
+    let values: BTreeMap<String, Vec<&dyn PgToSql>> =
         params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &PgToSql).collect();
+            *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
 
             acc
         });
@@ -310,10 +310,10 @@ fn query_rusqlite(
         }
     };
 
-    let values: BTreeMap<String, Vec<&RusqliteToSql>> =
+    let values: BTreeMap<String, Vec<&dyn RusqliteToSql>> =
         params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &RusqliteToSql).collect();
+            *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
 
             acc
         });

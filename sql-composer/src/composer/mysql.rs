@@ -58,9 +58,9 @@ impl<'a> ComposerConnection<'a> for Pool {
 
 pub struct MysqlComposer<'a> {
     config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a ToValue>>,
-    root_mock_values: Vec<BTreeMap<String, &'a ToValue>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToValue>>>,
+    values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
+    root_mock_values: Vec<BTreeMap<String, &'a dyn ToValue>>,
+    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
 }
 
 impl<'a> MysqlComposer<'a> {
@@ -325,7 +325,7 @@ mod tests {
                                        "d" => [&"d_value"],
                                        "e" => [&"e_value"]);
 
-        let mut mock_values = mock_values!(&dyn ToValue: {
+        let mock_values = mock_values!(&dyn ToValue: {
             "col_1" => &"e_value",
             "col_2" => &"d_value",
             "col_3" => &"b_value",
@@ -383,7 +383,7 @@ mod tests {
         "f" => [&"f_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToValue: {
+        let mock_values = mock_values!(&dyn ToValue: {
         "col_1" => &"d_value",
         "col_2" => &"f_value",
         "col_3" => &"b_value",
@@ -757,7 +757,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut bind_values = bind_values!(&dyn ToValue:
+        let bind_values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],
         "b" => [&"b_value"],
         "c" => [&"c_value"],

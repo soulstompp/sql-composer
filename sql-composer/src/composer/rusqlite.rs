@@ -58,9 +58,9 @@ impl ToSql for SerdeValue {
 
 pub struct RusqliteComposer<'a> {
     pub config:           ComposerConfig,
-    pub values:           BTreeMap<String, Vec<&'a ToSql>>,
-    pub root_mock_values: Vec<BTreeMap<String, &'a ToSql>>,
-    pub mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a ToSql>>>,
+    pub values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
+    pub root_mock_values: Vec<BTreeMap<String, &'a dyn ToSql>>,
+    pub mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToSql>>>,
 }
 
 impl<'a> RusqliteComposer<'a> {
@@ -281,7 +281,7 @@ mod tests {
         "d" => [&"d_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"a_value",
             "col_2" => &"b_value",
             "col_3" => &"c_value",
@@ -356,7 +356,7 @@ mod tests {
         "e" => [&"e_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"e_value",
             "col_2" => &"d_value",
             "col_3" => &"b_value",
@@ -439,7 +439,7 @@ mod tests {
         "f" => [&"f_value"]
         );
 
-        let mut mock_values = mock_values!(&dyn ToSql: {
+        let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"d_value",
             "col_2" => &"f_value",
             "col_3" => &"b_value",
@@ -885,9 +885,9 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut composer = RusqliteComposer::new();
+        let composer = RusqliteComposer::new();
 
-        let mut bind_values = bind_values!(&dyn ToSql:
+        let bind_values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
         "b" => [&"b_value"],
         "c" => [&"c_value"],

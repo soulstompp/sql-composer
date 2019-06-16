@@ -38,8 +38,6 @@ impl<'a> ComposerConnection<'a> for Connection {
 
         let (sql, bind_vars) = c.compose(s);
 
-        println!("compose bind sql: {}", sql);
-
         //TODO: support a DriverError type to handle this better
         let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
 
@@ -208,7 +206,6 @@ mod tests {
 
         let (remaining, insert_stmt) = parse_template(Span::new("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into()), None).unwrap();
 
-        println!("remaining: {}", remaining.to_string());
         assert_eq!(*remaining.fragment, "", "nothing remaining");
 
         /*
@@ -394,8 +391,6 @@ mod tests {
 
         mock_bound_sql.push(';');
 
-        println!("bound_sql: {}", bound_sql);
-
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
@@ -546,7 +541,6 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        println!("setup composer");
         let mut composer = RusqliteComposer::new();
 
         composer.values = bind_values!(&dyn ToSql:
@@ -560,10 +554,7 @@ mod tests {
         "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        println!("binding");
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-
-        println!("bound_sql: {}", bound_sql);
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -601,7 +592,6 @@ mod tests {
         )
         .unwrap();
 
-        println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 ) AS count_main";
 
         let mut composer = RusqliteComposer::new();
@@ -618,8 +608,6 @@ mod tests {
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-
-        println!("bound_sql: {}", bound_sql);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -646,7 +634,6 @@ mod tests {
 
         let (_remaining, stmt) = parse_template(Span::new(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);".into()), None).unwrap();
 
-        println!("made it through parse");
         let expected_bound_sql = "SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 UNION SELECT ?13 AS col_1, ?14 AS col_2, ?15 AS col_3, ?16 AS col_4 UNION ALL SELECT ?17 AS col_1, ?18 AS col_2, ?19 AS col_3, ?20 AS col_4 UNION SELECT ?21 AS col_1, ?22 AS col_2, ?23 AS col_3, ?24 AS col_4 UNION ALL SELECT ?25 AS col_1, ?26 AS col_2, ?27 AS col_3, ?28 AS col_4 UNION ALL SELECT ?29 AS col_1, ?30 AS col_2, ?31 AS col_3, ?32 AS col_4";
 
         let mut composer = RusqliteComposer::new();
@@ -664,7 +651,6 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
 
-        println!("bound_sql: {}", bound_sql);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -735,8 +721,6 @@ mod tests {
         }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false);
-
-        println!("bound sql: {}", bound_sql);
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -812,8 +796,6 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false);
 
-        println!("bound sql: {}", bound_sql);
-
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
@@ -888,8 +870,6 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false);
 
-        println!("bound sql: {}", bound_sql);
-
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
@@ -953,7 +933,6 @@ mod tests {
 
         for row in rows {
             values.push(row.unwrap());
-            println!("values: {:?}", values);
         }
 
         let expected: Vec<Vec<String>> = vec![vec![

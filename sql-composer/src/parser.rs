@@ -320,8 +320,6 @@ named!(
                 //TODO: clean this up properly
                 let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
 
-                println!("built alias: {:?}!", alias);
-
                 ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser")
             })
         ),
@@ -402,7 +400,6 @@ named!(
         ({
             let mut p = parsed;
 
-            println!("pos: {:?}, value: {}", pos, &p.item.value);
             p.position = Position::Parsed(ParsedSpan {
                 line: pos.line,
                 offset: pos.offset,
@@ -447,8 +444,6 @@ named!(
         char!('\'') >>
         check_bind_value_ending >>
         ({
-            println!("text string: {:?}", t);
-
             SerdeValue(Value::String(t.to_string()))
         })
     )
@@ -466,8 +461,6 @@ named!(
         }) >>
         check_bind_value_ending >>
         ({
-            println!("int string: {:?}", i);
-
             SerdeValue(Value::I64(i64::from_str(&i.fragment).expect("unable to parse integer found by bind_value_integer")))
         })
     )
@@ -497,8 +490,6 @@ named!(
         ({
             let r = format!("{}.{}", wi.fragment, fi.fragment);
 
-            println!("real string: {:?}", r);
-
             SerdeValue(Value::F64(f64::from_str(&r).expect("unable to parse real value")))
         })
     )
@@ -525,7 +516,6 @@ named!(
             do_parse!(i: bind_value_integer >> (i))
         ) >>
         ({
-            println!("parsed value: {:?}", value);
             value
         })
     )
@@ -545,14 +535,11 @@ named!(
                 (value)
             ),
             vec![], |mut acc: Vec<SerdeValue>, item: SerdeValue| {
-                println!("item: {:?}", item);
                 acc.push(item);
                 acc
             }) >>
         end: opt!(alt_complete!(tag!("]") | tag!(")"))) >>
         ({
-            println!("value set: start: {:?}, list: {:?}, end: {:?}", start, list, end);
-
             if let Some(s) = start {
                 if let Some(e) = end {
                     if *s.fragment == "[" && *e.fragment != "]" {
@@ -563,7 +550,6 @@ named!(
                     }
                 }
                 else {
-                    println!("bind_value_set: list: {:?}", list);
                     panic!("bind_value_set: no matching end found for start: {:?}", s);
                 }
             }
@@ -589,7 +575,6 @@ named!(
         opt_multispace >>
         values: bind_value_set >>
         ({
-            println!("kv_pair k: {:?}, v: {:?}", key, values);
             (key, values)
         })
     )
@@ -616,12 +601,9 @@ named!(
             let start = items.0;
             let end = items.2;
 
-            println!("value set: start: {:?}, list: {:?}, end: {:?}", start, &items.1, end);
-
             for (key, values) in items.1 {
                 let key = key.fragment.to_string();
 
-                println!("key: {}, v: {:?}", key, &values);
                 let entry = acc.entry(key).or_insert(vec![]);
 
                 for v in values {
@@ -1300,8 +1282,6 @@ mod tests {
         //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
 
-        println!("from input: {}", input);
-
         let (remaining, output) = bind_value_named_set(Span::new(CompleteStr(input))).unwrap();
 
         let expected_output = build_expected_bind_values();
@@ -1317,8 +1297,6 @@ mod tests {
         //TOOD: doesn't like spaces between keys still either
         //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a: ['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]], [a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
-
-        println!("from input: {}", input);
 
         let (remaining, output) = bind_value_named_sets(Span::new(CompleteStr(input))).unwrap();
 

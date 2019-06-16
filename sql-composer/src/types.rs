@@ -466,7 +466,6 @@ impl SqlKeyword {
 
 impl fmt::Display for SqlKeyword {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        println!("keyword: {}", self.value);
         write!(f, "{}", self.value)
     }
 }

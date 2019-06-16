@@ -49,8 +49,6 @@ impl<'a> ComposerConnection<'a> for Pool {
 
         let (sql, bind_vars) = c.compose(s);
 
-        println!("compose bind sql: {}", sql);
-
         //TODO: support a DriverError type to handle this better
         let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
 
@@ -355,8 +353,6 @@ mod tests {
 
         mock_bound_sql.push(';');
 
-        println!("bound_sql: {}", bound_sql);
-
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];
@@ -483,8 +479,6 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
 
-        println!("bound_sql: {}", bound_sql);
-
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
@@ -508,7 +502,6 @@ mod tests {
         )
         .unwrap();
 
-        println!("made it through parse");
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
         let mut composer = MysqlComposer::new(
@@ -527,8 +520,6 @@ mod tests {
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-
-        println!("bound_sql: {}", bound_sql);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -552,7 +543,6 @@ mod tests {
 
         let (_remaining, stmt) = parse_template(Span::new(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);".into()), None).unwrap();
 
-        println!("made it through parse");
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
         let mut composer = MysqlComposer::new(
@@ -571,8 +561,6 @@ mod tests {
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
-
-        println!("bound_sql: {}", bound_sql);
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 

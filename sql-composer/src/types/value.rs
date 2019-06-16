@@ -196,7 +196,7 @@ pub struct Row {
 }
 
 impl Row {
-    pub fn new(cn: Vec<String>) -> Self {
+    pub fn new() -> Self {
         Row { columns: vec![] }
     }
 

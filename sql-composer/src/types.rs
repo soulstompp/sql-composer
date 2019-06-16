@@ -299,7 +299,7 @@ impl SqlComposition {
         Ok(())
     }
 
-    //TODO: error if path already set to Some(...)
+    //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
             Some(existing) => Err(new_alias_conflict_error(existing.clone(), new).into()),
@@ -442,7 +442,7 @@ impl SqlDbObject {
 
 impl fmt::Display for SqlDbObject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.object_name);
+        write!(f, "{}", self.object_name)?;
 
         if let Some(alias) = &self.object_alias {
             write!(f, " AS {}", alias)

@@ -160,7 +160,7 @@ mod tests {
 
     use rusqlite::types::ToSql;
 
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
 
     #[derive(Debug, PartialEq)]
     struct Person {

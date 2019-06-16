@@ -142,16 +142,6 @@ impl<'a> Composer for MysqlComposer<'a> {
     fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
-
-    /*
-    fn from_uri(uri: &ToString) -> Result<Self, ()> {
-        unimplemented!("not here yet");
-    }
-
-    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
-        unimplemented!("not here yet");
-    }
-    */
 }
 
 #[cfg(test)]

@@ -142,12 +142,6 @@ impl<'a> Composer for RusqliteComposer<'a> {
     fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
-
-    /*
-    fn get_mock_values(&self, name: String) -> Option<&BTreeMap<String, Self::Value>> {
-        self.values.get(&name)
-    }
-    */
 }
 
 #[cfg(test)]
@@ -207,17 +201,6 @@ mod tests {
         let (remaining, insert_stmt) = parse_template(Span::new("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into()), None).unwrap();
 
         assert_eq!(*remaining.fragment, "", "nothing remaining");
-
-        /*
-        let mut composer = ComposerBuilder::default();
-
-        composer.uri("sqlite://:memory")
-            .bind("name".into(), vec![&person.name])
-            .bind("time_created".into(), vec![&person.time_created])
-            .bind("data".into(), vec![&person.data]);
-
-        composer = composer.build();
-        */
 
         let mut composer = RusqliteComposer::new();
 

@@ -382,8 +382,6 @@ pub trait Composer: Sized {
 
     fn config() -> ComposerConfig;
 
-    //fn insert_mock_values(&mut self, alias: SqlCompositionAlias, values: Vec<Self::Value>) -> ();
-
     fn root_mock_values(&self) -> &Vec<BTreeMap<String, Self::Value>>;
 
     fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>;

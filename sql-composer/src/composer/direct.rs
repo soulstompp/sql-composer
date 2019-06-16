@@ -90,18 +90,6 @@ impl<'a> Composer for DirectComposer<'a> {
     fn mock_values(&self) -> &HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>> {
         &self.mock_values
     }
-
-    /*
-    fn get_mock_values(&self, name: String) -> Option<&BTreeMap<String, Self::Value>> {
-        self.values.get(&name)
-    }
-    */
-
-    /*
-    fn set_parsed_bind_values(&mut self, v: BTreeMap<String, Vec<Value>>) -> Result<(), ()> {
-        unimplemented!("not here yet");
-    }
-    */
 }
 
 #[cfg(test)]

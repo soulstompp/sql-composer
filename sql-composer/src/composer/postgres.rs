@@ -171,7 +171,7 @@ impl<'a> Composer for PostgresComposer<'a> {
 mod tests {
     use super::{Composer, ComposerConnection, PostgresComposer};
 
-    use crate::{bind_values, mock_path_values, mock_values};
+    use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
     use crate::parser::parse_template;
 
@@ -700,36 +700,25 @@ mod tests {
         "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
-        let mut mock_values: HashMap<
-            SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn ToSql>>,
-        > = HashMap::new();
-
+        let mock_values = mock_db_object_values!(&dyn ToSql: "main" => [{
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
         {
-            let db_object_entry = mock_values
-                .entry(SqlCompositionAlias::DbObject(
-                    SqlDbObject::new("main".into(), None).unwrap(),
-                ))
-                .or_insert(Vec::new());
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
+        {
 
-            db_object_entry.push(BTreeMap::new());
-            db_object_entry[0].insert("col_1".into(), &"dd_value");
-            db_object_entry[0].insert("col_2".into(), &"ff_value");
-            db_object_entry[0].insert("col_3".into(), &"bb_value");
-            db_object_entry[0].insert("col_4".into(), &"aa_value");
-
-            db_object_entry.push(BTreeMap::new());
-            db_object_entry[1].insert("col_1".into(), &"dd_value");
-            db_object_entry[1].insert("col_2".into(), &"ff_value");
-            db_object_entry[1].insert("col_3".into(), &"bb_value");
-            db_object_entry[1].insert("col_4".into(), &"aa_value");
-
-            db_object_entry.push(BTreeMap::new());
-            db_object_entry[2].insert("col_1".into(), &"aa_value");
-            db_object_entry[2].insert("col_2".into(), &"bb_value");
-            db_object_entry[2].insert("col_3".into(), &"cc_value");
-            db_object_entry[2].insert("col_4".into(), &"dd_value");
-        }
+            "col_1" => &"aa_value",
+            "col_2" => &"bb_value",
+            "col_3" => &"cc_value",
+            "col_4" => &"dd_value"
+        }]);
 
         composer.mock_values = mock_values;
 

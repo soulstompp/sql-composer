@@ -184,9 +184,9 @@ named!(take_while_name_char(Span) -> Span,
     do_parse!(
         name: take_while!(|c| {
             match c {
-                'a'...'z' => true,
-                'A'...'Z' => true,
-                '0'...'9' => true,
+                'a'..='z' => true,
+                'A'..='Z' => true,
+                '0'..='9' => true,
                 '_' => true,
                 _ => false,
             }
@@ -309,9 +309,9 @@ named!(
                 let c = u as char;
 
                 match c {
-                    'a'...'z' => true,
-                    'A'...'Z' => true,
-                    '0'...'9' => true,
+                    'a'..='z' => true,
+                    'A'..='Z' => true,
+                    '0'..='9' => true,
                     '-' | '_' => true,
                     '.' | '/' | '\\' => true,
                     _ => false,
@@ -335,9 +335,9 @@ named!(
         let c = u as char;
 
         match c {
-            'a'...'z' => true,
-            'A'...'Z' => true,
-            '0'...'9' => true,
+            'a'..='z' => true,
+            'A'..='Z' => true,
+            '0'..='9' => true,
             '_' | '-' | '.' | '/' => true,
             _ => false,
         }
@@ -455,7 +455,7 @@ named!(
     do_parse!(
         i: take_while1!(|c| {
             match c {
-                '0'...'9' => true,
+                '0'..='9' => true,
                 _ => false,
             }
         }) >>
@@ -472,7 +472,7 @@ named!(
     do_parse!(
         wi: take_while!(|c| {
             match c {
-                '0'...'9' => true,
+                '0'..='9' => true,
                 _ => false,
             }
         }) >>
@@ -480,7 +480,7 @@ named!(
         char!('.') >>
         fi: take_while!(|c| {
             match c {
-                '0'...'9' => true,
+                '0'..='9' => true,
                 _ => false,
             }
         }) >>
@@ -581,7 +581,7 @@ named!(
 );
 
 #[cfg(feature = "composer-serde")]
-//"[a:[a_value, aa_value, aaa_value], b:b_value], [...]";
+//"[a:[a_value, aa_value, aaa_value], b:b_value], [..=]";
 named!(
     pub bind_value_named_set(Span) -> BTreeMap<String, Vec<SerdeValue>>,
     fold_many1!(

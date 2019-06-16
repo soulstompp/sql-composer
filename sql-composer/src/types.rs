@@ -115,8 +115,8 @@ impl SqlCompositionAlias {
             let c = u as char;
 
             match c {
-                'a'...'z' => {}
-                '0'...'9' => {}
+                'a'..='z' => {}
+                '0'..='9' => {}
                 '-' | '_' => {}
                 '.' | '/' | '\\' => acc.1 = true,
                 _ => acc = (false, false),

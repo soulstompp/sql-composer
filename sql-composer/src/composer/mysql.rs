@@ -158,7 +158,7 @@ impl<'a> Composer for MysqlComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mock_path_values, mock_db_object_values, mock_values};
+    use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
     use super::{Composer, ComposerConnection, MysqlComposer};
 
@@ -217,8 +217,10 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "insert stmt nothing remaining");
 
-        composer.values.insert("name".into(), vec![&person.name]);
-        composer.values.insert("data".into(), vec![&person.data]);
+        composer.values = bind_values!(&dyn ToValue:
+        "name" => [&person.name],
+        "data" => [&person.data]
+        );
 
         let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
 
@@ -287,10 +289,12 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
+        );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         composer.root_mock_values = mock_values!(&dyn ToValue: {"col_1" => &"a_value", "col_2" => &"b_value", "col_3" => &"c_value", "col_4" => &"d_value"});
@@ -326,11 +330,12 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"]);
 
         let mut mock_values = mock_values!(&dyn ToValue: {
             "col_1" => &"e_value",
@@ -383,12 +388,14 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+        "a" => [&"a_value"],
+        "b" => [&"b_value"],
+        "c" => [&"c_value"],
+        "d" => [&"d_value"],
+        "e" => [&"e_value"],
+        "f" => [&"f_value"]
+        );
 
         let mut mock_values = mock_values!(&dyn ToValue: {
         "col_1" => &"d_value",
@@ -461,18 +468,18 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value",
+                                       &"a_value"],
+                                       "col_3_values" => [&"b_value",
+                                       &"c_value"]
+        );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
 
@@ -508,18 +515,16 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+        "a" => [&"a_value"],
+        "b" => [&"b_value"],
+        "c" => [&"c_value"],
+        "d" => [&"d_value"],
+        "e" => [&"e_value"],
+        "f" => [&"f_value"],
+        "col_1_values" => [&"d_value", &"a_value"],
+        "col_3_values" => [&"b_value", &"c_value"]
+        );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
 
@@ -554,18 +559,16 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"d_value", &"a_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"b_value", &"c_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
+        );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
 
@@ -609,18 +612,16 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"ee_value", &"d_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"ee_value", &"d_value"],
+                                       "col_3_values" => [&"bb_value", &"b_value"]
+        );
 
         composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/include.tql" => [
         {
@@ -663,18 +664,16 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+        "a" => [&"a_value"],
+        "b" => [&"b_value"],
+        "c" => [&"c_value"],
+        "d" => [&"d_value"],
+        "e" => [&"e_value"],
+        "f" => [&"f_value"],
+        "col_1_values" => [&"dd_value", &"aa_value"],
+        "col_3_values" => [&"bb_value", &"cc_value"]
+        );
 
         composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/double-include.tql" => [
         {
@@ -729,18 +728,16 @@ mod tests {
             Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap(),
         );
 
-        composer.values.insert("a".into(), vec![&"a_value"]);
-        composer.values.insert("b".into(), vec![&"b_value"]);
-        composer.values.insert("c".into(), vec![&"c_value"]);
-        composer.values.insert("d".into(), vec![&"d_value"]);
-        composer.values.insert("e".into(), vec![&"e_value"]);
-        composer.values.insert("f".into(), vec![&"f_value"]);
-        composer
-            .values
-            .insert("col_1_values".into(), vec![&"dd_value", &"aa_value"]);
-        composer
-            .values
-            .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
+        composer.values = bind_values!(&dyn ToValue:
+        "a" => [&"a_value"],
+        "b" => [&"b_value"],
+        "c" => [&"c_value"],
+        "d" => [&"d_value"],
+        "e" => [&"e_value"],
+        "f" => [&"f_value"],
+        "col_1_values" => [&"dd_value", &"aa_value"],
+        "col_3_values" => [&"bb_value", &"cc_value"]
+        );
 
         composer.mock_values = mock_db_object_values!(&dyn ToValue: "main" => [{
             "col_1" => &"dd_value",
@@ -782,14 +779,15 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut values: BTreeMap<String, Vec<&ToValue>> = BTreeMap::new();
-        values.insert("a".into(), vec![&"a_value"]);
-        values.insert("b".into(), vec![&"b_value"]);
-        values.insert("c".into(), vec![&"c_value"]);
-        values.insert("d".into(), vec![&"d_value"]);
+        let mut bind_values = bind_values!(&dyn ToValue:
+        "a" => [&"a_value"],
+        "b" => [&"b_value"],
+        "c" => [&"c_value"],
+        "d" => [&"d_value"]
+        );
 
         let (mut prep_stmt, bindings) = conn
-            .compose(&stmt.item, values, vec![], HashMap::new())
+            .compose(&stmt.item, bind_values, vec![], HashMap::new())
             .unwrap();
 
         let mut values: Vec<Vec<String>> = vec![];

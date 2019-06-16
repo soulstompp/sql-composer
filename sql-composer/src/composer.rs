@@ -107,6 +107,27 @@ macro_rules! mock_db_object_values(
      };
 );
 
+#[macro_export]
+macro_rules! bind_values(
+    ($to_type:ty: $( $key:literal => [$($value:expr), +]), +)  => {
+        {
+            let mut m = ::std::collections::BTreeMap::new();
+
+            $(
+                let mut mv = vec![];
+
+                    $(
+                        mv.push($value as $to_type);
+                    )+
+
+                    m.insert($key.to_string(), mv);
+            )+
+
+            m
+        }
+     };
+);
+
 #[derive(Default)]
 pub struct ComposerConfig {
     start: usize,

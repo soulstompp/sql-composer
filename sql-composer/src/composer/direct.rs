@@ -106,7 +106,9 @@ impl<'a> Composer for DirectComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, DirectComposer};
+    use crate::bind_values;
+
+    use super::{Composer, DirectComposer, ToValue};
     use crate::parser::parse_template;
 
     use crate::types::Span;
@@ -138,11 +140,11 @@ mod tests {
 
         let mut composer = DirectComposer::new();
 
-        composer.values.insert("name".into(), vec![&person.name]);
-        composer
-            .values
-            .insert("time_created".into(), vec![&person.time_created]);
-        composer.values.insert("data".into(), vec![&person.data]);
+        composer.values = bind_values!(&dyn ToValue:
+        "name" => [&person.name],
+        "time_created" => [&person.time_created],
+        "data" => [&person.data]
+        );
 
         let (bound_sql, _bindings) = composer.compose(&insert_stmt.item);
 

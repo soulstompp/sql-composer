@@ -50,34 +50,62 @@ macro_rules! mock_values(
      };
 );
 
-/*
 #[macro_export]
-macro_rules! btreemap_then_array_of_mock_values(
-    ($to_type:ty: $({$($key:literal => [$($value:expr), +]), +}), +) => {
+macro_rules! mock_path_values(
+    ($to_type:ty: $($path:expr => [$({$($key:expr => $value:expr), +}), +]); +) => {
         {
-            let mut mv = vec![];
+            let mut mocks = HashMap::new();
 
             $(
-                let mut m = ::std::collections::BTreeMap::new();
-
-                $(
-                    let mut v = vec![];
+                    let mut mv = vec![];
 
                     $(
-                        v.push($value as $to_type)
-                    )*;
+                        let mut m = ::std::collections::BTreeMap::new();
 
-                    m.insert($key.to_string(), v);
-                )+
+                        $(
+                            m.insert($key.to_string(), $value as $to_type);
+                        )+
 
-                mv.push(m);
+                        mv.push(m);
+                    )+
+
+                mocks.insert(SqlCompositionAlias::Path($path.into()), mv);
             )+
 
-            mv
+            mocks
         }
      };
 );
-*/
+
+#[macro_export]
+macro_rules! mock_db_object_values(
+    ($to_type:ty: $($object:expr => [$({$($key:expr => $value:expr), +}), +]); +) => {
+        {
+            let mut mocks = HashMap::new();
+
+            $(
+                    let mut mv = vec![];
+
+                    $(
+                        let mut m = ::std::collections::BTreeMap::new();
+
+                        $(
+                            m.insert($key.to_string(), $value as $to_type);
+                        )+
+
+                        mv.push(m);
+                    )+
+
+                mocks.insert(SqlCompositionAlias::DbObject(SqlDbObject {
+                    object_name:  "main".into(),
+                    object_alias: None,
+                }), mv);
+            )+
+
+            mocks
+        }
+     };
+);
 
 #[derive(Default)]
 pub struct ComposerConfig {

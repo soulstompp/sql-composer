@@ -158,13 +158,14 @@ impl<'a> Composer for MysqlComposer<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{mock_path_values, mock_db_object_values, mock_values};
+
     use super::{Composer, ComposerConnection, MysqlComposer};
+
     use crate::parser::parse_template;
     use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
-
-    use crate::mock_values;
 
     use std::collections::{BTreeMap, HashMap};
 
@@ -331,19 +332,18 @@ mod tests {
         composer.values.insert("d".into(), vec![&"d_value"]);
         composer.values.insert("e".into(), vec![&"e_value"]);
 
-        let mut mock_values: Vec<BTreeMap<std::string::String, &dyn ToValue>> = vec![];
-
-        mock_values.push(BTreeMap::new());
-        mock_values[0].insert("col_1".into(), &"e_value");
-        mock_values[0].insert("col_2".into(), &"d_value");
-        mock_values[0].insert("col_3".into(), &"b_value");
-        mock_values[0].insert("col_4".into(), &"a_value");
-
-        mock_values.push(BTreeMap::new());
-        mock_values[1].insert("col_1".into(), &"a_value");
-        mock_values[1].insert("col_2".into(), &"b_value");
-        mock_values[1].insert("col_3".into(), &"c_value");
-        mock_values[1].insert("col_4".into(), &"d_value");
+        let mut mock_values = mock_values!(&dyn ToValue: {
+            "col_1" => &"e_value",
+            "col_2" => &"d_value",
+            "col_3" => &"b_value",
+            "col_4" => &"a_value"
+        },
+        {
+            "col_1" => &"a_value",
+            "col_2" => &"b_value",
+            "col_3" => &"c_value",
+            "col_4" => &"d_value"
+        });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item);
         let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
@@ -622,26 +622,13 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"b_value"]);
 
-        let mut mock_values: HashMap<
-            SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
-        > = HashMap::new();
-
+        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/include.tql" => [
         {
-            let path_entry = mock_values
-                .entry(SqlCompositionAlias::Path(
-                    "src/tests/values/include.tql".into(),
-                ))
-                .or_insert(Vec::new());
-
-            path_entry.push(BTreeMap::new());
-            path_entry[0].insert("col_1".into(), &"ee_value");
-            path_entry[0].insert("col_2".into(), &"dd_value");
-            path_entry[0].insert("col_3".into(), &"bb_value");
-            path_entry[0].insert("col_4".into(), &"aa_value");
-        }
-
-        composer.mock_values = mock_values;
+        "col_1" => &"ee_value",
+        "col_2" => &"dd_value",
+        "col_3" => &"bb_value",
+        "col_4" => &"aa_value"
+        }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
 
@@ -689,38 +676,25 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
-        let mut mock_values: HashMap<
-            SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
-        > = HashMap::new();
-
+        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/double-include.tql" => [
         {
-            let path_entry = mock_values
-                .entry(SqlCompositionAlias::Path(
-                    "src/tests/values/double-include.tql".into(),
-                ))
-                .or_insert(Vec::new());
-
-            path_entry.push(BTreeMap::new());
-            path_entry[0].insert("col_1".into(), &"dd_value");
-            path_entry[0].insert("col_2".into(), &"ff_value");
-            path_entry[0].insert("col_3".into(), &"bb_value");
-            path_entry[0].insert("col_4".into(), &"aa_value");
-
-            path_entry.push(BTreeMap::new());
-            path_entry[1].insert("col_1".into(), &"dd_value");
-            path_entry[1].insert("col_2".into(), &"ff_value");
-            path_entry[1].insert("col_3".into(), &"bb_value");
-            path_entry[1].insert("col_4".into(), &"aa_value");
-
-            path_entry.push(BTreeMap::new());
-            path_entry[2].insert("col_1".into(), &"aa_value");
-            path_entry[2].insert("col_2".into(), &"bb_value");
-            path_entry[2].insert("col_3".into(), &"cc_value");
-            path_entry[2].insert("col_4".into(), &"dd_value");
-        }
-
-        composer.mock_values = mock_values;
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
+        {
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
+        {
+            "col_1" => &"aa_value",
+            "col_2" => &"bb_value",
+            "col_3" => &"cc_value",
+            "col_4" => &"dd_value"
+        }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
 
@@ -768,39 +742,24 @@ mod tests {
             .values
             .insert("col_3_values".into(), vec![&"bb_value", &"cc_value"]);
 
-        let mut mock_values: HashMap<
-            SqlCompositionAlias,
-            Vec<BTreeMap<std::string::String, &dyn ToValue>>,
-        > = HashMap::new();
-
-        {
-            let path_entry = mock_values
-                .entry(SqlCompositionAlias::DbObject(SqlDbObject {
-                    object_name:  "main".into(),
-                    object_alias: None,
-                }))
-                .or_insert(Vec::new());
-
-            path_entry.push(BTreeMap::new());
-            path_entry[0].insert("col_1".into(), &"dd_value");
-            path_entry[0].insert("col_2".into(), &"ff_value");
-            path_entry[0].insert("col_3".into(), &"bb_value");
-            path_entry[0].insert("col_4".into(), &"aa_value");
-
-            path_entry.push(BTreeMap::new());
-            path_entry[1].insert("col_1".into(), &"dd_value");
-            path_entry[1].insert("col_2".into(), &"ff_value");
-            path_entry[1].insert("col_3".into(), &"bb_value");
-            path_entry[1].insert("col_4".into(), &"aa_value");
-
-            path_entry.push(BTreeMap::new());
-            path_entry[2].insert("col_1".into(), &"aa_value");
-            path_entry[2].insert("col_2".into(), &"bb_value");
-            path_entry[2].insert("col_3".into(), &"cc_value");
-            path_entry[2].insert("col_4".into(), &"dd_value");
-        }
-
-        composer.mock_values = mock_values;
+        composer.mock_values = mock_db_object_values!(&dyn ToValue: "main" => [{
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+                },
+                {
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+                },
+                {
+            "col_1" => &"aa_value",
+            "col_2" => &"bb_value",
+            "col_3" => &"cc_value",
+            "col_4" => &"dd_value"
+        }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
 

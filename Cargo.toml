@@ -1,5 +1,8 @@
 [workspace]
 members = [
   "sql-composer",
-  "sql-composer-cli"  
+  "sql-composer-cli"
+]
+exclude = [
+  "ffi/sql-composer-ffi"
 ]

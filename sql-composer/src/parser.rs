@@ -23,8 +23,7 @@ named!(
     fold_many1!(
         alt_complete!(
             do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)]))
-            | do_parse!(position!() >> q: parse_quoted_bindvar >> (vec![Sql::Binding(q)]))
-            | do_parse!(position!() >> b: parse_bindvar >> (vec![Sql::Binding(b)]))
+            | do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)]))
             | do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"), sc.1))]))
             | do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
             | do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)]))
@@ -85,6 +84,7 @@ named!(
            )
         )
 );
+
 
 named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
        complete!(do_parse!(
@@ -344,38 +344,89 @@ named!(
     })
 );
 
-named!(
-    parse_quoted_bindvar(Span) -> ParsedItem<SqlBinding>,
-    do_parse!(
-        position!() >>
-        tag!("':bind(") >>
-        bindvar: take_while_name_char >>
-        tag!(")'") >>
-        opt_multispace >>
-        (
-            ParsedItem::from_span(
-                SqlBinding::new_quoted(bindvar.fragment.to_string()).expect("SqlBinding::new_quoted() failed unexpectedly from parse_quoted_bindvar parser"),
-                    bindvar,
-                    None
-            ).expect("expected a parsed item from_span in parse_quoted_bindvar")
+named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
+       do_parse!(
+           tag_no_case!("expecting") >>
+           expecting: alt_complete!(
+                do_parse!(
+                    position!() >>
+                    exact_span: take_while!(|c:char| c.is_digit(10)) >>
+                    ({
+                        let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
+
+                        (Some(exact), Some(exact))
+                    })
+                )
+                | do_parse!(
+                    position!() >>
+                    min_span: opt!(
+                        do_parse!(
+                            tag_no_case!("min") >>
+                            min: take_while!(|c:char| c.is_digit(10)) >>
+                            (min)
+                        )
+                    ) >>
+                    max_span: opt!(
+                        do_parse!(
+                            tag_no_case!("max") >>
+                            max: take_while!(|c:char| c.is_digit(10)) >>
+                            (max)
+                        )
+                    ) >>
+                    ({
+                        let min = min_span.expect("min_span result should always be ok").fragment.to_string().parse::<u32>().expect("min could not be parsed as u32");
+                        let max = max_span.expect("max_span result should always be ok").fragment.to_string().parse::<u32>().expect("max could not be parsed as u32");
+
+                        (Some(min), Some(max))
+                    })
+                )
+            ) >>
+            ({
+                expecting
+            })
         )
-    )
 );
 
-named!(
-    parse_bindvar(Span) -> ParsedItem<SqlBinding>,
-    do_parse!(
-        position!() >>
-        bindvar: delimited!(tag!(":bind("), take_until!(")"), tag!(")")) >>
-        opt_multispace >>
-        (
-            ParsedItem::from_span(
-                SqlBinding::new(bindvar.fragment.to_string()).expect("SqlBinding::new() failed unexpectedly from parse_bindvar parser"),
-                bindvar,
-                None
-            ).expect("expected Ok from ParsedItem::from_span in parse_bindvar")
-        )
-    )
+// name EXPECTING (i|MIN i|MAX i|MIN i MAX i)
+named!(bindvar(Span) -> ParsedItem<SqlBinding>,
+       complete!(do_parse!(
+               start_quote: opt!(tag!("'")) >>
+               position!() >>
+               tag!(":bind(") >>
+               opt_multispace >>
+               position!() >>
+               bindvar_name: take_while_name_char >>
+               opt_multispace >>
+               position!() >>
+               expecting: opt!(bindvar_expecting) >>
+               opt_multispace >>
+               tag!(")") >>
+               opt_multispace >>
+               end_quote: opt!(tag!("'")) >>
+               ({
+                   let min = expecting.and_then(|m| m.0);
+                   let max = expecting.and_then(|m| m.1);
+
+                   if start_quote.is_some() && end_quote.is_none() {
+                       //TODO: proper error instead
+                       panic!("start_quote but no end_quote");
+                   }
+                   else if end_quote.is_some() && start_quote.is_none() {
+                       //TODO: proper error instead
+                       panic!("end_quote but no start_quote");
+                   }
+                   ParsedItem::from_span(
+                       SqlBinding::new(
+                           bindvar_name.fragment.to_string(),
+                           start_quote.is_some(),
+                           min,
+                           max
+                       ).expect("SqlBinding::new() failed unexpectedly from bindvar parser"),
+                       bindvar_name,
+                       None
+                   ).expect("expected Ok from ParsedItem::from_span in bindvar parser")
+               })
+       ))
 );
 
 named!(
@@ -652,8 +703,8 @@ named!(
 #[cfg(test)]
 mod tests {
     use super::{column_list,
-                db_object, db_object_alias_sql, parse_bindvar, parse_composer_macro,
-                parse_quoted_bindvar, parse_sql, parse_sql_end, parse_template};
+                db_object, db_object_alias_sql, bindvar, parse_composer_macro,
+                parse_sql, parse_sql_end, parse_template};
 
 
     #[cfg(feature = "composer-serde")]
@@ -831,10 +882,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bindvar() {
+    fn it_parses_bindvar() {
         let input = ":bind(varname)blah blah blah";
 
-        let out = parse_bindvar(Span::new(input.into())).expect("expected Ok from parse_bindvar");
+        let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(14), "blah blah blah");
         let expected_item = build_parsed_binding_item("varname", None, Some(6), "varname");
@@ -846,11 +897,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_quoted_bindvar() {
+    fn it_parses_quoted_bindvar() {
         let input = "':bind(varname)'blah blah blah";
 
-        let out = parse_quoted_bindvar(Span::new(input.into()))
-            .expect("expected Ok from parse_quoted_bindvar");
+        let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(16), "blah blah blah");
         let expected_item = build_parsed_quoted_binding_item("varname", None, Some(7), "varname");

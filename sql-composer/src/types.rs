@@ -495,23 +495,19 @@ impl fmt::Display for SqlLiteral {
 pub struct SqlBinding {
     pub name:      String,
     pub quoted:    bool,
+    pub min_values: Option<u32>,
+    pub max_values: Option<u32>,
     pub generated: bool,
 }
 
 impl SqlBinding {
-    pub fn new(s: String) -> Result<Self> {
+    pub fn new(name: String, quoted: bool, min_values: Option<u32>, max_values: Option<u32>) -> Result<Self> {
         Ok(Self {
-            name:      s,
-            quoted:    false,
-            generated: false,
-        })
-    }
-
-    pub fn new_quoted(s: String) -> Result<Self> {
-        Ok(Self {
-            name:      s,
-            quoted:    true,
-            generated: false,
+            name,
+            min_values,
+            max_values,
+            quoted,
+            generated: false
         })
     }
 }

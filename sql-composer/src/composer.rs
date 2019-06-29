@@ -372,9 +372,31 @@ pub trait Composer: Sized {
         Ok(self.compose_statement(&item, offset, child))
     }
 
-    fn bind_var_tag(&self, u: usize, name: String) -> String;
+    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
+        let mut sql = String::new();
+        let mut new_values = vec![];
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>);
+        let i = offset;
+
+        match self.get_values(name.to_string()) {
+            Some(v) => {
+                for iv in v.iter() {
+                    if new_values.len() > 0 {
+                        sql.push_str(", ");
+                    }
+
+                    sql.push_str(&self.bind_var_tag(new_values.len() + offset, name.to_string()));
+
+                    new_values.push(*iv);
+                }
+            }
+            None => panic!("no value for binding {} of {}", i, name),
+        };
+
+        (sql, new_values)
+    }
+
+    fn bind_var_tag(&self, u: usize, name: String) -> String;
 
     fn get_values(&self, name: String) -> Option<&Vec<Self::Value>>;
 

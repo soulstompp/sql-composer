@@ -108,30 +108,6 @@ impl<'a> Composer for PostgresComposer<'a> {
         format!("${}", u)
     }
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
-        let mut sql = String::new();
-        let mut new_values = vec![];
-
-        let _i = offset;
-
-        match self.values.get(&name) {
-            Some(v) => {
-                for iv in v.iter() {
-                    if new_values.len() > 0 {
-                        sql.push_str(", ");
-                    }
-
-                    sql.push_str(&self.bind_var_tag(new_values.len() + offset, name.to_string()));
-
-                    new_values.push(*iv);
-                }
-            }
-            None => panic!("no value for binding: {}", new_values.len()),
-        };
-
-        (sql, new_values)
-    }
-
     fn compose_count_command(
         &self,
         composition: &ParsedItem<SqlComposition>,

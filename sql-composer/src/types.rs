@@ -497,17 +497,17 @@ pub struct SqlBinding {
     pub quoted:    bool,
     pub min_values: Option<u32>,
     pub max_values: Option<u32>,
-    pub generated: bool,
+    pub nullable: bool,
 }
 
 impl SqlBinding {
-    pub fn new(name: String, quoted: bool, min_values: Option<u32>, max_values: Option<u32>) -> Result<Self> {
+    pub fn new(name: String, quoted: bool, min_values: Option<u32>, max_values: Option<u32>, nullable: bool) -> Result<Self> {
         Ok(Self {
             name,
             min_values,
             max_values,
             quoted,
-            generated: false
+            nullable,
         })
     }
 }

@@ -38,7 +38,7 @@ pub fn build_parsed_binding_item(
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<SqlBinding> {
-    let binding = SqlBinding::new(item.to_string(), false, None, None).unwrap();
+    let binding = SqlBinding::new(item.to_string(), false, None, None, false).unwrap();
 
     build_parsed_item(binding, line, offset, fragment)
 }
@@ -58,7 +58,7 @@ pub fn build_parsed_quoted_binding_item(
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<SqlBinding> {
-    let quoted_binding = SqlBinding::new(item.to_string(), true, None, None).unwrap();
+    let quoted_binding = SqlBinding::new(item.to_string(), true, None, None, false).unwrap();
 
     build_parsed_item(quoted_binding, line, offset, fragment)
 }

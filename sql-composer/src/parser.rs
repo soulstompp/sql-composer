@@ -400,6 +400,8 @@ named!(bindvar(Span) -> ParsedItem<SqlBinding>,
                position!() >>
                expecting: opt!(bindvar_expecting) >>
                opt_multispace >>
+               nullable: opt!(tag_no_case!("null")) >>
+               opt_multispace >>
                tag!(")") >>
                opt_multispace >>
                end_quote: opt!(tag!("'")) >>
@@ -420,7 +422,8 @@ named!(bindvar(Span) -> ParsedItem<SqlBinding>,
                            bindvar_name.fragment.to_string(),
                            start_quote.is_some(),
                            min,
-                           max
+                           max,
+                           nullable.is_some(),
                        ).expect("SqlBinding::new() failed unexpectedly from bindvar parser"),
                        bindvar_name,
                        None

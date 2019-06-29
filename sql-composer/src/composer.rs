@@ -136,7 +136,7 @@ pub struct ComposerConfig {
 pub trait Composer: Sized {
     type Value: Copy;
 
-    fn compose(&self, s: &SqlComposition) -> (String, Vec<Self::Value>) {
+    fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>), ()> {
         let item = ParsedItem::generated(s.clone(), None).unwrap();
 
         self.compose_statement(&item, 1usize, false)
@@ -147,7 +147,7 @@ pub trait Composer: Sized {
         sc: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> (String, Vec<Self::Value>) {
+    ) -> Result<(String, Vec<Self::Value>), ()> {
         let mut i = offset;
 
         let mut sql = String::new();
@@ -155,7 +155,7 @@ pub trait Composer: Sized {
         let mut values: Vec<Self::Value> = vec![];
 
         if sc.item.command.is_some() {
-            return self.compose_command(&sc, i, true).unwrap();
+            return self.compose_command(&sc, i, true);
         }
 
         let mut pad = true;
@@ -169,8 +169,8 @@ pub trait Composer: Sized {
 
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
-                Sql::Binding(b) => self.bind_values(b.item.name.to_string(), i),
-                Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true),
+                Sql::Binding(b) => self.compose_binding(b.item.name.to_string(), i)?,
+                Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true)?,
                 Sql::Ending(e) => {
                     pad = false;
 
@@ -223,7 +223,7 @@ pub trait Composer: Sized {
             i = values.len() + offset;
         }
 
-        (sql, values)
+        Ok((sql, values))
     }
 
     fn compose_command<'c>(
@@ -246,17 +246,17 @@ pub trait Composer: Sized {
                                 .get(&SqlCompositionAlias::Path(path.into()))
                             {
                                 Some(e) => Ok(self.mock_compose(e, offset)),
-                                None => Ok(self.compose_statement(
+                                None => self.compose_statement(
                                     &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                     offset,
                                     child,
-                                )),
+                                ),
                             },
-                            None => Ok(self.compose_statement(
+                            None => self.compose_statement(
                                 &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                 offset,
                                 child,
-                            )),
+                            ),
                         }
                     }
                     "count" => self.compose_count_command(composition, offset, child),
@@ -265,7 +265,7 @@ pub trait Composer: Sized {
                     _ => panic!("unknown call"),
                 }
             }
-            None => Ok(self.compose_statement(&composition, offset, child)),
+            None => self.compose_statement(&composition, offset, child),
         }
     }
 
@@ -320,7 +320,7 @@ pub trait Composer: Sized {
 
         let item = ParsedItem::generated(out, Some("COUNT".into())).unwrap();
 
-        Ok(self.compose_statement(&item, offset, child))
+        self.compose_statement(&item, offset, child)
     }
 
     fn compose_union_command(
@@ -369,10 +369,10 @@ pub trait Composer: Sized {
 
         let item = ParsedItem::generated(out, Some("UNION".into())).unwrap();
 
-        Ok(self.compose_statement(&item, offset, child))
+        self.compose_statement(&item, offset, child)
     }
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
+    fn compose_binding(&self, name: String, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
         let mut sql = String::new();
         let mut new_values = vec![];
 
@@ -385,7 +385,7 @@ pub trait Composer: Sized {
                         sql.push_str(", ");
                     }
 
-                    sql.push_str(&self.bind_var_tag(new_values.len() + offset, name.to_string()));
+                    sql.push_str(&self.binding_tag(new_values.len() + offset, name.to_string()));
 
                     new_values.push(*iv);
                 }
@@ -393,10 +393,10 @@ pub trait Composer: Sized {
             None => panic!("no value for binding {} of {}", i, name),
         };
 
-        (sql, new_values)
+        Ok((sql, new_values))
     }
 
-    fn bind_var_tag(&self, u: usize, name: String) -> String;
+    fn binding_tag(&self, u: usize, name: String) -> String;
 
     fn get_values(&self, name: String) -> Option<&Vec<Self::Value>>;
 
@@ -444,7 +444,7 @@ pub trait Composer: Sized {
                         sql.push_str(", ")
                     }
 
-                    sql.push_str(&self.bind_var_tag(i, name.to_string()));
+                    sql.push_str(&self.binding_tag(i, name.to_string()));
                     sql.push_str(&format!(" AS {}", &name));
 
                     values.push(*value);

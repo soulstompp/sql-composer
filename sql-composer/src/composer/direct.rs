@@ -34,7 +34,7 @@ impl<'a> Composer for DirectComposer<'a> {
     }
 
     //TODO: error handling
-    fn bind_var_tag(&self, _u: usize, name: String) -> String {
+    fn binding_tag(&self, _u: usize, name: String) -> String {
         let mut s = String::new();
 
         if let Some(values) = self.values.get(&name) {
@@ -53,8 +53,8 @@ impl<'a> Composer for DirectComposer<'a> {
         s
     }
 
-    fn bind_values(&self, name: String, offset: usize) -> (String, Vec<Self::Value>) {
-        (self.bind_var_tag(offset, name), vec![])
+    fn compose_binding(&self, name: String, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
+        Ok((self.binding_tag(offset, name), vec![]))
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {
@@ -134,7 +134,7 @@ mod tests {
         "data" => [&person.data]
         );
 
-        let (bound_sql, _bindings) = composer.compose(&insert_stmt.item);
+        let (bound_sql, _bindings) = composer.compose(&insert_stmt.item).expect("compose should work");
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -149,7 +149,7 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "nothing remaining");
 
-        let (bound_sql, _bindings) = composer.compose(&select_stmt.item);
+        let (bound_sql, _bindings) = composer.compose(&select_stmt.item).expect("compose should work");
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 

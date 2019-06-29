@@ -45,7 +45,7 @@ impl<'a> ComposerConnection<'a> for Pool {
             mock_values,
         };
 
-        let (sql, bind_vars) = c.compose(s);
+        let (sql, bind_vars) = c.compose(s)?;
 
         //TODO: support a DriverError type to handle this better
         let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
@@ -79,7 +79,7 @@ impl<'a> Composer for MysqlComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn bind_var_tag(&self, _u: usize, _name: String) -> String {
+    fn binding_tag(&self, _u: usize, _name: String) -> String {
         format!("?")
     }
 
@@ -182,7 +182,7 @@ mod tests {
         "data" => [&person.data]
         );
 
-        let (bound_sql, bindings) = composer.compose(&insert_stmt.item);
+        let (bound_sql, bindings) = composer.compose(&insert_stmt.item).expect("compose should work");
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ( ?, ? );";
 
@@ -194,7 +194,7 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = composer.compose(&select_stmt.item);
+        let (bound_sql, bindings) = composer.compose(&select_stmt.item).expect("compose should work");
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = ? AND name = ?;";
 
@@ -254,10 +254,10 @@ mod tests {
                                        "d" => [&"d_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
         composer.root_mock_values = mock_values!(&dyn ToValue: {"col_1" => &"a_value", "col_2" => &"b_value", "col_3" => &"c_value", "col_4" => &"d_value"});
 
-        let (mock_bound_sql, mock_bindings) = composer.compose(&stmt.item);
+        let (mock_bound_sql, mock_bindings) = composer.compose(&stmt.item).expect("compose should work");
 
         let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
 
@@ -306,7 +306,7 @@ mod tests {
             "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
         let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
 
         mock_bound_sql.push(';');
@@ -368,7 +368,7 @@ mod tests {
         "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
         let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1);
 
         mock_bound_sql.push(';');
@@ -431,7 +431,7 @@ mod tests {
                                        &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -471,7 +471,7 @@ mod tests {
         "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -510,7 +510,7 @@ mod tests {
                                        "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item);
+        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -567,7 +567,7 @@ mod tests {
         "col_4" => &"aa_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false).expect("compose_statement should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -629,7 +629,7 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false).expect("compose_statement should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
@@ -690,7 +690,7 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false);
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false).expect("compose_statement should work");
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 

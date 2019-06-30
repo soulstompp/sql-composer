@@ -207,7 +207,9 @@ mod tests {
                                        "data" => [&person.data]
         );
 
-        let (bound_sql, bindings) = composer.compose(&insert_stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer
+            .compose(&insert_stmt.item)
+            .expect("compose should work");
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ( $1, $2 );";
 
@@ -219,7 +221,9 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "select stmt nothing remaining");
 
-        let (bound_sql, bindings) = composer.compose(&select_stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer
+            .compose(&select_stmt.item)
+            .expect("compose should work");
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = $1 AND name = $2;";
 
@@ -572,7 +576,9 @@ mod tests {
         "col_4" => &"aa_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -635,7 +641,9 @@ mod tests {
 
         ]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -698,7 +706,9 @@ mod tests {
 
         composer.mock_values = mock_values;
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let prep_stmt = conn.prepare(&bound_sql).unwrap();
 

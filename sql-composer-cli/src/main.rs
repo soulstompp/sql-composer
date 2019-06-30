@@ -236,8 +236,7 @@ fn query_postgres(
     comp: SqlComposition,
     params: BTreeMap<String, Vec<SerdeValue>>,
 ) -> CliResult {
-    let conn = PgConnection::connect(uri, PgTlsMode::None)
-        .unwrap();
+    let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
 
     let values: BTreeMap<String, Vec<&dyn PgToSql>> =
         params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {

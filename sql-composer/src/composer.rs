@@ -372,7 +372,11 @@ pub trait Composer: Sized {
         self.compose_statement(&item, offset, child)
     }
 
-    fn compose_binding(&self, binding: SqlBinding, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
+    fn compose_binding(
+        &self,
+        binding: SqlBinding,
+        offset: usize,
+    ) -> Result<(String, Vec<Self::Value>), ()> {
         let name = &binding.name;
         let mut sql = String::new();
         let mut new_values = vec![];
@@ -397,9 +401,9 @@ pub trait Composer: Sized {
 
                 if found == 0 {
                     if binding.nullable {
-                      sql.push_str("NULL");
+                        sql.push_str("NULL");
 
-                      return Ok((sql, new_values));
+                        return Ok((sql, new_values));
                     }
                     else {
                         return Err(());
@@ -410,7 +414,6 @@ pub trait Composer: Sized {
                     if found < min {
                         //TODO: useful error
                         return Err(());
-
                     }
                 }
 
@@ -418,7 +421,6 @@ pub trait Composer: Sized {
                     if found > max {
                         //TODO: useful error
                         return Err(());
-
                     }
                 }
                 else {
@@ -426,9 +428,7 @@ pub trait Composer: Sized {
                         //TODO: useful error
                         return Err(());
                     }
-
                 }
-
             }
             //TODO: error "no value for binding {} of {}", i, name),
             //only error that isn't

@@ -186,7 +186,9 @@ mod tests {
         "data" => [&person.data]
         );
 
-        let (bound_sql, bindings) = composer.compose(&insert_stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer
+            .compose(&insert_stmt.item)
+            .expect("compose should work");
 
         let expected_bound_sql =
             "INSERT INTO person (name, time_created, data) VALUES ( ?1, ?2, ?3 );";
@@ -199,7 +201,9 @@ mod tests {
 
         assert_eq!(*remaining.fragment, "", "nothing remaining");
 
-        let (bound_sql, bindings) = composer.compose(&select_stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer
+            .compose(&select_stmt.item)
+            .expect("compose should work");
 
         let expected_bound_sql = "SELECT id, name, time_created, data FROM person WHERE name = ?1 AND time_created = ?2 AND name = ?3 AND time_created = ?4";
 
@@ -610,7 +614,6 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
 
-
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
@@ -679,7 +682,9 @@ mod tests {
             "col_4" => &"aa_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -753,7 +758,9 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 
@@ -827,7 +834,9 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false).expect("compose_statement should work");
+        let (bound_sql, bindings) = composer
+            .compose_statement(&stmt, 1, false)
+            .expect("compose_statement should work");
 
         let mut prep_stmt = conn.prepare(&bound_sql).unwrap();
 

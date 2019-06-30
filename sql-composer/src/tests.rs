@@ -55,7 +55,9 @@ pub fn build_parsed_sql_binding(
     offset: Option<usize>,
     fragment: &str,
 ) -> Sql {
-    Sql::Binding(build_parsed_binding_item(name, min, max, nullable, line, offset, fragment))
+    Sql::Binding(build_parsed_binding_item(
+        name, min, max, nullable, line, offset, fragment,
+    ))
 }
 
 pub fn build_parsed_quoted_binding_item(

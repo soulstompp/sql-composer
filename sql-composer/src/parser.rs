@@ -85,7 +85,6 @@ named!(
         )
 );
 
-
 named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
        complete!(do_parse!(
                position!() >>
@@ -710,10 +709,8 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{column_list,
-                db_object, db_object_alias_sql, bindvar, bindvar_expecting, parse_composer_macro,
-                parse_sql, parse_sql_end, parse_template};
-
+    use super::{bindvar, bindvar_expecting, column_list, db_object, db_object_alias_sql,
+                parse_composer_macro, parse_sql, parse_sql_end, parse_template};
 
     #[cfg(feature = "composer-serde")]
     use super::{bind_value_named_set, bind_value_named_sets, bind_value_set};
@@ -896,7 +893,8 @@ mod tests {
         let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(14), "blah blah blah");
-        let expected_item = build_parsed_binding_item("varname", None, None, false, None, Some(6), "varname");
+        let expected_item =
+            build_parsed_binding_item("varname", None, None, false, None, Some(6), "varname");
 
         let (span, item) = out;
 
@@ -908,7 +906,8 @@ mod tests {
     fn it_parses_bindvar_expecting_only_min() {
         let input = "EXPECTING MIN 1blah blah blah";
 
-        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
+        let out =
+            bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
 
         let expected_span = build_span(Some(1), Some(15), "blah blah blah");
         let expected_item = (Some(1), None);
@@ -938,7 +937,8 @@ mod tests {
     fn it_parses_bindvar_expecting_min_and_max() {
         let input = "EXPECTING MIN 1 MAX 3blah blah blah";
 
-        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
+        let out =
+            bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
 
         let expected_span = build_span(Some(1), Some(21), "blah blah blah");
         let expected_item = (Some(1), Some(3));
@@ -964,7 +964,6 @@ mod tests {
         assert_eq!(span, expected_span, "spans match");
     }
 
-
     #[test]
     fn it_parses_quoted_bindvar() {
         let input = "':bind(varname)'blah blah blah";
@@ -972,7 +971,15 @@ mod tests {
         let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(16), "blah blah blah");
-        let expected_item = build_parsed_quoted_binding_item("varname", None, None, false, None, Some(7), "varname");
+        let expected_item = build_parsed_quoted_binding_item(
+            "varname",
+            None,
+            None,
+            false,
+            None,
+            Some(7),
+            "varname",
+        );
 
         let (span, item) = out;
 
@@ -1034,7 +1041,15 @@ mod tests {
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 Sql::Composition((simple_template_compose_comp(None, None), vec![])),
                 build_parsed_sql_literal(") WHERE name =", None, Some(54), ") WHERE name = "),
-                build_parsed_sql_quoted_binding("bindvar", None, None, false, None, Some(76), "bindvar"),
+                build_parsed_sql_quoted_binding(
+                    "bindvar",
+                    None,
+                    None,
+                    false,
+                    None,
+                    Some(76),
+                    "bindvar",
+                ),
                 build_parsed_sql_ending(";", None, Some(85), ";"),
             ],
             ..Default::default()
@@ -1062,7 +1077,15 @@ mod tests {
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 Sql::Composition((include_template_compose_comp(), vec![])),
                 build_parsed_sql_literal(") WHERE name =", None, Some(55), ") WHERE name = "),
-                build_parsed_sql_quoted_binding("bindvar", None, None, false, None, Some(77), "bindvar"),
+                build_parsed_sql_quoted_binding(
+                    "bindvar",
+                    None,
+                    None,
+                    false,
+                    None,
+                    Some(77),
+                    "bindvar",
+                ),
                 build_parsed_sql_ending(";".into(), None, Some(86), ";"),
             ],
             ..Default::default()

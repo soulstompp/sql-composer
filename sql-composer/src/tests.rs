@@ -33,44 +33,56 @@ pub fn build_parsed_string(
 }
 
 pub fn build_parsed_binding_item(
-    item: &str,
+    name: &str,
+    min: Option<u32>,
+    max: Option<u32>,
+    nullable: bool,
     line: Option<u32>,
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<SqlBinding> {
-    let binding = SqlBinding::new(item.to_string(), false, None, None, false).unwrap();
+    let binding = SqlBinding::new(name.to_string(), false, min, max, nullable).unwrap();
 
     build_parsed_item(binding, line, offset, fragment)
 }
 
 pub fn build_parsed_sql_binding(
-    item: &str,
+    name: &str,
+    min: Option<u32>,
+    max: Option<u32>,
+    nullable: bool,
     line: Option<u32>,
     offset: Option<usize>,
     fragment: &str,
 ) -> Sql {
-    Sql::Binding(build_parsed_binding_item(item, line, offset, fragment))
+    Sql::Binding(build_parsed_binding_item(name, min, max, nullable, line, offset, fragment))
 }
 
 pub fn build_parsed_quoted_binding_item(
-    item: &str,
+    name: &str,
+    min: Option<u32>,
+    max: Option<u32>,
+    nullable: bool,
     line: Option<u32>,
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<SqlBinding> {
-    let quoted_binding = SqlBinding::new(item.to_string(), true, None, None, false).unwrap();
+    let quoted_binding = SqlBinding::new(name.to_string(), true, min, max, nullable).unwrap();
 
     build_parsed_item(quoted_binding, line, offset, fragment)
 }
 
 pub fn build_parsed_sql_quoted_binding(
-    item: &str,
+    name: &str,
+    min: Option<u32>,
+    max: Option<u32>,
+    nullable: bool,
     line: Option<u32>,
     offset: Option<usize>,
     fragment: &str,
 ) -> Sql {
     Sql::Binding(build_parsed_quoted_binding_item(
-        item, line, offset, fragment,
+        name, min, max, nullable, line, offset, fragment,
     ))
 }
 

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::{Composer, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
 
 use crate::types::value::ToValue;
 
@@ -53,8 +53,8 @@ impl<'a> Composer for DirectComposer<'a> {
         s
     }
 
-    fn compose_binding(&self, name: String, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
-        Ok((self.binding_tag(offset, name), vec![]))
+    fn compose_binding(&self, binding: SqlBinding, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
+        Ok((self.binding_tag(offset, binding.name), vec![]))
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {

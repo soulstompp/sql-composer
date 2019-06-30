@@ -347,37 +347,41 @@ named!(
 named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
        do_parse!(
            tag_no_case!("expecting") >>
+           opt_multispace >>
            expecting: alt_complete!(
                 do_parse!(
                     position!() >>
-                    exact_span: take_while!(|c:char| c.is_digit(10)) >>
+                    exact_span: take_while1!(|c:char| c.is_digit(10)) >>
                     ({
                         let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
 
                         (Some(exact), Some(exact))
                     })
-                )
-                | do_parse!(
+                ) |
+                do_parse!(
                     position!() >>
                     min_span: opt!(
                         do_parse!(
                             tag_no_case!("min") >>
-                            min: take_while!(|c:char| c.is_digit(10)) >>
+                            opt_multispace >>
+                            min: take_while1!(|c:char| c.is_digit(10)) >>
                             (min)
                         )
                     ) >>
+                    opt_multispace >>
                     max_span: opt!(
                         do_parse!(
                             tag_no_case!("max") >>
-                            max: take_while!(|c:char| c.is_digit(10)) >>
+                            opt_multispace >>
+                            max: take_while1!(|c:char| c.is_digit(10)) >>
                             (max)
                         )
                     ) >>
                     ({
-                        let min = min_span.expect("min_span result should always be ok").fragment.to_string().parse::<u32>().expect("min could not be parsed as u32");
-                        let max = max_span.expect("max_span result should always be ok").fragment.to_string().parse::<u32>().expect("max could not be parsed as u32");
+                        let min = min_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("min could not be parsed as u32")));
+                        let max = max_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("max could not be parsed as u32")));
 
-                        (Some(min), Some(max))
+                        (min, max)
                     })
                 )
             ) >>
@@ -392,7 +396,7 @@ named!(bindvar(Span) -> ParsedItem<SqlBinding>,
        complete!(do_parse!(
                start_quote: opt!(tag!("'")) >>
                position!() >>
-               tag!(":bind(") >>
+               tag_no_case!(":bind(") >>
                opt_multispace >>
                position!() >>
                bindvar_name: take_while_name_char >>
@@ -417,6 +421,7 @@ named!(bindvar(Span) -> ParsedItem<SqlBinding>,
                        //TODO: proper error instead
                        panic!("end_quote but no start_quote");
                    }
+
                    ParsedItem::from_span(
                        SqlBinding::new(
                            bindvar_name.fragment.to_string(),
@@ -706,7 +711,7 @@ named!(
 #[cfg(test)]
 mod tests {
     use super::{column_list,
-                db_object, db_object_alias_sql, bindvar, parse_composer_macro,
+                db_object, db_object_alias_sql, bindvar, bindvar_expecting, parse_composer_macro,
                 parse_sql, parse_sql_end, parse_template};
 
 
@@ -819,7 +824,7 @@ mod tests {
                 build_parsed_db_object("foo", None, None, Some(24), "foo"),
                 build_parsed_sql_keyword("WHERE", None, Some(28), "WHERE"),
                 build_parsed_sql_literal("foo.bar =", None, Some(34), "foo.bar = "),
-                build_parsed_sql_binding("varname", None, Some(50), "varname"),
+                build_parsed_sql_binding("varname", None, None, false, None, Some(50), "varname"),
                 build_parsed_sql_ending(";", None, Some(58), ";"),
             ],
             ..Default::default()
@@ -891,7 +896,7 @@ mod tests {
         let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(14), "blah blah blah");
-        let expected_item = build_parsed_binding_item("varname", None, Some(6), "varname");
+        let expected_item = build_parsed_binding_item("varname", None, None, false, None, Some(6), "varname");
 
         let (span, item) = out;
 
@@ -900,13 +905,74 @@ mod tests {
     }
 
     #[test]
+    fn it_parses_bindvar_expecting_only_min() {
+        let input = "EXPECTING MIN 1blah blah blah";
+
+        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
+
+        let expected_span = build_span(Some(1), Some(15), "blah blah blah");
+        let expected_item = (Some(1), None);
+
+        let (span, item) = out;
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
+
+    #[test]
+    fn it_parses_bindvar_expecting_only_max() {
+        let input = "EXPECTING MAX 1blah blah blah";
+
+        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar");
+
+        let expected_span = build_span(Some(1), Some(15), "blah blah blah");
+        let expected_item = (None, Some(1));
+
+        let (span, item) = out;
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
+
+    #[test]
+    fn it_parses_bindvar_expecting_min_and_max() {
+        let input = "EXPECTING MIN 1 MAX 3blah blah blah";
+
+        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar_expecting");
+
+        let expected_span = build_span(Some(1), Some(21), "blah blah blah");
+        let expected_item = (Some(1), Some(3));
+
+        let (span, item) = out;
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
+
+    #[test]
+    fn it_parses_bindvar_expecting_exact() {
+        let input = "EXPECTING 1blah blah blah";
+
+        let out = bindvar_expecting(Span::new(input.into())).expect("expected Ok from bindvar");
+
+        let expected_span = build_span(Some(1), Some(11), "blah blah blah");
+        let expected_item = (Some(1), Some(1));
+
+        let (span, item) = out;
+
+        assert_eq!(item, expected_item, "items match");
+        assert_eq!(span, expected_span, "spans match");
+    }
+
+
+    #[test]
     fn it_parses_quoted_bindvar() {
         let input = "':bind(varname)'blah blah blah";
 
         let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(16), "blah blah blah");
-        let expected_item = build_parsed_quoted_binding_item("varname", None, Some(7), "varname");
+        let expected_item = build_parsed_quoted_binding_item("varname", None, None, false, None, Some(7), "varname");
 
         let (span, item) = out;
 
@@ -968,7 +1034,7 @@ mod tests {
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 Sql::Composition((simple_template_compose_comp(None, None), vec![])),
                 build_parsed_sql_literal(") WHERE name =", None, Some(54), ") WHERE name = "),
-                build_parsed_sql_quoted_binding("bindvar", None, Some(76), "bindvar"),
+                build_parsed_sql_quoted_binding("bindvar", None, None, false, None, Some(76), "bindvar"),
                 build_parsed_sql_ending(";", None, Some(85), ";"),
             ],
             ..Default::default()
@@ -996,7 +1062,7 @@ mod tests {
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 Sql::Composition((include_template_compose_comp(), vec![])),
                 build_parsed_sql_literal(") WHERE name =", None, Some(55), ") WHERE name = "),
-                build_parsed_sql_quoted_binding("bindvar", None, Some(77), "bindvar"),
+                build_parsed_sql_quoted_binding("bindvar", None, None, false, None, Some(77), "bindvar"),
                 build_parsed_sql_ending(";".into(), None, Some(86), ";"),
             ],
             ..Default::default()

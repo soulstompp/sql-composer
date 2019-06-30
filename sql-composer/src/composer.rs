@@ -11,7 +11,7 @@ pub mod rusqlite;
 pub use crate::parser::bind_value_named_set;
 pub use crate::parser::parse_template;
 
-use crate::types::{ParsedItem, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
 pub trait ComposerConnection<'a> {
@@ -169,7 +169,7 @@ pub trait Composer: Sized {
 
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
-                Sql::Binding(b) => self.compose_binding(b.item.name.to_string(), i)?,
+                Sql::Binding(b) => self.compose_binding(b.item.clone(), i)?,
                 Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true)?,
                 Sql::Ending(e) => {
                     pad = false;
@@ -372,7 +372,8 @@ pub trait Composer: Sized {
         self.compose_statement(&item, offset, child)
     }
 
-    fn compose_binding(&self, name: String, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
+    fn compose_binding(&self, binding: SqlBinding, offset: usize) -> Result<(String, Vec<Self::Value>), ()> {
+        let name = &binding.name;
         let mut sql = String::new();
         let mut new_values = vec![];
 
@@ -380,6 +381,8 @@ pub trait Composer: Sized {
 
         match self.get_values(name.to_string()) {
             Some(v) => {
+                let mut found = 0;
+
                 for iv in v.iter() {
                     if new_values.len() > 0 {
                         sql.push_str(", ");
@@ -388,8 +391,47 @@ pub trait Composer: Sized {
                     sql.push_str(&self.binding_tag(new_values.len() + offset, name.to_string()));
 
                     new_values.push(*iv);
+
+                    found += 1;
                 }
+
+                if found == 0 {
+                    if binding.nullable {
+                      sql.push_str("NULL");
+
+                      return Ok((sql, new_values));
+                    }
+                    else {
+                        return Err(());
+                    }
+                }
+
+                if let Some(min) = binding.min_values {
+                    if found < min {
+                        //TODO: useful error
+                        return Err(());
+
+                    }
+                }
+
+                if let Some(max) = binding.max_values {
+                    if found > max {
+                        //TODO: useful error
+                        return Err(());
+
+                    }
+                }
+                else {
+                    if binding.min_values.is_none() && found > 1 {
+                        //TODO: useful error
+                        return Err(());
+                    }
+
+                }
+
             }
+            //TODO: error "no value for binding {} of {}", i, name),
+            //only error that isn't
             None => panic!("no value for binding {} of {}", i, name),
         };
 

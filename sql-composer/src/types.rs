@@ -1,6 +1,6 @@
 pub mod value;
 
-use crate::error::{new_alias_conflict_error, new_incomplete_composition_error, Result};
+use crate::error::{ErrorKind, Result};
 
 use crate::parser::parse_template;
 
@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+
+use error_chain::bail;
 
 pub use nom::types::CompleteStr;
 
@@ -302,7 +304,7 @@ impl SqlComposition {
     //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
-            Some(existing) => Err(new_alias_conflict_error(existing.clone(), new).into()),
+            Some(existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
             None => {
                 self.position = Some(new);
                 Ok(())
@@ -350,12 +352,7 @@ impl SqlComposition {
                 )
                 .unwrap(),
             )),
-            None => Err(new_incomplete_composition_error(
-                Position::Generated(GeneratedSpan { command: None }),
-                self.clone(),
-                "".into(),
-            )
-            .into()),
+            None => Err(ErrorKind::CompositionIncomplete("".into()).into()),
         }
     }
 }

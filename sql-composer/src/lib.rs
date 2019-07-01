@@ -21,6 +21,9 @@
 /// difference in number of placeholders and size/shape of the bind values returned as well.
 
 #[macro_use]
+extern crate error_chain;
+
+#[macro_use]
 extern crate nom;
 #[macro_use]
 extern crate nom_locate;

@@ -3,7 +3,12 @@
 
 dist: trusty
 language: rust
-services: docker
+services: 
+  - docker
+  - mysql
+  - postgres
+  - sqlite3
+
 sudo: required
 
 env:

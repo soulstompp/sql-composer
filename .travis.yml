@@ -3,6 +3,12 @@
 
 dist: trusty
 language: rust
+
+addons:
+  apt:
+    packages:
+      - libsqlite3-dev
+
 services: 
   - docker
   - mysql
@@ -14,6 +20,16 @@ sudo: required
 env:
   global:
     - CRATE_NAME=sql-composer
+    - SQLITE_DATABASE_URL=/tmp/sql_composer_test.db
+    - SQLITE_MEMORY_DATABASE_URL=:memory
+    - PG_DATABASE_URL=postgres://postgres@localhost/
+    - PG_EXAMPLE_DATABASE_URL=postgres://postgres@localhost/sql_composer_example
+    - MYSQL_DATABASE_URL=mysql://travis@localhost/sql_composer_test
+    - MYSQL_EXAMPLE_DATABASE_URL=mysql://travis@localhost/sql_composer_example
+    - MYSQL_UNIT_TEST_DATABASE_URL=mysql://travis@localhost/sql_composer_unit_test
+
+before_script:
+  - mysql -e "create database sql_composer_test;grant all on \`sql_composer_%\`.* to 'travis'@'%';" -uroot
 
 matrix:
   include:

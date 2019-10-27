@@ -159,6 +159,8 @@ mod tests {
 
     use std::collections::{BTreeMap, HashMap};
 
+    use std::env;
+
     #[derive(Debug, PartialEq)]
     struct Person {
         id:   i32,
@@ -167,7 +169,10 @@ mod tests {
     }
 
     fn setup_db() -> Connection {
-        Connection::connect("postgres://vagrant:vagrant@localhost:5432", TlsMode::None).unwrap()
+        Connection::connect(
+            env::var("PG_DATABASE_URL").expect("Missing variable PG_DATABASE_URL"),
+            TlsMode::None
+        ).unwrap()
     }
 
     #[test]

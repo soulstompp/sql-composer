@@ -1,0 +1,39 @@
+version: "3"
+services:
+  postgres:
+    image: "postgres"
+    container_name: "sql_composer_postgres"
+    environment:
+      - POSTGRES_USER=runner
+      - POSTGRES_PASSWORD=
+      - POSTGRES_DB=sql_composer
+    # map to ephemeral port, look up via `docker-compose port sql_composer_postgres 5432`
+    ports:
+      - "5432"
+    # map localhost 5432 to 5432 in container for local access
+    # otherwise use `docker-compose port sql_composer_postgress 5432` to get the port
+    # ports:
+    #   - "5432:5432"
+    # if we need to save data, mount a dir as local volume:
+    # volumes:
+    #  - ./db/postgres-data:/var/lib/postgresql/data
+  mysql:
+    image: "mysql"
+    container_name: "sql_composer_mysql"
+    environment:
+      - MYSQL_USER=runner
+      - MYSQL_PASSWORD=
+      - MYSQL_DATABASE=sql_composer
+      - MYSQL_RANDOM_ROOT_PASSWORD=true
+    ports:
+        - "3306"
+    #   map localhost 3306 to 3306 in container.
+    #   change this if you want to run multiple or have a local db instance
+    #   can look up via `docker-compose port sql_composer_mysql 3306` if we let this
+    #   randomize
+    # ports:
+    #   - "3306:3306"
+    #   map to ephemeral port, look up via `docker-compose port sql_composer_mysql 3306`
+    # if we need to save data, mount a dir as local volume:
+    # volumes:
+    #   - ./db/mysql-data:/var/lib/mysql

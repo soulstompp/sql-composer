@@ -21,7 +21,7 @@ main() {
     #cross rustc --bin hello --target $TARGET --release -- -C lto
 
     # TODO: this should copy the ci and so files
-    cp target/$TARGET/release/hello $stage/
+#    cp target/$TARGET/release/hello $stage/
 
     cd $stage
     tar czf $src/$CRATE_NAME-$TRAVIS_TAG-$TARGET.tar.gz *

@@ -131,6 +131,8 @@ mod tests {
 
     use std::collections::HashMap;
 
+    use std::env;
+
     #[derive(Debug, PartialEq)]
     struct Person {
         id:   i32,
@@ -139,7 +141,9 @@ mod tests {
     }
 
     fn setup_db() -> Pool {
-        let pool = Pool::new("mysql://vagrant:password@localhost:3306/vagrant").unwrap();
+        let pool = Pool::new(
+            env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL")
+        ).unwrap();
 
         pool.prep_exec("DROP TABLE IF EXISTS person;", ()).unwrap();
 

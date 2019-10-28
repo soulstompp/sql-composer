@@ -52,11 +52,29 @@ Thank you! We'll try to respond as quickly as possible.
    to install _all_ drivers so you can run all tests locally.
 
 3. Clone this repository and open it in your favorite editor.
-4. Use docker-compose to launch containers with databases for testing.
 
-   docker-compose will download and run containers for mysql and
+4. Local override of database ports or passwords
+
+   If you wish to change the local database ports, override PG_DATABASE_PORT
+   and MYSQL_DATABASE_PORT via environment variables or edit the values in the
+   `.env` file.
+
+   Use MYSQL_DATABASE_PASS and PG_DATABASE_PASS to override the default
+   passwords.  If the containers have already been run, changing the password
+   will not affect the container.  Shut down the container and delete the 
+   db/* files to clear the old password values.
+
+   ```bash
+   # delete database storage files to force re-initialization of database
+   sudo rm -rf db/*
+   ```
+5. Use docker-compose to launch containers with databases for testing.
+
+   `docker-compose up` will download and run containers for mysql and
    postgresql.  The internal database ports (3306 or 5432) will be
-   forwarded to ephemeral ports on the host.
+   forwarded to ports on the host as determined by MYSQL_DATABASE_PORT
+   and PG_DATABASE_PORT environment variables.  Default port values are
+   defined in the `.env` file in the root of the crate.
 
    The containers will be named `sql_composer_mysql` and `sql_composer_postgres`.
    Each will have an empty database named `sql_composer` owned by user `runner`
@@ -69,28 +87,46 @@ Thank you! We'll try to respond as quickly as possible.
    docker-compose up postgresql  # launch only postgresql
    ```
 
-5. use `docker port` to find the local port mapped into the database containers.
+   db storage files will be cached in the `./db/` directory.  These files
+   can be deleted to force the database to re-initialize on the next run of
+   `docker-compose up`
 
-   In another shell get the forwarded ports from the docker containers.
+6. Now, try running the test suite to confirm everything works for you locally
+   by executing `cargo test`. (Initially, this will take a while to compile
+   everything.)  Each database is hidden behind a feature flag.
 
-    ```bash
-    docker port sql_composer_mysql 3306       # e.g. 0.0.0.0:32000
-    docker port sql_composer_postgresql 5432  # e.g. 0.0.0.0:32001
-    ```
+   Run a test against all the databases with the `--all-features` flag
 
-   env.database.sh can be sourced to export environent variables
-   `$MYSQL_DATABASE_URL` and `$PG_DATABASE_URL` into your shell.
+   Individual features are not supported at the top level workspace, they can
+   only be enabled when building within the subprojects.
+     See: https://github.com/rust-lang/cargo/issues/4942
+
+   The features are listed in the `[features]` section of `Cargo.toml` of 
+   the individual projects.
+   * dbd-mysql
+   * dbd-rusqlite
+   * dbd-postgres
+   * composer-serde  (for sql-composer only)
 
    ```bash
-   . ./env.database.sh
+   cargo test                          # run non-db and sqlite tests only
+   cargo test --all-features           # compile for all dbs and run all tests.
+
+   # individual features are only supported in the sub-projects
+   # sql-composer:
+   (cd sql-composer && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
+   (cd sql-composer && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
+   (cd sql-composer && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
+   (cd sql-composer && cargo test --features composer-serde) # compile for serde and run serde tests.
+
+   # multiple features are passed as single quoted string of space separated features
+   (cd sql-composer && cargo test --features "composer-serde dbd-mysql") # compile for serde and mysql
+
+   # sql-composer-cli:
+   (cd sql-composer-cli && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
+   (cd sql-composer-cli && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
+   (cd sql-composer-cli && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
    ```
-
-6. Create a `.env` file in this directory, and add the connection details for
-   your databases.
-
-7. Now, try running the test suite to confirm everything works for you locally
-   by executing `cargo test`. (Initially, this will take a while to compile
-   everything.)
 
 [rustup]: https://rustup.rs/
 

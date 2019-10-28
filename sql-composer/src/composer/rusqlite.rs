@@ -176,7 +176,7 @@ mod tests {
 
         let (remaining, insert_stmt) = parse_template(Span::new("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into()), None).unwrap();
 
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
 
         let mut composer = RusqliteComposer::new();
 
@@ -199,7 +199,7 @@ mod tests {
 
         let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)'".into()), None).unwrap();
 
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
 
         let (bound_sql, bindings) = composer
             .compose(&select_stmt.item)

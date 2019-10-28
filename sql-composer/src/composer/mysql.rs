@@ -183,7 +183,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(*remaining.fragment, "", "insert stmt nothing remaining");
+        assert_eq!(remaining.fragment, "", "insert stmt nothing remaining");
 
         composer.values = bind_values!(&dyn ToValue:
         "name" => [&person.name],
@@ -202,7 +202,7 @@ mod tests {
 
         let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';".into()), None).unwrap();
 
-        assert_eq!(*remaining.fragment, "", "select stmt nothing remaining");
+        assert_eq!(remaining.fragment, "", "select stmt nothing remaining");
 
         let (bound_sql, bindings) = composer
             .compose(&select_stmt.item)

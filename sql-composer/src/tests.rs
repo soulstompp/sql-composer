@@ -1,4 +1,4 @@
-use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
+use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
 use std::fmt::Debug;
@@ -16,7 +16,8 @@ pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
     let span = Span {
         line:     line.unwrap_or(1),
         offset:   offset.unwrap_or(0),
-        fragment: CompleteStr(&fs),
+        fragment: &fs,
+        extra: ()
     };
 
     ParsedItem::from_span(item, span, None)
@@ -194,6 +195,7 @@ pub fn build_span(line: Option<u32>, offset: Option<usize>, fragment: &str) -> S
     Span {
         line:     line.unwrap_or(1),
         offset:   offset.unwrap_or(0),
-        fragment: CompleteStr(fragment),
+        fragment: fragment,
+        extra: ()
     }
 }

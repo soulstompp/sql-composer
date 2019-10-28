@@ -1,8 +1,10 @@
-use crate::types::{CompleteStr, ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
+use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
-use nom::{multispace, IResult};
+use nom::{IResult};
+
+use nom::character::complete::multispace1;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -15,21 +17,23 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 named!(opt_multispace(Span) -> Option<Span>,
-    opt!(complete!(multispace))
+    opt!(complete!(multispace1))
 );
 
 named!(
     _parse_template(Span) -> ParsedItem<SqlComposition>,
     fold_many1!(
-        alt_complete!(
-            do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)]))
-            | do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)]))
-            | do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(CompleteStr("")), None).expect("expected to make a Span in sc _parse_template"), sc.1))]))
-            | do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
-            | do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)]))
-            | do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
+        complete!(
+            alt!(
+                do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)]))
+                | do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)]))
+                | do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(""), None).expect("expected to make a Span in sc _parse_template"), sc.1))]))
+                | do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
+                | do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)]))
+                | do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
+            )
         ),
-        ParsedItem::from_span(SqlComposition::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in _parse_template parser"),
+        ParsedItem::from_span(SqlComposition::default(), Span::new(""), None).expect("expected to make a Span in _parse_template parser"),
         |mut acc: ParsedItem<SqlComposition>, items: Vec<Sql>| {
             for item in items {
                 match item {
@@ -213,35 +217,43 @@ named!(keyword(Span) -> ParsedItem<SqlKeyword>,
 
 named!(keyword_sql(Span) -> Span,
     do_parse!(
-        keyword: alt_complete!(
-            command_sql |
-            db_object_pre_sql |
-            db_object_post_sql
+        keyword: complete!(
+            alt!(
+                command_sql |
+                db_object_pre_sql |
+                db_object_post_sql
+            )
         ) >>
         (keyword)
     )
 );
 
 named!(command_sql(Span) -> Span,
-    alt_complete!(
-        tag_no_case!("SELECT") |
-        tag_no_case!("INSERT INTO") |
-        tag_no_case!("UPDATE") |
-        tag_no_case!("WHERE")
+    complete!(
+        alt!(
+            tag_no_case!("SELECT") |
+            tag_no_case!("INSERT INTO") |
+            tag_no_case!("UPDATE") |
+            tag_no_case!("WHERE")
+        )
     )
 );
 
 named!(db_object_pre_sql(Span) -> Span,
-    alt_complete!(
-        tag_no_case!("FROM") |
-        tag_no_case!("JOIN")
+    complete!(
+        alt!(
+            tag_no_case!("FROM") |
+            tag_no_case!("JOIN")
+        )
     )
 );
 
 named!(db_object_post_sql(Span) -> Span,
-    alt_complete!(
-        tag_no_case!("ON") |
-        tag_no_case!("USING")
+    complete!(
+        alt!(
+            tag_no_case!("ON") |
+            tag_no_case!("USING")
+        )
     )
 );
 
@@ -347,41 +359,43 @@ named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
        do_parse!(
            tag_no_case!("expecting") >>
            opt_multispace >>
-           expecting: alt_complete!(
-                do_parse!(
-                    position!() >>
-                    exact_span: take_while1!(|c:char| c.is_digit(10)) >>
-                    ({
-                        let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
+           expecting: complete!(
+               alt!(
+                   do_parse!(
+                       position!() >>
+                       exact_span: take_while1!(|c:char| c.is_digit(10)) >>
+                       ({
+                           let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
 
-                        (Some(exact), Some(exact))
-                    })
-                ) |
-                do_parse!(
-                    position!() >>
-                    min_span: opt!(
-                        do_parse!(
-                            tag_no_case!("min") >>
-                            opt_multispace >>
-                            min: take_while1!(|c:char| c.is_digit(10)) >>
-                            (min)
-                        )
-                    ) >>
-                    opt_multispace >>
-                    max_span: opt!(
-                        do_parse!(
-                            tag_no_case!("max") >>
-                            opt_multispace >>
-                            max: take_while1!(|c:char| c.is_digit(10)) >>
-                            (max)
-                        )
-                    ) >>
-                    ({
-                        let min = min_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("min could not be parsed as u32")));
-                        let max = max_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("max could not be parsed as u32")));
+                           (Some(exact), Some(exact))
+                       })
+                   ) |
+                   do_parse!(
+                       position!() >>
+                       min_span: opt!(
+                           do_parse!(
+                               tag_no_case!("min") >>
+                               opt_multispace >>
+                               min: take_while1!(|c:char| c.is_digit(10)) >>
+                               (min)
+                           )
+                       ) >>
+                       opt_multispace >>
+                       max_span: opt!(
+                           do_parse!(
+                               tag_no_case!("max") >>
+                               opt_multispace >>
+                               max: take_while1!(|c:char| c.is_digit(10)) >>
+                               (max)
+                           )
+                       ) >>
+                       ({
+                           let min = min_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("min could not be parsed as u32")));
+                           let max = max_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("max could not be parsed as u32")));
 
-                        (min, max)
-                    })
+                           (min, max)
+                       })
+                )
                 )
             ) >>
             ({
@@ -449,7 +463,7 @@ named!(
                 literal: take!(1) >>
                 (literal)
             ),
-            ParsedItem::from_span(SqlLiteral::default(), Span::new(CompleteStr("")), None).expect("expected to make a Span in parse_sql parser"),
+            ParsedItem::from_span(SqlLiteral::default(), Span::new(""), None).expect("expected to make a Span in parse_sql parser"),
             |mut acc: ParsedItem<SqlLiteral>, item: Span| {
                 acc.item.value.push_str(&item.fragment);
                 acc
@@ -556,11 +570,13 @@ named!(
 #[cfg(feature = "composer-serde")]
 named!(
     check_bind_value_ending(Span) -> Span,
-    alt_complete!(
-        peek!(tag!(")")) |
-        peek!(tag!("]")) |
-        peek!(tag!(",")) |
-        eof!()
+    complete!(
+        alt!(
+            peek!(tag!(")")) |
+            peek!(tag!("]")) |
+            peek!(tag!(",")) |
+            eof!()
+        )
     )
 );
 
@@ -568,10 +584,12 @@ named!(
 named!(
     bind_value(Span) -> (SerdeValue),
     do_parse!(
-        value: alt_complete!(
-            do_parse!(t: bind_value_text >> (t)) |
-            do_parse!(r: bind_value_real >> (r)) |
-            do_parse!(i: bind_value_integer >> (i))
+        value: complete!(
+            alt!(
+                do_parse!(t: bind_value_text >> (t)) |
+                do_parse!(r: bind_value_real >> (r)) |
+                do_parse!(i: bind_value_integer >> (i))
+            )
         ) >>
         ({
             value
@@ -583,7 +601,7 @@ named!(
 named!(
     bind_value_set(Span) -> Vec<SerdeValue>,
     do_parse!(
-        start: opt!(alt_complete!(tag!("[") | tag!("("))) >>
+        start: opt!(complete!(alt!(tag!("[") | tag!("(")))) >>
         list: fold_many1!(
             do_parse!(
                 value: bind_value >>
@@ -596,14 +614,14 @@ named!(
                 acc.push(item);
                 acc
             }) >>
-        end: opt!(alt_complete!(tag!("]") | tag!(")"))) >>
+        end: opt!(complete!(alt!(tag!("]") | tag!(")")))) >>
         ({
             if let Some(s) = start {
                 if let Some(e) = end {
-                    if *s.fragment == "[" && *e.fragment != "]" {
+                    if s.fragment == "[" && e.fragment != "]" {
                         panic!("bind_value_set: no corresponding '[' for ']'");
                     }
-                    else if *s.fragment == "(" && *e.fragment != ")" {
+                    else if s.fragment == "(" && e.fragment != ")" {
                         panic!("bind_value_set: no corresponding ')' for '('");
                     }
                 }
@@ -644,14 +662,14 @@ named!(
     pub bind_value_named_set(Span) -> BTreeMap<String, Vec<SerdeValue>>,
     fold_many1!(
         do_parse!(
-            start: opt!(alt_complete!(tag!("[") | tag!("("))) >>
+            start: opt!(complete!(alt!(tag!("[") | tag!("(")))) >>
             opt_multispace >>
             kv: separated_list!(
                 do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()),
                 bind_value_kv_pair
             ) >>
             opt_multispace >>
-            end: opt!(alt_complete!(tag!("]") | tag!(")"))) >>
+            end: opt!(complete!(alt!(tag!("]") | tag!(")")))) >>
             opt_multispace >>
             ((start, kv, end))
         ),
@@ -671,10 +689,10 @@ named!(
 
             if let Some(s) = start {
                 if let Some(e) = end {
-                    if *s.fragment == "[" && *e.fragment != "]" {
+                    if s.fragment == "[" && e.fragment != "]" {
                         panic!("bind_value_named_set: no corresponding '['for ']'");
                     }
-                    else if *s.fragment == "(" && *e.fragment != ")" {
+                    else if s.fragment == "(" && e.fragment != ")" {
                         panic!("bind_value_named_set: no corresponding ')'for '('");
                     }
                 }
@@ -733,8 +751,6 @@ mod tests {
                        build_parsed_sql_ending, build_parsed_sql_keyword,
                        build_parsed_sql_literal, build_parsed_sql_quoted_binding,
                        build_parsed_string, build_span};
-
-    use nom::types::CompleteStr;
 
     fn simple_aliases(
         shift_line: Option<u32>,
@@ -1126,6 +1142,7 @@ mod tests {
                 offset:   92,
                 line:     1,
                 fragment: ";".into(),
+                extra: (),
             },
             (
                 SqlComposition {
@@ -1391,7 +1408,7 @@ mod tests {
     fn test_bind_value_set() {
         let input = "['a', 'aa', 'aaa']";
 
-        let (remaining, output) = bind_value_set(Span::new(CompleteStr(input))).unwrap();
+        let (remaining, output) = bind_value_set(Span::new(input)).unwrap();
 
         let expected_output = vec![
             SerdeValue(Value::String("a".into())),
@@ -1400,7 +1417,7 @@ mod tests {
         ];
 
         assert_eq!(output, expected_output, "correct output");
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
     }
 
     #[test]
@@ -1408,12 +1425,12 @@ mod tests {
     fn test_bind_single_undelimited_value_set() {
         let input = "'a'";
 
-        let (remaining, output) = bind_value_set(Span::new(CompleteStr(input))).unwrap();
+        let (remaining, output) = bind_value_set(Span::new(input)).unwrap();
 
         let expected_output = vec![SerdeValue(Value::String("a".into()))];
 
         assert_eq!(output, expected_output, "correct output");
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
     }
 
     #[test]
@@ -1424,12 +1441,12 @@ mod tests {
         //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
 
-        let (remaining, output) = bind_value_named_set(Span::new(CompleteStr(input))).unwrap();
+        let (remaining, output) = bind_value_named_set(Span::new(input)).unwrap();
 
         let expected_output = build_expected_bind_values();
 
         assert_eq!(output, expected_output, "correct output");
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
     }
 
     #[test]
@@ -1440,12 +1457,12 @@ mod tests {
         //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a: ['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]], [a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
 
-        let (remaining, output) = bind_value_named_sets(Span::new(CompleteStr(input))).unwrap();
+        let (remaining, output) = bind_value_named_sets(Span::new(input)).unwrap();
 
         let expected_output = vec![build_expected_bind_values(), build_expected_bind_values()];
 
         assert_eq!(output, expected_output, "correct output");
-        assert_eq!(*remaining.fragment, "", "nothing remaining");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
     }
 
     /*
@@ -1453,7 +1470,7 @@ mod tests {
     fn test_bind_path_alias_name_value_sets() {
         let input = "t1.tql: [[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]], t2.tql: [[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566], [a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]]";
 
-        let (remaining, output) = bind_path_alias_name_value_sets(CompleteStr(input)).unwrap();
+        let (remaining, output) = bind_path_alias_name_value_sets(input).unwrap();
 
         let expected_values = build_expected_bind_values();
         let mut expected_output: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Vec<Value>>>> =
@@ -1470,7 +1487,7 @@ mod tests {
             );
 
         assert_eq!(output, expected_output, "correct output");
-        assert_eq!(*remaining, "", "nothing remaining");
+        assert_eq!(remaining, "", "nothing remaining");
     }
     */
 }

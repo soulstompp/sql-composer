@@ -11,11 +11,9 @@ use std::path::{Path, PathBuf};
 
 use error_chain::bail;
 
-pub use nom::types::CompleteStr;
-
 pub use nom_locate::LocatedSpan;
 
-pub type Span<'a> = LocatedSpan<CompleteStr<'a>>;
+pub type Span<'a> = LocatedSpan<& 'a str>;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -109,7 +107,7 @@ pub enum SqlCompositionAlias {
 
 impl SqlCompositionAlias {
     pub fn from_span(s: Span) -> Result<Self> {
-        Self::from_str(*s.fragment)
+        Self::from_str(s.fragment)
     }
 
     fn from_str(s: &str) -> Result<Self> {

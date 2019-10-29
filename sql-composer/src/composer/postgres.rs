@@ -159,6 +159,7 @@ mod tests {
 
     use std::collections::{BTreeMap, HashMap};
 
+    use dotenv::dotenv;
     use std::env;
 
     #[derive(Debug, PartialEq)]
@@ -169,6 +170,8 @@ mod tests {
     }
 
     fn setup_db() -> Connection {
+        dotenv().ok();
+
         Connection::connect(
             env::var("PG_DATABASE_URL").expect("Missing variable PG_DATABASE_URL"),
             TlsMode::None

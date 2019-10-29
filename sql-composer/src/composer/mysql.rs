@@ -131,7 +131,9 @@ mod tests {
 
     use std::collections::HashMap;
 
+    use dotenv::dotenv;
     use std::env;
+
 
     #[derive(Debug, PartialEq)]
     struct Person {
@@ -141,6 +143,8 @@ mod tests {
     }
 
     fn setup_db() -> Pool {
+
+        dotenv().ok();
         let pool = Pool::new(
             env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL")
         ).unwrap();

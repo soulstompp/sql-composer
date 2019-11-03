@@ -238,7 +238,7 @@ impl SqlComposition {
             Span::new(s.as_str().into()),
             Some(SqlCompositionAlias::from_path(path.into())),
         )
-        .unwrap();
+        .expect("expected completed parse");
 
         Ok(stmt)
     }

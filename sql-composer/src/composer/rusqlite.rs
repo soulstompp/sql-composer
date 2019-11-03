@@ -553,7 +553,7 @@ mod tests {
             Span::new(":count(src/tests/values/double-include.tql);".into()),
             None,
         )
-        .unwrap();
+        .expect("unable to parse template");
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 ) AS count_main";
 

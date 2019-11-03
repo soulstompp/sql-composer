@@ -4,7 +4,7 @@ use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
 
 use nom::{IResult};
 
-use nom::character::complete::multispace1;
+use nom::character::complete::multispace0;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -16,23 +16,18 @@ use std::collections::BTreeMap;
 
 use std::str::FromStr;
 
-named!(opt_multispace(Span) -> Option<Span>,
-    opt!(complete!(multispace1))
-);
-
 named!(
     _parse_template(Span) -> ParsedItem<SqlComposition>,
+    dbg_dmp!(
     fold_many1!(
-        complete!(
             alt!(
-                do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)]))
-                | do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)]))
-                | do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(""), None).expect("expected to make a Span in sc _parse_template"), sc.1))]))
-                | do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
-                | do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)]))
-                | do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
-            )
-        ),
+                complete!(do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)])))
+                | complete!(do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)])))
+                | complete!(do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(""), None).expect("expected to make a Span in sc _parse_template"), sc.1))])))
+                | complete!(do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)])))
+                | complete!(do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)])))
+                | complete!(do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
+            )),
         ParsedItem::from_span(SqlComposition::default(), Span::new(""), None).expect("expected to make a Span in _parse_template parser"),
         |mut acc: ParsedItem<SqlComposition>, items: Vec<Sql>| {
             for item in items {
@@ -58,7 +53,7 @@ named!(
 
             acc
         }
-    )
+    ))
 );
 
 pub fn parse_template(
@@ -95,12 +90,12 @@ named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
                command: parse_macro_name >>
                position!() >>
                distinct: command_distinct_arg >>
-               opt_multispace >>
+               multispace0 >>
                position!() >>
                all: command_all_arg >>
-               opt_multispace >>
+               multispace0 >>
                columns: opt!(column_list) >>
-               opt_multispace >>
+               multispace0 >>
                position!() >>
                of: of_list >>
                tag!(")") >>
@@ -156,14 +151,13 @@ named!(
 named!(
     column_list(Span) -> Vec<ParsedItem<String>>,
     terminated!(
-        many1!(column_name),
-        do_parse!(opt_multispace >> tag_no_case!("of") >> opt_multispace >> ())
+        many1!(complete!(column_name)),
+        do_parse!(multispace0 >> tag_no_case!("of") >> multispace0 >> ())
     )
 );
 
 named!(
     column_name(Span) -> ParsedItem<String>,
-    dbg_dmp!(
     terminated!(
         do_parse!(
             position!() >>
@@ -178,14 +172,13 @@ named!(
                 p.expect("unable to build ParsedItem of String from column_list parser")
             })
           ),
-          opt!(do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()))
-    )
+          opt!(do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()))
     )
 );
 
 named!(take_while_name_char(Span) -> Span,
     do_parse!(
-        name: take_while!(|c| {
+        name: take_while1!(|c| {
             match c {
                 'a'..='z' => true,
                 'A'..='Z' => true,
@@ -204,7 +197,7 @@ named!(keyword(Span) -> ParsedItem<SqlKeyword>,
     do_parse!(
         position!() >>
         keyword: keyword_sql >>
-        opt_multispace >>
+        multispace0 >>
         (
             ParsedItem::from_span(
                 SqlKeyword::new(keyword.fragment.to_string()).expect("SqlKeyword::new() failed unexpectedly from keyword parser"),
@@ -260,11 +253,11 @@ named!(db_object_post_sql(Span) -> Span,
 named!(db_object_alias_sql(Span) -> Span,
     do_parse!(
         opt!(tag_no_case!("AS")) >>
-        opt_multispace >>
+        multispace0 >>
         not!(peek!(keyword_sql)) >>
         not!(peek!(tag!("("))) >>
         alias: take_while_name_char >>
-        opt_multispace >>
+        multispace0 >>
         (
             alias
         )
@@ -275,13 +268,13 @@ named!(
     db_object(Span) -> (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>),
     do_parse!(
         keyword: db_object_pre_sql >>
-        opt_multispace >>
+        multispace0 >>
         position!() >>
         table: db_object_alias_sql >>
-        opt_multispace >>
+        multispace0 >>
         position!() >>
         alias: opt!(db_object_alias_sql) >>
-        opt_multispace >>
+        multispace0 >>
         ({
             let k = SqlKeyword {
                 value: keyword.fragment.to_string()
@@ -313,10 +306,10 @@ named!(
 
 named!(
     of_list(Span) -> Vec<ParsedItem<SqlCompositionAlias>>,
-    complete!(many1!(terminated!(
+    many1!(terminated!(
         do_parse!(
             position!() >>
-            of_name: take_while!(|u| {
+            of_name: take_while1!(|u| {
                 let c = u as char;
 
                 match c {
@@ -335,14 +328,15 @@ named!(
             })
         ),
         opt!(do_parse!(
-            opt_multispace >> tag!(",") >> opt_multispace >> ()
+            multispace0 >> tag!(",") >> multispace0 >> ()
         ))
-    )))
+    ))
 );
 
 named!(
     _parse_macro_include_alias(Span) -> Span,
-    take_while!(|u| {
+    dbg!(
+    take_while1!(|u| {
         let c = u as char;
 
         match c {
@@ -353,12 +347,13 @@ named!(
             _ => false,
         }
     })
+    )
 );
 
 named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
        do_parse!(
            tag_no_case!("expecting") >>
-           opt_multispace >>
+           multispace0 >>
            expecting: complete!(
                alt!(
                    do_parse!(
@@ -375,16 +370,16 @@ named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
                        min_span: opt!(
                            do_parse!(
                                tag_no_case!("min") >>
-                               opt_multispace >>
+                               multispace0 >>
                                min: take_while1!(|c:char| c.is_digit(10)) >>
                                (min)
                            )
                        ) >>
-                       opt_multispace >>
+                       multispace0 >>
                        max_span: opt!(
                            do_parse!(
                                tag_no_case!("max") >>
-                               opt_multispace >>
+                               multispace0 >>
                                max: take_while1!(|c:char| c.is_digit(10)) >>
                                (max)
                            )
@@ -410,17 +405,17 @@ named!(bindvar(Span) -> ParsedItem<SqlBinding>,
                start_quote: opt!(tag!("'")) >>
                position!() >>
                tag_no_case!(":bind(") >>
-               opt_multispace >>
+               multispace0 >>
                position!() >>
                bindvar_name: take_while_name_char >>
-               opt_multispace >>
+               multispace0 >>
                position!() >>
                expecting: opt!(bindvar_expecting) >>
-               opt_multispace >>
+               multispace0 >>
                nullable: opt!(tag_no_case!("null")) >>
-               opt_multispace >>
+               multispace0 >>
                tag!(")") >>
-               opt_multispace >>
+               multispace0 >>
                end_quote: opt!(tag!("'")) >>
                ({
                    let min = expecting.and_then(|m| m.0);
@@ -490,7 +485,7 @@ named!(
     do_parse!(
         position!() >>
         ending: tag!(";") >>
-        opt_multispace >>
+        multispace0 >>
         (
             ParsedItem::from_span(
                 SqlEnding::new(ending.fragment.to_string()).expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
@@ -556,9 +551,9 @@ named!(
                 _ => false,
             }
         }) >>
-        opt_multispace >>
+        multispace0 >>
         check_bind_value_ending >>
-        opt_multispace >>
+        multispace0 >>
         ({
             let r = format!("{}.{}", wi.fragment, fi.fragment);
 
@@ -605,9 +600,9 @@ named!(
         list: fold_many1!(
             do_parse!(
                 value: bind_value >>
-                opt_multispace >>
+                multispace0 >>
                 opt!(tag!(",")) >>
-                opt_multispace >>
+                multispace0 >>
                 (value)
             ),
             vec![], |mut acc: Vec<SerdeValue>, item: SerdeValue| {
@@ -646,9 +641,9 @@ named!(
     bind_value_kv_pair(Span) -> (Span, Vec<SerdeValue>),
     do_parse!(
         key: take_while_name_char >>
-        opt_multispace >>
+        multispace0 >>
         tag!(":") >>
-        opt_multispace >>
+        multispace0 >>
         values: bind_value_set >>
         ({
             (key, values)
@@ -663,14 +658,14 @@ named!(
     fold_many1!(
         do_parse!(
             start: opt!(complete!(alt!(tag!("[") | tag!("(")))) >>
-            opt_multispace >>
+            multispace0 >>
             kv: separated_list!(
-                do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()),
+                do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()),
                 bind_value_kv_pair
             ) >>
-            opt_multispace >>
+            multispace0 >>
             end: opt!(complete!(alt!(tag!("]") | tag!(")")))) >>
-            opt_multispace >>
+            multispace0 >>
             ((start, kv, end))
         ),
         BTreeMap::new(), |mut acc: BTreeMap<String, Vec<SerdeValue>>, items: (Option<Span>, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
@@ -716,7 +711,7 @@ named!(
     bind_value_named_sets(Span) -> Vec<BTreeMap<String, Vec<SerdeValue>>>,
     do_parse!(
         values: separated_list!(
-            do_parse!(opt_multispace >> tag!(",") >> opt_multispace >> ()),
+            do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()),
             bind_value_named_set
         ) >>
         (
@@ -727,7 +722,7 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{bindvar, bindvar_expecting, column_list, db_object, db_object_alias_sql,
+    use super::{bindvar, bindvar_expecting, column_list, column_name, db_object, db_object_alias_sql,
                 parse_composer_macro, parse_sql, parse_sql_end, parse_template};
 
     #[cfg(feature = "composer-serde")]

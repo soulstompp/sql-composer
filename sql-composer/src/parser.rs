@@ -567,13 +567,11 @@ named!(
 #[cfg(feature = "composer-serde")]
 named!(
     check_bind_value_ending(Span) -> Span,
-    complete!(
-        alt!(
-            peek!(tag!(")")) |
-            peek!(tag!("]")) |
-            peek!(tag!(",")) |
-            eof!()
-        )
+    alt!(
+        eof!()           | // shortest first
+        peek!(tag!(")")) |
+        peek!(tag!("]")) |
+        peek!(tag!(","))
     )
 );
 
@@ -603,7 +601,7 @@ named!(
             do_parse!(
                 value: bind_value >>
                 multispace0 >>
-                opt!(tag!(",")) >>
+                opt!(complete!(tag!(","))) >>
                 multispace0 >>
                 (value)
             ),
@@ -659,7 +657,8 @@ named!(
     pub bind_value_named_set(Span) -> BTreeMap<String, Vec<SerdeValue>>,
     fold_many1!(
         do_parse!(
-            start: opt!(complete!(alt!(tag!("[") | tag!("(")))) >>
+            //XXX: failed with Incomplete(Size(1) when start was opt!
+            start: complete!(alt!(tag!("[") | tag!("("))) >>
             multispace0 >>
             kv: separated_list!(
                 do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()),
@@ -670,8 +669,8 @@ named!(
             multispace0 >>
             ((start, kv, end))
         ),
-        BTreeMap::new(), |mut acc: BTreeMap<String, Vec<SerdeValue>>, items: (Option<Span>, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
-            let start = items.0;
+        BTreeMap::new(), |mut acc: BTreeMap<String, Vec<SerdeValue>>, items: (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
+            let s = items.0;
             let end = items.2;
 
             for (key, values) in items.1 {
@@ -684,23 +683,16 @@ named!(
                 }
             }
 
-            if let Some(s) = start {
-                if let Some(e) = end {
-                    if s.fragment == "[" && e.fragment != "]" {
-                        panic!("bind_value_named_set: no corresponding '['for ']'");
-                    }
-                    else if s.fragment == "(" && e.fragment != ")" {
-                        panic!("bind_value_named_set: no corresponding ')'for '('");
-                    }
+            if let Some(e) = end {
+                if s.fragment == "[" && e.fragment != "]" {
+                    panic!("bind_value_named_set: no corresponding ']'for '['");
                 }
-                else {
-                    panic!("bind_value_named_set: no matching end found for start: {:?}", s);
+                else if s.fragment == "(" && e.fragment != ")" {
+                    panic!("bind_value_named_set: no corresponding ')'for '('");
                 }
             }
             else {
-                if let Some(e) = end {
-                    panic!("bind_value_named_set: found ending {} with no starter", e.fragment);
-                }
+                panic!("bind_value_named_set: no matching end found for start: {:?}, end:{:?}", s, end);
             }
 
             acc
@@ -713,7 +705,7 @@ named!(
     bind_value_named_sets(Span) -> Vec<BTreeMap<String, Vec<SerdeValue>>>,
     do_parse!(
         values: separated_list!(
-            do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()),
+            do_parse!(multispace0 >> complete!(tag!(",")) >> multispace0 >> ()),
             bind_value_named_set
         ) >>
         (
@@ -728,7 +720,14 @@ mod tests {
                 parse_composer_macro, parse_sql, parse_sql_end, parse_template};
 
     #[cfg(feature = "composer-serde")]
-    use super::{bind_value_named_set, bind_value_named_sets, bind_value_set};
+    use super::{
+        bind_value,
+        bind_value_named_set,
+        bind_value_named_sets,
+        bind_value_set,
+        bind_value_text,
+        check_bind_value_ending
+    };
 
     use crate::types::{ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject,
                        SqlEnding, SqlLiteral};
@@ -1405,6 +1404,55 @@ mod tests {
 
     #[test]
     #[cfg(feature = "composer-serde")]
+    fn test_bind_value() {
+        let input = "'a'";
+
+        let (remaining, output) = bind_value(Span::new(input)).unwrap();
+
+        let expected_output = SerdeValue(Value::String("a".into()));
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    #[cfg(feature = "composer-serde")]
+    fn test_bind_value_text() {
+        let input = "'a'";
+
+        let (remaining, output) = bind_value_text(Span::new(input)).unwrap();
+
+        let expected_output = SerdeValue(Value::String("a".into()));
+
+        assert_eq!(output, expected_output, "correct output");
+        assert_eq!(remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    #[cfg(feature = "composer-serde")]
+    fn test_check_bind_value_ending() {
+        for &input in [")", "]", ",", ""].iter() {
+            // breaks for input="" if eof() is not listed first
+            println!("test_check_bind_value_ending with input=\"{}\"", input);
+
+            match check_bind_value_ending(Span::new(input)) {
+                Ok((remaining, output)) => {
+                    let expected_output = Span::new(input);
+                    let expected_fragment = input;
+
+                    assert_eq!(output, expected_output, "correct output for {:?}", input);
+                    assert_eq!(remaining.fragment, expected_fragment, "input not consumed for {:?}", input);
+                },
+                Err(e) => {
+                    println!("bind_value_ending for input={:?} returned an error={:?}", input, e);
+                    panic!(e)
+                }
+            };
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "composer-serde")]
     fn test_bind_value_set() {
         let input = "['a', 'aa', 'aaa']";
 
@@ -1441,12 +1489,18 @@ mod tests {
         //let input = "[a:['a', 'aa', 'aaa'], b:'b', c: (2, 2.25, 'a'), d: 2, e: 2.234566]";
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
 
-        let (remaining, output) = bind_value_named_set(Span::new(input)).unwrap();
+        match bind_value_named_set(Span::new(input)) {
+            Ok((remaining, output)) =>{
+                let expected_output = build_expected_bind_values();
 
-        let expected_output = build_expected_bind_values();
-
-        assert_eq!(output, expected_output, "correct output");
-        assert_eq!(remaining.fragment, "", "nothing remaining");
+                assert_eq!(output, expected_output, "correct output");
+                assert_eq!(remaining.fragment, "", "nothing remaining");
+            },
+            Err(e) => {
+                println!("bind_value_named_set returned an error={:?}", e);
+                panic!(e)
+            }
+        }
     }
 
     #[test]

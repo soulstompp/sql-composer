@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+#[cfg(feature = "composer-serde")]
 use rusqlite::types::ToSqlOutput;
 use rusqlite::{Connection, Statement};
 
@@ -15,6 +16,7 @@ use crate::types::SerdeValue;
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
 
+#[cfg(feature = "composer-serde")]
 use std::convert::From;
 
 impl<'a> ComposerConnection<'a> for Connection {
@@ -45,6 +47,7 @@ impl<'a> ComposerConnection<'a> for Connection {
     }
 }
 
+#[cfg(feature = "composer-serde")]
 impl ToSql for SerdeValue {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         match &self.0 {

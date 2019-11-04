@@ -9,8 +9,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
-use error_chain::bail;
-
 pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<& 'a str>;

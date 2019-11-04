@@ -21,7 +21,7 @@ use serde_value::Value;
 use std::fs::File;
 use std::io::prelude::*;
 
-struct Null();
+pub struct Null();
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum Position {

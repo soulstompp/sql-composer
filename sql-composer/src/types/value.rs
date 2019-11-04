@@ -51,6 +51,7 @@ impl ToValue for isize {
     }
 }
 
+#[allow(unused_macros)]
 macro_rules! from_optional_value(
     ($t: ty, $b: block) => (
         impl ToValue for $t {

@@ -12,8 +12,10 @@ use serde_value::Value;
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
 
+#[cfg(feature = "composer-serde")]
 use std::collections::BTreeMap;
 
+#[cfg(feature = "composer-serde")]
 use std::str::FromStr;
 
 named!(
@@ -737,7 +739,10 @@ mod tests {
     #[cfg(feature = "composer-serde")]
     use serde_value::Value;
 
-    use std::collections::{BTreeMap, HashMap};
+    #[cfg(feature = "composer-serde")]
+    use std::collections::BTreeMap;
+
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
     use crate::tests::{build_parsed_binding_item, build_parsed_db_object,

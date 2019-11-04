@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use mysql::{prelude::ToValue, Stmt};
 
+#[cfg(feature = "composer-serde")]
 use mysql::Value;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
@@ -16,6 +17,7 @@ use serde_value::Value as SerdeValueEnum;
 
 use mysql::Pool;
 
+#[cfg(feature = "composer-serde")]
 impl Into<Value> for SerdeValue {
     fn into(self) -> Value {
         match self.0 {

@@ -31,7 +31,7 @@ extern crate nom_locate;
 #[macro_use]
 pub mod composer;
 
-#[cfg(feature = "dbd-postgres")]
+#[cfg(all(feature = "dbd-postgres", feature="composer-serde"))]
 #[macro_use]
 extern crate postgres;
 

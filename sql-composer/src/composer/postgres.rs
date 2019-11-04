@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
-use postgres::types::{IsNull, ToSql, Type};
+use postgres::types::ToSql;
+#[cfg(feature = "composer-serde")]
+use postgres::types::{IsNull, Type};
 use postgres::Connection;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
@@ -14,6 +16,7 @@ use crate::types::SerdeValue;
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
 
+#[cfg(feature = "composer-serde")]
 use std::error::Error;
 
 impl<'a> ComposerConnection<'a> for Connection {

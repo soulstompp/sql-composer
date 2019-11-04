@@ -162,7 +162,7 @@ mod tests {
     use postgres::types::ToSql;
     use postgres::{Connection, TlsMode};
 
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::HashMap;
 
     use dotenv::dotenv;
     use std::env;

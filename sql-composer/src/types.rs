@@ -111,7 +111,7 @@ impl SqlCompositionAlias {
     }
 
     fn from_str(s: &str) -> Result<Self> {
-        let (is_name, is_path) = s.chars().fold((true, false), |mut acc, u| {
+        let (_is_name, _is_path) = s.chars().fold((true, false), |mut acc, u| {
             let c = u as char;
 
             match c {
@@ -302,7 +302,7 @@ impl SqlComposition {
     //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
-            Some(existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
+            Some(_existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
             None => {
                 self.position = Some(new);
                 Ok(())
@@ -340,7 +340,7 @@ impl SqlComposition {
     pub fn end(&mut self, value: &str, span: Span) -> Result<()> {
         //TODO: check if this has already ended
         match self.sql.last() {
-            Some(last) => self.push_sql(Sql::Ending(
+            Some(_last) => self.push_sql(Sql::Ending(
                 ParsedItem::from_span(
                     SqlEnding {
                         value: value.into(),

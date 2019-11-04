@@ -159,8 +159,8 @@ pub trait Composer: Sized {
             return self.compose_command(&sc, i, true);
         }
 
-        let mut pad = true;
-        let mut skip_this = false;
+        let mut pad;
+        let mut skip_this;
         let mut skip_next = false;
 
         for c in &sc.item.sql {

@@ -876,7 +876,8 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let composer = RusqliteComposer::new();
+        // TODO: why isn't composer used?
+        let _composer = RusqliteComposer::new();
 
         let bind_values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],

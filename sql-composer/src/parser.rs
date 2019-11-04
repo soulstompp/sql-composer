@@ -724,7 +724,7 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{bindvar, bindvar_expecting, column_list, column_name, db_object, db_object_alias_sql,
+    use super::{bindvar, bindvar_expecting, column_list, db_object, db_object_alias_sql,
                 parse_composer_macro, parse_sql, parse_sql_end, parse_template};
 
     #[cfg(feature = "composer-serde")]
@@ -820,8 +820,8 @@ mod tests {
         shift_line: Option<u32>,
         shift_offset: Option<usize>,
     ) -> ParsedItem<SqlComposition> {
-        let shift_line = shift_line.unwrap_or(0);
-        let shift_offset = shift_offset.unwrap_or(0);
+        let _shift_line = shift_line.unwrap_or(0);
+        let _shift_offset = shift_offset.unwrap_or(0);
 
         let item = SqlComposition {
             position: Some(build_parsed_path_position(
@@ -1250,7 +1250,7 @@ mod tests {
 
         let expected_span = build_span(Some(1), Some(3), "tt");
 
-        let (leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
+        let (_leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(span, expected_span, "spans match");
@@ -1262,7 +1262,7 @@ mod tests {
 
         let expected_span = build_span(Some(1), Some(1), "AS");
 
-        let (leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
+        let (_leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(span, expected_span, "spans match");
@@ -1274,7 +1274,7 @@ mod tests {
 
         let expected_span = build_span(Some(1), Some(0), "tt");
 
-        let (leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
+        let (_leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(span, expected_span, "spans match");
@@ -1286,7 +1286,7 @@ mod tests {
 
         let expected_span = build_span(Some(1), Some(0), "tt");
 
-        let (leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
+        let (_leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(span, expected_span, "spans match");
@@ -1298,7 +1298,7 @@ mod tests {
 
         let expected_span = build_span(Some(1), Some(1), "tt");
 
-        let (leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
+        let (_leftover_span, span) = db_object_alias_sql(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(span, expected_span, "spans match");
@@ -1317,7 +1317,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "items match");
@@ -1337,7 +1337,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "DbObject items match");
@@ -1357,7 +1357,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "items match");

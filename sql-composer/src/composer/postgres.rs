@@ -32,6 +32,7 @@ impl<'a> ComposerConnection<'a> for Connection {
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = PostgresComposer {
+            #[allow(dead_code)]
             config: PostgresComposer::config(),
             values,
             root_mock_values,
@@ -83,6 +84,7 @@ impl ToSql for SerdeValue {
 
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
+    #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a dyn ToSql>>,

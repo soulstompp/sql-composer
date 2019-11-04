@@ -130,6 +130,7 @@ macro_rules! bind_values(
 
 #[derive(Default)]
 pub struct ComposerConfig {
+    #[allow(dead_code)]
     start: usize,
 }
 

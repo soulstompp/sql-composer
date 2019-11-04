@@ -24,6 +24,7 @@ pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
         .expect("expected Ok from ParsedItem::from_span in build_parsed_time()")
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_string(
     item: &str,
     line: Option<u32>,
@@ -33,6 +34,7 @@ pub fn build_parsed_string(
     build_parsed_item(item.to_string(), line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_binding_item(
     name: &str,
     min: Option<u32>,
@@ -47,6 +49,7 @@ pub fn build_parsed_binding_item(
     build_parsed_item(binding, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_sql_binding(
     name: &str,
     min: Option<u32>,
@@ -61,6 +64,7 @@ pub fn build_parsed_sql_binding(
     ))
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_quoted_binding_item(
     name: &str,
     min: Option<u32>,
@@ -75,6 +79,7 @@ pub fn build_parsed_quoted_binding_item(
     build_parsed_item(quoted_binding, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_sql_quoted_binding(
     name: &str,
     min: Option<u32>,
@@ -89,6 +94,7 @@ pub fn build_parsed_sql_quoted_binding(
     ))
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_literal_item(
     item: &str,
     line: Option<u32>,
@@ -100,6 +106,7 @@ pub fn build_parsed_literal_item(
     build_parsed_item(literal, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_sql_literal(
     item: &str,
     line: Option<u32>,
@@ -109,6 +116,7 @@ pub fn build_parsed_sql_literal(
     Sql::Literal(build_parsed_literal_item(item, line, offset, fragment))
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_db_object_item(
     item: &str,
     alias: Option<String>,
@@ -121,6 +129,7 @@ pub fn build_parsed_db_object_item(
     build_parsed_item(object, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_db_object(
     item: &str,
     alias: Option<String>,
@@ -133,6 +142,7 @@ pub fn build_parsed_db_object(
     ))
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_keyword_item(
     item: &str,
     line: Option<u32>,
@@ -144,6 +154,7 @@ pub fn build_parsed_keyword_item(
     build_parsed_item(keyword, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_sql_keyword(
     item: &str,
     line: Option<u32>,
@@ -164,6 +175,7 @@ pub fn build_parsed_ending_item(
     build_parsed_item(ending, line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_sql_ending(
     item: &str,
     line: Option<u32>,
@@ -173,6 +185,7 @@ pub fn build_parsed_sql_ending(
     Sql::Ending(build_parsed_ending_item(item, line, offset, fragment))
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_path_position(
     path: PathBuf,
     line: u32,
@@ -191,6 +204,7 @@ pub fn build_parsed_path_position(
     Position::Parsed(span)
 }
 
+#[allow(dead_code)]
 pub fn build_span(line: Option<u32>, offset: Option<usize>, fragment: &str) -> Span {
     Span {
         line:     line.unwrap_or(1),

@@ -32,6 +32,7 @@ impl<'a> ComposerConnection<'a> for Connection {
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = RusqliteComposer {
+            #[allow(dead_code)]
             config: RusqliteComposer::config(),
             values,
             root_mock_values,
@@ -242,6 +243,8 @@ mod tests {
         assert_eq!(found.data, person.data, "person's data");
     }
 
+    // TODO: why does get_row_values exist?
+    #[allow(dead_code)]
     fn get_row_values(row: Row) -> Vec<String> {
         (0..4).fold(Vec::new(), |mut acc, i| {
             acc.push(row.get(i).unwrap());

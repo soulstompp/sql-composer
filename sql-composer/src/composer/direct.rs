@@ -10,6 +10,7 @@ pub struct Connection();
 
 #[derive(Default)]
 pub struct DirectComposer<'a> {
+    #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,

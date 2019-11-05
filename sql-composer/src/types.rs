@@ -9,8 +9,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
-use error_chain::bail;
-
 pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<& 'a str>;
@@ -21,7 +19,7 @@ use serde_value::Value;
 use std::fs::File;
 use std::io::prelude::*;
 
-struct Null();
+pub struct Null();
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum Position {
@@ -111,7 +109,7 @@ impl SqlCompositionAlias {
     }
 
     fn from_str(s: &str) -> Result<Self> {
-        let (is_name, is_path) = s.chars().fold((true, false), |mut acc, u| {
+        let (_is_name, _is_path) = s.chars().fold((true, false), |mut acc, u| {
             let c = u as char;
 
             match c {
@@ -302,7 +300,7 @@ impl SqlComposition {
     //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
-            Some(existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
+            Some(_existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
             None => {
                 self.position = Some(new);
                 Ok(())
@@ -340,7 +338,7 @@ impl SqlComposition {
     pub fn end(&mut self, value: &str, span: Span) -> Result<()> {
         //TODO: check if this has already ended
         match self.sql.last() {
-            Some(last) => self.push_sql(Sql::Ending(
+            Some(_last) => self.push_sql(Sql::Ending(
                 ParsedItem::from_span(
                     SqlEnding {
                         value: value.into(),

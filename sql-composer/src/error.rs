@@ -1,11 +1,3 @@
-use std::fmt;
-
-use crate::types::{Position, SqlComposition, SqlCompositionAlias};
-
-use nom_locate::LocatedSpan;
-
-type Span<'a> = LocatedSpan<&'a str>;
-
 error_chain! {
     errors {
         AliasConflict(t: String) {

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+#[cfg(feature = "composer-serde")]
 use rusqlite::types::ToSqlOutput;
 use rusqlite::{Connection, Statement};
 
@@ -15,6 +16,7 @@ use crate::types::SerdeValue;
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
 
+#[cfg(feature = "composer-serde")]
 use std::convert::From;
 
 impl<'a> ComposerConnection<'a> for Connection {
@@ -30,6 +32,7 @@ impl<'a> ComposerConnection<'a> for Connection {
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
         let c = RusqliteComposer {
+            #[allow(dead_code)]
             config: RusqliteComposer::config(),
             values,
             root_mock_values,
@@ -45,6 +48,7 @@ impl<'a> ComposerConnection<'a> for Connection {
     }
 }
 
+#[cfg(feature = "composer-serde")]
 impl ToSql for SerdeValue {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         match &self.0 {
@@ -239,6 +243,8 @@ mod tests {
         assert_eq!(found.data, person.data, "person's data");
     }
 
+    // TODO: why does get_row_values exist?
+    #[allow(dead_code)]
     fn get_row_values(row: Row) -> Vec<String> {
         (0..4).fold(Vec::new(), |mut acc, i| {
             acc.push(row.get(i).unwrap());
@@ -870,7 +876,8 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let composer = RusqliteComposer::new();
+        // TODO: why isn't composer used?
+        let _composer = RusqliteComposer::new();
 
         let bind_values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use mysql::{prelude::ToValue, Stmt};
 
+#[cfg(feature = "composer-serde")]
 use mysql::Value;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
@@ -16,6 +17,7 @@ use serde_value::Value as SerdeValueEnum;
 
 use mysql::Pool;
 
+#[cfg(feature = "composer-serde")]
 impl Into<Value> for SerdeValue {
     fn into(self) -> Value {
         match self.0 {
@@ -55,6 +57,7 @@ impl<'a> ComposerConnection<'a> for Pool {
 }
 
 pub struct MysqlComposer<'a> {
+    #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a dyn ToValue>>,
@@ -233,6 +236,7 @@ mod tests {
         assert_eq!(found.data, person.data, "person's data");
     }
 
+    #[allow(dead_code)]
     fn parse(input: &str) -> ParsedItem<SqlComposition> {
         let (_remaining, stmt) = parse_template(Span::new(input.into()), None).unwrap();
 

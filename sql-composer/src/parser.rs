@@ -14,7 +14,8 @@ use nom::{
     },
     character::complete::{
         digit1, one_of
-    }
+    },
+    number::complete::double,
 };
 
 #[cfg(feature = "composer-serde")]
@@ -539,33 +540,17 @@ pub fn bind_value_integer(
 }
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_real(Span) -> SerdeValue,
-    do_parse!(
-        wi: take_while!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        //TODO: support comma decimal format?
-        char!('.') >>
-        fi: take_while!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        multispace0 >>
-        check_bind_value_ending >>
-        multispace0 >>
-        ({
-            let r = format!("{}.{}", wi.fragment, fi.fragment);
+pub fn bind_value_real(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
 
-            SerdeValue(Value::F64(f64::from_str(&r).expect("unable to parse real value")))
-        })
-    )
-);
+    let (span, value) = double(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    let (span, _) = multispace0(span)?;
+    Ok((span,
+        SerdeValue(Value::F64(value))))
+}
 
 #[cfg(feature = "composer-serde")]
 named!(
@@ -584,9 +569,9 @@ named!(
     do_parse!(
         value: complete!(
             alt!(
-                do_parse!(t: bind_value_text >> (t)) |
-                do_parse!(r: bind_value_real >> (r)) |
-                do_parse!(i: bind_value_integer >> (i))
+                do_parse!(t: bind_value_text >> (t))    |
+                do_parse!(i: bind_value_integer >> (i)) |
+                do_parse!(r: bind_value_real >> (r))
             )
         ) >>
         ({

@@ -523,6 +523,7 @@ pub fn bind_value_text(
             _    => true,
         })(span)?;
     let (span, _) = one_of("'")(span)?;
+    let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
     Ok((span,
         SerdeValue(Value::String(found.fragment.to_string()))))
@@ -534,6 +535,7 @@ pub fn bind_value_integer(
     ) -> IResult<Span, SerdeValue> {
 
     let (span, found) = digit1(span)?;
+    let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
     Ok((span,
         SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))))
@@ -570,7 +572,7 @@ named!(
         value: complete!(
             alt!(
                 do_parse!(t: bind_value_text >> (t))    |
-                do_parse!(i: bind_value_integer >> (i)) |
+                do_parse!(i: bind_value_integer >> (i)) |  // must parse int before real
                 do_parse!(r: bind_value_real >> (r))
             )
         ) >>
@@ -714,6 +716,7 @@ mod tests {
         bind_value_named_sets,
         bind_value_set,
         bind_value_text,
+        bind_value_integer,
         check_bind_value_ending
     };
 
@@ -1393,14 +1396,26 @@ mod tests {
     #[test]
     #[cfg(feature = "composer-serde")]
     fn test_bind_value() {
-        let input = "'a'";
+        let tests= vec![
+            ("'a'",     "",   SerdeValue(Value::String("a".into()))),
+            ("'a', ",   ", ", SerdeValue(Value::String("a".into()))),
+            ("'a' , ",  ", ", SerdeValue(Value::String("a".into()))),
 
-        let (remaining, output) = bind_value(Span::new(input)).unwrap();
+            ("34",     "",   SerdeValue(Value::I64(34))),
+            ("34, ",   ", ", SerdeValue(Value::I64(34))),
+            ("34 ,",   ",",  SerdeValue(Value::I64(34))),
 
-        let expected_output = SerdeValue(Value::String("a".into()));
+            ("54.3, ", ", ", SerdeValue(Value::F64(54.3))),
+            ("54.3",   "", SerdeValue(Value::F64(54.3))),
+            ("54.3 ",  "", SerdeValue(Value::F64(54.3))),
+        ];
+        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+            println!("{}: input={:?}", i, input);
+            let (remaining, output) = bind_value(Span::new(input)).unwrap();
 
-        assert_eq!(output, expected_output, "correct output");
-        assert_eq!(remaining.fragment, "", "nothing remaining");
+            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
+            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+        }
     }
 
     #[test]
@@ -1414,6 +1429,24 @@ mod tests {
 
         assert_eq!(output, expected_output, "correct output");
         assert_eq!(remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    #[cfg(feature = "composer-serde")]
+    fn test_bind_value_integer() {
+        let tests= vec![
+            ("34, ",   ", ", SerdeValue(Value::I64(34))),
+            ("34 ",    "",   SerdeValue(Value::I64(34))),
+            ("34 , ",  ", ", SerdeValue(Value::I64(34))),
+            ("34",     "",   SerdeValue(Value::I64(34))),
+        ];
+        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+            println!("input={:?}", input);
+            let (remaining, output) = bind_value_integer(Span::new(input)).unwrap();
+
+            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
+            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+        }
     }
 
     #[test]

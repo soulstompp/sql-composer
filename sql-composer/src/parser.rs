@@ -2,9 +2,20 @@ use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
-use nom::{IResult};
+use nom::{
+    IResult,
+    character::complete::multispace0
+};
 
-use nom::character::complete::multispace0;
+#[cfg(feature = "composer-serde")]
+use nom::{
+    bytes::complete::{
+        take_while1,
+    },
+    character::complete::{
+        digit1, one_of
+    }
+};
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -499,41 +510,40 @@ named!(
 );
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_text(Span) -> SerdeValue,
-    do_parse!(
-        char!('\'') >>
-        t: take_while1!(|c| {
-            match c {
-                '\'' => false,
-                ']' => false,
-                _ => true,
-            }
-        }) >>
-        char!('\'') >>
-        check_bind_value_ending >>
-        ({
-            SerdeValue(Value::String(t.to_string()))
-        })
+pub fn bind_value_text(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
+
+    let (span, _) = one_of("'")(span)?;
+    let (span, found) = take_while1(
+        |c:char| match c {
+            '\'' => false,
+            ']'  => false,
+            _    => true,
+        })(span)?;
+    let (span, _) = one_of("'")(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    return Ok(
+        (
+            span,
+            SerdeValue(Value::String(found.fragment.to_string()))
+        )
     )
-);
+}
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_integer(Span) -> SerdeValue,
-    do_parse!(
-        i: take_while1!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        check_bind_value_ending >>
-        ({
-            SerdeValue(Value::I64(i64::from_str(&i.fragment).expect("unable to parse integer found by bind_value_integer")))
-        })
+pub fn bind_value_integer(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
+
+    let (remaining, found) = digit1(span)?;
+    return Ok(
+        (
+            remaining,
+            SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))
+        )
     )
-);
+}
 
 #[cfg(feature = "composer-serde")]
 named!(

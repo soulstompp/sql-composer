@@ -523,12 +523,8 @@ pub fn bind_value_text(
         })(span)?;
     let (span, _) = one_of("'")(span)?;
     let (span, _) = check_bind_value_ending(span)?;
-    return Ok(
-        (
-            span,
-            SerdeValue(Value::String(found.fragment.to_string()))
-        )
-    )
+    Ok((span,
+        SerdeValue(Value::String(found.fragment.to_string()))))
 }
 
 #[cfg(feature = "composer-serde")]
@@ -536,13 +532,10 @@ pub fn bind_value_integer(
     span: Span,
     ) -> IResult<Span, SerdeValue> {
 
-    let (remaining, found) = digit1(span)?;
-    return Ok(
-        (
-            remaining,
-            SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))
-        )
-    )
+    let (span, found) = digit1(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    Ok((span,
+        SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))))
 }
 
 #[cfg(feature = "composer-serde")]

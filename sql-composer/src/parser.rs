@@ -2,9 +2,21 @@ use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
-use nom::{IResult};
+use nom::{
+    IResult,
+    character::complete::multispace0
+};
 
-use nom::character::complete::multispace0;
+#[cfg(feature = "composer-serde")]
+use nom::{
+    bytes::complete::{
+        take_while1,
+    },
+    character::complete::{
+        digit1, one_of
+    },
+    number::complete::double,
+};
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -499,70 +511,48 @@ named!(
 );
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_text(Span) -> SerdeValue,
-    do_parse!(
-        char!('\'') >>
-        t: take_while1!(|c| {
-            match c {
-                '\'' => false,
-                ']' => false,
-                _ => true,
-            }
-        }) >>
-        char!('\'') >>
-        check_bind_value_ending >>
-        ({
-            SerdeValue(Value::String(t.to_string()))
-        })
-    )
-);
+pub fn bind_value_text(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
+
+    let (span, _) = one_of("'")(span)?;
+    let (span, found) = take_while1(
+        |c:char| match c {
+            '\'' => false,
+            ']'  => false,
+            _    => true,
+        })(span)?;
+    let (span, _) = one_of("'")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    Ok((span,
+        SerdeValue(Value::String(found.fragment.to_string()))))
+}
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_integer(Span) -> SerdeValue,
-    do_parse!(
-        i: take_while1!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        check_bind_value_ending >>
-        ({
-            SerdeValue(Value::I64(i64::from_str(&i.fragment).expect("unable to parse integer found by bind_value_integer")))
-        })
-    )
-);
+pub fn bind_value_integer(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
+
+    let (span, found) = digit1(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    Ok((span,
+        SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))))
+}
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_real(Span) -> SerdeValue,
-    do_parse!(
-        wi: take_while!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        //TODO: support comma decimal format?
-        char!('.') >>
-        fi: take_while!(|c| {
-            match c {
-                '0'..='9' => true,
-                _ => false,
-            }
-        }) >>
-        multispace0 >>
-        check_bind_value_ending >>
-        multispace0 >>
-        ({
-            let r = format!("{}.{}", wi.fragment, fi.fragment);
+pub fn bind_value_real(
+    span: Span,
+    ) -> IResult<Span, SerdeValue> {
 
-            SerdeValue(Value::F64(f64::from_str(&r).expect("unable to parse real value")))
-        })
-    )
-);
+    let (span, value) = double(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    let (span, _) = multispace0(span)?;
+    Ok((span,
+        SerdeValue(Value::F64(value))))
+}
 
 #[cfg(feature = "composer-serde")]
 named!(
@@ -581,9 +571,9 @@ named!(
     do_parse!(
         value: complete!(
             alt!(
-                do_parse!(t: bind_value_text >> (t)) |
-                do_parse!(r: bind_value_real >> (r)) |
-                do_parse!(i: bind_value_integer >> (i))
+                do_parse!(t: bind_value_text >> (t))    |
+                do_parse!(i: bind_value_integer >> (i)) |  // must parse int before real
+                do_parse!(r: bind_value_real >> (r))
             )
         ) >>
         ({
@@ -726,6 +716,7 @@ mod tests {
         bind_value_named_sets,
         bind_value_set,
         bind_value_text,
+        bind_value_integer,
         check_bind_value_ending
     };
 
@@ -1405,14 +1396,26 @@ mod tests {
     #[test]
     #[cfg(feature = "composer-serde")]
     fn test_bind_value() {
-        let input = "'a'";
+        let tests= vec![
+            ("'a'",     "",   SerdeValue(Value::String("a".into()))),
+            ("'a', ",   ", ", SerdeValue(Value::String("a".into()))),
+            ("'a' , ",  ", ", SerdeValue(Value::String("a".into()))),
 
-        let (remaining, output) = bind_value(Span::new(input)).unwrap();
+            ("34",     "",   SerdeValue(Value::I64(34))),
+            ("34, ",   ", ", SerdeValue(Value::I64(34))),
+            ("34 ,",   ",",  SerdeValue(Value::I64(34))),
 
-        let expected_output = SerdeValue(Value::String("a".into()));
+            ("54.3, ", ", ", SerdeValue(Value::F64(54.3))),
+            ("54.3",   "", SerdeValue(Value::F64(54.3))),
+            ("54.3 ",  "", SerdeValue(Value::F64(54.3))),
+        ];
+        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+            println!("{}: input={:?}", i, input);
+            let (remaining, output) = bind_value(Span::new(input)).unwrap();
 
-        assert_eq!(output, expected_output, "correct output");
-        assert_eq!(remaining.fragment, "", "nothing remaining");
+            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
+            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+        }
     }
 
     #[test]
@@ -1426,6 +1429,24 @@ mod tests {
 
         assert_eq!(output, expected_output, "correct output");
         assert_eq!(remaining.fragment, "", "nothing remaining");
+    }
+
+    #[test]
+    #[cfg(feature = "composer-serde")]
+    fn test_bind_value_integer() {
+        let tests= vec![
+            ("34, ",   ", ", SerdeValue(Value::I64(34))),
+            ("34 ",    "",   SerdeValue(Value::I64(34))),
+            ("34 , ",  ", ", SerdeValue(Value::I64(34))),
+            ("34",     "",   SerdeValue(Value::I64(34))),
+        ];
+        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+            println!("input={:?}", input);
+            let (remaining, output) = bind_value_integer(Span::new(input)).unwrap();
+
+            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
+            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+        }
     }
 
     #[test]

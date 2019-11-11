@@ -6,6 +6,8 @@ use crate::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
 
 use crate::types::value::ToValue;
 
+use crate::error::{ErrorKind, Result};
+
 pub struct Connection();
 
 #[derive(Default)]
@@ -34,7 +36,6 @@ impl<'a> Composer for DirectComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    //TODO: error handling
     fn binding_tag(&self, _u: usize, name: String) -> String {
         let mut s = String::new();
 
@@ -48,7 +49,7 @@ impl<'a> Composer for DirectComposer<'a> {
             }
         }
         else {
-            panic!("don't have proper error handling yet!");
+            unimplemented!("unexpected binding_tag error!");
         }
 
         s
@@ -58,7 +59,7 @@ impl<'a> Composer for DirectComposer<'a> {
         &self,
         binding: SqlBinding,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         Ok((self.binding_tag(offset, binding.name), vec![]))
     }
 
@@ -71,7 +72,7 @@ impl<'a> Composer for DirectComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_count_default_command(composition, offset, child)
     }
 
@@ -80,7 +81,7 @@ impl<'a> Composer for DirectComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_union_default_command(composition, offset, child)
     }
 

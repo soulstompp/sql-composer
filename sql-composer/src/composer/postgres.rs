@@ -10,6 +10,8 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
+use crate::error::{ErrorKind, Result};
+
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
 
@@ -30,7 +32,7 @@ impl<'a> ComposerConnection<'a> for Connection {
         values: BTreeMap<String, Vec<&'a dyn ToSql>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
-    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    ) -> Result<(Self::Statement, Vec<Self::Value>)> {
         let c = PostgresComposer {
             #[allow(dead_code)]
             config: PostgresComposer::config(),
@@ -42,7 +44,7 @@ impl<'a> ComposerConnection<'a> for Connection {
         let (sql, bind_vars) = c.compose(s)?;
 
         //TODO: support a DriverError type to handle this better
-        let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
+        let stmt = self.prepare(&sql).or_else(|_| Err("can't prepare sql"))?;
 
         Ok((stmt, bind_vars))
     }
@@ -50,16 +52,15 @@ impl<'a> ComposerConnection<'a> for Connection {
 
 #[cfg(feature = "composer-serde")]
 impl ToSql for SerdeValue {
-    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
         match &self.0 {
             Value::String(s) => {
-                <String as ToSql>::to_sql(s, ty, w)?;
+                <String as ToSql>::to_sql(s, ty, w).expect("unable to convert Value::String via to_sql");
             }
             Value::I64(i) => {
-                <i64 as ToSql>::to_sql(i, ty, w)?;
-            }
+                <i64 as ToSql>::to_sql(i, ty, w).expect("unable to convert Value::String via to_sql");            }
             Value::F64(f) => {
-                <f64 as ToSql>::to_sql(f, ty, w)?;
+                <f64 as ToSql>::to_sql(f, ty, w).expect("unable to convert Value::String via to_sql");
             }
             _ => unimplemented!("unable to convert unexpected Value type"),
         }
@@ -118,7 +119,7 @@ impl<'a> Composer for PostgresComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_count_default_command(composition, offset, child)
     }
 
@@ -127,7 +128,7 @@ impl<'a> Composer for PostgresComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_union_default_command(composition, offset, child)
     }
 
@@ -291,7 +292,7 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -344,7 +345,7 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -406,7 +407,7 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 

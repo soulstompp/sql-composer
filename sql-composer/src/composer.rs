@@ -14,6 +14,8 @@ pub use crate::parser::parse_template;
 use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
+use crate::error::{ErrorKind, Result};
+
 pub trait ComposerConnection<'a> {
     type Composer;
     //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
@@ -26,7 +28,7 @@ pub trait ComposerConnection<'a> {
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
-    ) -> Result<(Self::Statement, Vec<Self::Value>), ()>;
+    ) -> Result<(Self::Statement, Vec<Self::Value>)>;
 }
 
 #[macro_export]
@@ -137,7 +139,7 @@ pub struct ComposerConfig {
 pub trait Composer: Sized {
     type Value: Copy;
 
-    fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>), ()> {
+    fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>)> {
         let item = ParsedItem::generated(s.clone(), None).unwrap();
 
         self.compose_statement(&item, 1usize, false)
@@ -148,7 +150,7 @@ pub trait Composer: Sized {
         sc: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         let mut i = offset;
 
         let mut sql = String::new();
@@ -160,13 +162,11 @@ pub trait Composer: Sized {
         }
 
         let mut pad;
-        let mut skip_this;
-        let mut skip_next = false;
+        let mut skip_padding;
 
         for c in &sc.item.sql {
             pad = true;
-            skip_this = skip_next;
-            skip_next = false;
+            skip_padding = false;
 
             let (sub_sql, sub_values) = match c {
                 Sql::Literal(t) => (t.to_string(), vec![]),
@@ -188,7 +188,7 @@ pub trait Composer: Sized {
                     );
 
                     if let Some(mv) = self.mock_values().get(&dbo_alias) {
-                        let (mock_sql, mock_values) = self.mock_compose(mv, i);
+                        let (mock_sql, mock_values) = self.mock_compose(mv, i)?;
 
                         //TODO: this should call the alias function on dbo_alias, which uses
                         //object_alias but falls back to object_name
@@ -208,10 +208,10 @@ pub trait Composer: Sized {
             }
 
             if sub_sql == "," {
-                skip_this = true;
+                skip_padding = true;
             }
 
-            if !skip_this && pad && sql.len() > 0 {
+            if !skip_padding && pad && sql.len() > 0 {
                 sql.push(' ');
             }
 
@@ -232,7 +232,7 @@ pub trait Composer: Sized {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         match &composition.item.command {
             Some(s) => {
                 match s.item().to_lowercase().as_str() {
@@ -246,7 +246,7 @@ pub trait Composer: Sized {
                                 .mock_values()
                                 .get(&SqlCompositionAlias::Path(path.into()))
                             {
-                                Some(e) => Ok(self.mock_compose(e, offset)),
+                                Some(e) => Ok(self.mock_compose(e, offset)?),
                                 None => self.compose_statement(
                                     &out.item.aliases.get(&out.item.of[0].item()).unwrap(),
                                     offset,
@@ -262,8 +262,7 @@ pub trait Composer: Sized {
                     }
                     "count" => self.compose_count_command(composition, offset, child),
                     "union" => self.compose_union_command(composition, offset, child),
-                    // TODO: handle this error better
-                    _ => panic!("unknown call"),
+                    c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into()))
                 }
             }
             None => self.compose_statement(&composition, offset, child),
@@ -275,14 +274,14 @@ pub trait Composer: Sized {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()>;
+    ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_count_default_command(
         &self,
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         let mut out = SqlComposition::default();
 
         let mut select = String::from("SELECT COUNT(");
@@ -301,15 +300,15 @@ pub trait Composer: Sized {
         out.push_generated_literal(&select, Some("COUNT".into()))
             .unwrap();
 
-        for position in composition.item.of.iter() {
+        for alias in composition.item.of.iter() {
             out.push_generated_literal("(", Some("COUNT".into()))
                 .unwrap();
-            match composition.item.aliases.get(&position.item()) {
+            match composition.item.aliases.get(&alias.item()) {
                 Some(sc) => {
                     out.push_sub_comp(sc.clone()).unwrap();
                 }
                 None => {
-                    panic!("no position found with position: {:?}", position);
+                    bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
                 }
             }
 
@@ -329,14 +328,14 @@ pub trait Composer: Sized {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()>;
+    ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_union_default_command(
         &self,
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         let mut out = SqlComposition::default();
 
         // columns in this case would mean an compose on each side of the union literal
@@ -345,21 +344,21 @@ pub trait Composer: Sized {
         let mut i = 0usize;
 
         if composition.item.of.len() < 2 {
-            panic!("union requires 2 of arguments");
+            bail!(ErrorKind::CompositionCommandArgInvalid("union".into(), "requires 2 or more alias names".into()));
         }
 
-        for position in composition.item.of.iter() {
+        for alias in composition.item.of.iter() {
             if i > 0 {
                 out.push_generated_literal("UNION ", Some("UNION".into()))
                     .unwrap();
             }
 
-            match composition.item.aliases.get(&position.item()) {
+            match composition.item.aliases.get(&alias.item()) {
                 Some(sc) => {
                     out.push_sub_comp(sc.clone()).unwrap();
                 }
                 None => {
-                    panic!("no alias found with alias: {:?}", position.item());
+                    bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
                 }
             }
 
@@ -377,7 +376,7 @@ pub trait Composer: Sized {
         &self,
         binding: SqlBinding,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         let name = &binding.name;
         let mut sql = String::new();
         let mut new_values = vec![];
@@ -407,33 +406,28 @@ pub trait Composer: Sized {
                         return Ok((sql, new_values));
                     }
                     else {
-                        return Err(());
+                        bail!(ErrorKind::CompositionBindingValueInvalid(name.into(), "cannot be NULL and no value provided".into()));
                     }
                 }
 
                 if let Some(min) = binding.min_values {
                     if found < min {
-                        //TODO: useful error
-                        return Err(());
+                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), format!("found {} > min {}", found, min)));
                     }
                 }
 
                 if let Some(max) = binding.max_values {
                     if found > max {
-                        //TODO: useful error
-                        return Err(());
+                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), format!("found {} < max {}", found, max)));
                     }
                 }
                 else {
                     if binding.min_values.is_none() && found > 1 {
-                        //TODO: useful error
-                        return Err(());
+                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), "does not accept more than one value".into()));
                     }
                 }
             }
-            //TODO: error "no value for binding {} of {}", i, name),
-            //only error that isn't
-            None => panic!("no value for binding {} of {}", i, name),
+            None => bail!(ErrorKind::CompositionBindingValueCount(name.into(), "requires a value".into()))
         };
 
         Ok((sql, new_values))
@@ -455,7 +449,7 @@ pub trait Composer: Sized {
         &self,
         mock_values: &Vec<BTreeMap<String, Self::Value>>,
         offset: usize,
-    ) -> (String, Vec<Self::Value>) {
+    ) -> Result<(String, Vec<Self::Value>)> {
         let mut sql = String::new();
         let mut values: Vec<Self::Value> = vec![];
 
@@ -470,7 +464,7 @@ pub trait Composer: Sized {
         let mut expected_columns: Option<u8> = None;
 
         if mock_values.is_empty() {
-            panic!("mock_values cannot be empty");
+            bail!(ErrorKind::MockCompositionArgsInvalid("mock_values cannot be empty".into()));
         }
         else {
             for row in mock_values.iter() {
@@ -497,7 +491,7 @@ pub trait Composer: Sized {
 
                 if let Some(ec) = expected_columns {
                     if c != ec {
-                        panic!("expected {} columns found {} for row {}", ec, c, r);
+                        bail!(ErrorKind::MockCompositionColumnCountInvalid(r, c, ec));
                     }
                 }
                 else {
@@ -509,6 +503,6 @@ pub trait Composer: Sized {
             }
         }
 
-        (sql, values)
+        Ok((sql, values))
     }
 }

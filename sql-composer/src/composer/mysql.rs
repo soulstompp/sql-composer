@@ -9,6 +9,8 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
+use crate::error::{ErrorKind, Result};
+
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
 
@@ -39,7 +41,7 @@ impl<'a> ComposerConnection<'a> for Pool {
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
-    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
+    ) -> Result<(Self::Statement, Vec<Self::Value>)> {
         let c = MysqlComposer {
             config: MysqlComposer::config(),
             values,
@@ -50,7 +52,7 @@ impl<'a> ComposerConnection<'a> for Pool {
         let (sql, bind_vars) = c.compose(s)?;
 
         //TODO: support a DriverError type to handle this better
-        let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
+        let stmt = self.prepare(&sql).or_else(|_| Err("unable to prepare"))?;
 
         Ok((stmt, bind_vars))
     }
@@ -91,7 +93,7 @@ impl<'a> Composer for MysqlComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_count_default_command(composition, offset, child)
     }
 
@@ -100,7 +102,7 @@ impl<'a> Composer for MysqlComposer<'a> {
         composition: &ParsedItem<SqlComposition>,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_union_default_command(composition, offset, child)
     }
 
@@ -324,7 +326,7 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -386,7 +388,7 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1);
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1).expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 

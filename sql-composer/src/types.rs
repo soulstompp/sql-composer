@@ -300,7 +300,7 @@ impl SqlComposition {
     //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
-            Some(_existing) => Err(ErrorKind::AliasConflict("bad posisition".into()).into()),
+            Some(_existing) => Err(ErrorKind::CompositionAliasConflict("bad posisition".into()).into()),
             None => {
                 self.position = Some(new);
                 Ok(())

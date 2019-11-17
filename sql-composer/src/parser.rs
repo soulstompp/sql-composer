@@ -1,22 +1,17 @@
-use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding,
-                   SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
-                   SqlLiteral};
+use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding, SqlComposition,
+                   SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
-use nom::{
-    IResult,
-    character::complete::multispace0
-};
+use nom::{branch::alt,
+          bytes::complete::{tag, tag_no_case, take_until},
+          character::complete::multispace0,
+          combinator::opt,
+          sequence::delimited,
+          IResult};
 
 #[cfg(feature = "composer-serde")]
-use nom::{
-    bytes::complete::{
-        take_while1,
-    },
-    character::complete::{
-        digit1, one_of
-    },
-    number::complete::double,
-};
+use nom::{bytes::complete::take_while1,
+          character::complete::{digit1, one_of},
+          number::complete::double};
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -32,16 +27,8 @@ use std::str::FromStr;
 
 named!(
     _parse_template(Span) -> ParsedItem<SqlComposition>,
-    dbg_dmp!(
     fold_many1!(
-            alt!(
-                complete!(do_parse!(position!() >> e: parse_sql_end >> (vec![Sql::Ending(e)])))
-                | complete!(do_parse!(position!() >> b: bindvar >> (vec![Sql::Binding(b)])))
-                | complete!(do_parse!(position!() >> sc: parse_composer_macro >> (vec![Sql::Composition((ParsedItem::from_span(sc.0, Span::new(""), None).expect("expected to make a Span in sc _parse_template"), sc.1))])))
-                | complete!(do_parse!(position!() >> dbo: db_object >> (vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)])))
-                | complete!(do_parse!(position!() >> k: keyword >> (vec![Sql::Keyword(k)])))
-                | complete!(do_parse!(position!() >> s: parse_sql >> (vec![Sql::Literal(s)]))
-            )),
+        complete!(sql_sets),
         ParsedItem::from_span(SqlComposition::default(), Span::new(""), None).expect("expected to make a Span in _parse_template parser"),
         |mut acc: ParsedItem<SqlComposition>, items: Vec<Sql>| {
             for item in items {
@@ -67,7 +54,7 @@ named!(
 
             acc
         }
-    ))
+    )
 );
 
 pub fn parse_template(
@@ -87,48 +74,67 @@ pub fn parse_template(
     })
 }
 
-named!(
-    parse_macro_name(Span) -> ParsedItem<String>,
-       do_parse!(
-           position!() >>
-           name: delimited!(tag!(":"), take_until!("("), tag!("(")) >>
-           (
-               ParsedItem::from_span(name.fragment.to_string(), name, None).expect("invalid parsed item came from parser parse_macro_name")
-           )
-        )
-);
+pub fn sql_sets(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, set) = alt((
+        sql_ending_sql_set,
+        bindvar_sql_set,
+        composer_macro_sql_set,
+        db_object_sql_set,
+        keyword_sql_set,
+        sql_literal_sql_set,
+    ))(span)?;
 
-named!(parse_composer_macro(Span) -> (SqlComposition, Vec<SqlCompositionAlias>),
-       complete!(do_parse!(
-               position!() >>
-               command: parse_macro_name >>
-               position!() >>
-               distinct: command_distinct_arg >>
-               multispace0 >>
-               position!() >>
-               all: command_all_arg >>
-               multispace0 >>
-               columns: opt!(column_list) >>
-               multispace0 >>
-               position!() >>
-               of: of_list >>
-               tag!(")") >>
-               ({
-                 let mut sc = SqlComposition {
-                     command: Some(command),
-                     distinct,
-                     all,
-                     columns,
-                     of,
-                     ..Default::default()
-                 };
+    Ok((span, set))
+}
 
-                 sc.update_aliases().expect("expected to update aliases");
+pub fn parse_macro_name(span: Span) -> IResult<Span, ParsedItem<String>> {
+    let (span, name) = delimited(tag(":"), take_until("("), tag("("))(span)?;
 
-                 (sc, vec![])
-               })
-       ))
-);
+    Ok((
+        span,
+        ParsedItem::from_span(name.fragment.to_string(), name, None)
+            .expect("invalid parsed item came from parser parse_macro_name"),
+    ))
+}
+
+pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, sc) = composer_macro_item(span)?;
+
+    let c = Sql::Composition((
+        ParsedItem::from_span(sc.0, Span::new(""), None)
+            .expect("expected to make a Span in sc _parse_template"),
+        sc.1,
+    ));
+
+    Ok((span, vec![c]))
+}
+
+pub fn composer_macro_item(
+    span: Span,
+) -> IResult<Span, (SqlComposition, Vec<SqlCompositionAlias>)> {
+    let (span, command) = parse_macro_name(span)?;
+    let (span, distinct) = command_distinct_arg(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, all) = command_all_arg(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, columns) = opt(column_list)(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, of) = of_list(span)?;
+    let (span, _) = tag(")")(span)?;
+
+    let mut sc = SqlComposition {
+        command: Some(command),
+        distinct,
+        all,
+        columns,
+        of,
+        ..Default::default()
+    };
+
+    sc.update_aliases().expect("expected to update aliases");
+
+    Ok((span, (sc, vec![])))
+}
 
 named!(
     command_distinct_arg(Span) -> Option<ParsedItem<bool>>,
@@ -207,20 +213,26 @@ named!(take_while_name_char(Span) -> Span,
     )
 );
 
-named!(keyword(Span) -> ParsedItem<SqlKeyword>,
-    do_parse!(
-        position!() >>
-        keyword: keyword_sql >>
-        multispace0 >>
-        (
-            ParsedItem::from_span(
-                SqlKeyword::new(keyword.fragment.to_string()).expect("SqlKeyword::new() failed unexpectedly from keyword parser"),
-                keyword,
-                None
-            ).expect("expected Ok from ParsedItem::from_span in keyword parser")
-        )
+pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, k) = keyword_item(span)?;
+
+    Ok((span, vec![Sql::Keyword(k)]))
+}
+
+pub fn keyword_item(span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
+    let (span, keyword) = keyword_sql(span)?;
+    let (span, _) = multispace0(span)?;
+
+    let item = ParsedItem::from_span(
+        SqlKeyword::new(keyword.fragment.to_string())
+            .expect("SqlKeyword::new() failed unexpectedly from keyword parser"),
+        keyword,
+        None,
     )
-);
+    .expect("expected Ok from ParsedItem::from_span in keyword parser");
+
+    Ok((span, item))
+}
 
 named!(keyword_sql(Span) -> Span,
     do_parse!(
@@ -278,45 +290,41 @@ named!(db_object_alias_sql(Span) -> Span,
     )
 );
 
-named!(
-    db_object(Span) -> (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>),
-    do_parse!(
-        keyword: db_object_pre_sql >>
-        multispace0 >>
-        position!() >>
-        table: db_object_alias_sql >>
-        multispace0 >>
-        position!() >>
-        alias: opt!(db_object_alias_sql) >>
-        multispace0 >>
-        ({
-            let k = SqlKeyword {
-                value: keyword.fragment.to_string()
-            };
+pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, dbo) = db_object_item(span)?;
 
-            let pk = ParsedItem::from_span(
-                k,
-                keyword,
-                None
-            ).expect("unable to build ParsedItem of SqlDbObject in db_object parser");
+    Ok((span, vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
+}
 
-            let object_alias = alias.and_then(|a| Some(a.fragment.to_string()));
+pub fn db_object_item(
+    span: Span,
+) -> IResult<Span, (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>)> {
+    let (span, keyword) = db_object_pre_sql(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, table) = db_object_alias_sql(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, alias) = opt(db_object_alias_sql)(span)?;
+    let (span, _) = multispace0(span)?;
 
-            let object = SqlDbObject {
-                object_name: table.fragment.to_string(),
-                object_alias
-            };
+    let k = SqlKeyword {
+        value: keyword.fragment.to_string(),
+    };
 
-            let po = ParsedItem::from_span(
-                object,
-                table,
-                None
-            ).expect("unable to build ParsedItem of SqlDbObject in db_object parser");
+    let pk = ParsedItem::from_span(k, keyword, None)
+        .expect("unable to build ParsedItem of SqlDbObject in db_object parser");
 
-            (pk, po)
-        })
-     )
-);
+    let object_alias = alias.and_then(|a| Some(a.fragment.to_string()));
+
+    let object = SqlDbObject {
+        object_name: table.fragment.to_string(),
+        object_alias,
+    };
+
+    let po = ParsedItem::from_span(object, table, None)
+        .expect("unable to build ParsedItem of SqlDbObject in db_object parser");
+
+    Ok((span, (pk, po)))
+}
 
 named!(
     of_list(Span) -> Vec<ParsedItem<SqlCompositionAlias>>,
@@ -413,54 +421,64 @@ named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
         )
 );
 
+pub fn bindvar_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, b) = bindvar_item(span)?;
+
+    Ok((span, vec![Sql::Binding(b)]))
+}
+
 // name EXPECTING (i|MIN i|MAX i|MIN i MAX i)
-named!(bindvar(Span) -> ParsedItem<SqlBinding>,
-       complete!(do_parse!(
-               start_quote: opt!(tag!("'")) >>
-               position!() >>
-               tag_no_case!(":bind(") >>
-               multispace0 >>
-               position!() >>
-               bindvar_name: take_while_name_char >>
-               multispace0 >>
-               position!() >>
-               expecting: opt!(bindvar_expecting) >>
-               multispace0 >>
-               nullable: opt!(tag_no_case!("null")) >>
-               multispace0 >>
-               tag!(")") >>
-               multispace0 >>
-               end_quote: opt!(tag!("'")) >>
-               ({
-                   let min = expecting.and_then(|m| m.0);
-                   let max = expecting.and_then(|m| m.1);
+pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
+    let (span, start_quote) = opt(tag("'"))(span)?;
+    let (span, _) = tag_no_case(":bind(")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, bindvar_name) = take_while_name_char(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, expecting) = opt(bindvar_expecting)(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, nullable) = opt(tag_no_case("null"))(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = tag(")")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, end_quote) = opt(tag("'"))(span)?;
 
-                   if start_quote.is_some() && end_quote.is_none() {
-                       //TODO: proper error instead
-                       panic!("start_quote but no end_quote");
-                   }
-                   else if end_quote.is_some() && start_quote.is_none() {
-                       //TODO: proper error instead
-                       panic!("end_quote but no start_quote");
-                   }
+    let min = expecting.and_then(|m| m.0);
+    let max = expecting.and_then(|m| m.1);
 
-                   ParsedItem::from_span(
-                       SqlBinding::new(
-                           bindvar_name.fragment.to_string(),
-                           start_quote.is_some(),
-                           min,
-                           max,
-                           nullable.is_some(),
-                       ).expect("SqlBinding::new() failed unexpectedly from bindvar parser"),
-                       bindvar_name,
-                       None
-                   ).expect("expected Ok from ParsedItem::from_span in bindvar parser")
-               })
-       ))
-);
+    if start_quote.is_some() && end_quote.is_none() {
+        //TODO: proper error instead
+        panic!("start_quote but no end_quote");
+    }
+    else if end_quote.is_some() && start_quote.is_none() {
+        //TODO: proper error instead
+        panic!("end_quote but no start_quote");
+    }
+
+    let item = ParsedItem::from_span(
+        SqlBinding::new(
+            bindvar_name.fragment.to_string(),
+            start_quote.is_some(),
+            min,
+            max,
+            nullable.is_some(),
+        )
+        .expect("SqlBinding::new() failed unexpectedly from bindvar parser"),
+        bindvar_name,
+        None,
+    )
+    .expect("expected Ok from ParsedItem::from_span in bindvar parser");
+
+    Ok((span, item))
+}
+
+pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, l) = sql_literal_item(span)?;
+
+    Ok((span, vec![Sql::Literal(l)]))
+}
 
 named!(
-    parse_sql(Span) -> ParsedItem<SqlLiteral>,
+    sql_literal_item(Span) -> ParsedItem<SqlLiteral>,
     do_parse!(
         pos: position!() >>
         parsed: fold_many1!(
@@ -494,8 +512,29 @@ named!(
     )
 );
 
+pub fn sql_ending_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+    let (span, e) = sql_ending_item(span)?;
+
+    Ok((span, vec![Sql::Ending(e)]))
+}
+
+pub fn sql_ending_item(span: Span) -> IResult<Span, ParsedItem<SqlEnding>> {
+    let (span, ending) = tag(";")(span)?;
+    let (span, _) = multispace0(span)?;
+
+    let item = ParsedItem::from_span(
+        SqlEnding::new(ending.fragment.to_string())
+            .expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
+        ending,
+        None,
+    )
+    .expect("expected Ok from ParsedItem::from_span in parse_sql_end");
+
+    Ok((span, item))
+}
+
 named!(
-    parse_sql_end(Span) -> ParsedItem<SqlEnding>,
+    sql_ending_item_old(Span) -> ParsedItem<SqlEnding>,
     do_parse!(
         position!() >>
         ending: tag!(";") >>
@@ -511,47 +550,40 @@ named!(
 );
 
 #[cfg(feature = "composer-serde")]
-pub fn bind_value_text(
-    span: Span,
-    ) -> IResult<Span, SerdeValue> {
-
+pub fn bind_value_text(span: Span) -> IResult<Span, SerdeValue> {
     let (span, _) = one_of("'")(span)?;
-    let (span, found) = take_while1(
-        |c:char| match c {
-            '\'' => false,
-            ']'  => false,
-            _    => true,
-        })(span)?;
+    let (span, found) = take_while1(|c: char| match c {
+        '\'' => false,
+        ']' => false,
+        _ => true,
+    })(span)?;
     let (span, _) = one_of("'")(span)?;
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
-    Ok((span,
-        SerdeValue(Value::String(found.fragment.to_string()))))
+    Ok((span, SerdeValue(Value::String(found.fragment.to_string()))))
 }
 
 #[cfg(feature = "composer-serde")]
-pub fn bind_value_integer(
-    span: Span,
-    ) -> IResult<Span, SerdeValue> {
-
+pub fn bind_value_integer(span: Span) -> IResult<Span, SerdeValue> {
     let (span, found) = digit1(span)?;
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
-    Ok((span,
-        SerdeValue(Value::I64(i64::from_str(&found.fragment).expect("unable to parse integer found by bind_value_integer")))))
+    Ok((
+        span,
+        SerdeValue(Value::I64(
+            i64::from_str(&found.fragment)
+                .expect("unable to parse integer found by bind_value_integer"),
+        )),
+    ))
 }
 
 #[cfg(feature = "composer-serde")]
-pub fn bind_value_real(
-    span: Span,
-    ) -> IResult<Span, SerdeValue> {
-
+pub fn bind_value_real(span: Span) -> IResult<Span, SerdeValue> {
     let (span, value) = double(span)?;
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
     let (span, _) = multispace0(span)?;
-    Ok((span,
-        SerdeValue(Value::F64(value))))
+    Ok((span, SerdeValue(Value::F64(value))))
 }
 
 #[cfg(feature = "composer-serde")]
@@ -706,19 +738,13 @@ named!(
 
 #[cfg(test)]
 mod tests {
-    use super::{bindvar, bindvar_expecting, column_list, db_object, db_object_alias_sql,
-                parse_composer_macro, parse_sql, parse_sql_end, parse_template};
+    use super::{bindvar_expecting, bindvar_item, column_list, composer_macro_item,
+                db_object_alias_sql, db_object_item, db_object_sql_set, parse_template,
+                sql_ending_item, sql_literal_item};
 
     #[cfg(feature = "composer-serde")]
-    use super::{
-        bind_value,
-        bind_value_named_set,
-        bind_value_named_sets,
-        bind_value_set,
-        bind_value_text,
-        bind_value_integer,
-        check_bind_value_ending
-    };
+    use super::{bind_value, bind_value_integer, bind_value_named_set, bind_value_named_sets,
+                bind_value_set, bind_value_text, check_bind_value_ending};
 
     use crate::types::{ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlDbObject,
                        SqlEnding, SqlLiteral};
@@ -896,7 +922,7 @@ mod tests {
     fn it_parses_bindvar() {
         let input = ":bind(varname)blah blah blah";
 
-        let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
+        let out = bindvar_item(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(14), "blah blah blah");
         let expected_item =
@@ -974,7 +1000,7 @@ mod tests {
     fn it_parses_quoted_bindvar() {
         let input = "':bind(varname)'blah blah blah";
 
-        let out = bindvar(Span::new(input.into())).expect("expected Ok from bindvar");
+        let out = bindvar_item(Span::new(input.into())).expect("expected Ok from bindvar");
 
         let expected_span = build_span(Some(1), Some(16), "blah blah blah");
         let expected_item = build_parsed_quoted_binding_item(
@@ -994,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sql_end() {
+    fn test_sql_ending_itme() {
         let input = ";blah blah blah";
 
         let expected_span = build_span(Some(1), Some(1), "blah blah blah");
@@ -1002,7 +1028,7 @@ mod tests {
         let expected_item = build_parsed_ending_item(";", None, None, ";");
 
         let (span, item) =
-            parse_sql_end(Span::new(input.into())).expect("expected Ok from parse_sql_end");
+            sql_ending_item(Span::new(input.into())).expect("expected Ok from parse_sql_end");
 
         assert_eq!(item, expected_item, "items match");
         assert_eq!(span, expected_span, "spans match");
@@ -1012,7 +1038,7 @@ mod tests {
     fn test_parse_sql_until_path() {
         let input = "foo.bar = :bind(varname);";
 
-        let out = parse_sql(Span::new(input.into())).expect("expected Ok from parse_sql");
+        let out = sql_literal_item(Span::new(input.into())).expect("expected Ok from parse_sql");
 
         let (span, item) = out;
 
@@ -1125,14 +1151,14 @@ mod tests {
     fn test_parse_composed_composer() {
         let sql_str = ":count(distinct col1, col2 of src/tests/simple-template.tql, src/tests/include-template.tql);";
 
-        let comp = parse_composer_macro(Span::new(sql_str.into()));
+        let comp = composer_macro_item(Span::new(sql_str.into()));
 
         let expected = Ok((
             Span {
                 offset:   92,
                 line:     1,
                 fragment: ";".into(),
-                extra: (),
+                extra:    (),
             },
             (
                 SqlComposition {
@@ -1307,7 +1333,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object_item(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "items match");
@@ -1327,7 +1353,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object_item(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "DbObject items match");
@@ -1347,7 +1373,7 @@ mod tests {
 
         let expected_dbo_item = build_parsed_item(expected_dbo, None, Some(5), "t1");
 
-        let (span, (_keyword_item, dbo_item)) = db_object(Span::new(input.into()))
+        let (span, (_keyword_item, dbo_item)) = db_object_item(Span::new(input.into()))
             .expect(&format!("expected Ok from parsing {}", input));
 
         assert_eq!(dbo_item, expected_dbo_item, "items match");
@@ -1358,7 +1384,7 @@ mod tests {
     fn test_parse_db_object_with_subquery() {
         let input = "FROM (SELECT * FROM t1) AS tt WHERE 1";
 
-        db_object(Span::new(input.into()))
+        db_object_sql_set(Span::new(input.into()))
             .expect_err(&format!("expected error from parsing {}", input));
     }
 
@@ -1396,25 +1422,31 @@ mod tests {
     #[test]
     #[cfg(feature = "composer-serde")]
     fn test_bind_value() {
-        let tests= vec![
-            ("'a'",     "",   SerdeValue(Value::String("a".into()))),
-            ("'a', ",   ", ", SerdeValue(Value::String("a".into()))),
-            ("'a' , ",  ", ", SerdeValue(Value::String("a".into()))),
-
-            ("34",     "",   SerdeValue(Value::I64(34))),
-            ("34, ",   ", ", SerdeValue(Value::I64(34))),
-            ("34 ,",   ",",  SerdeValue(Value::I64(34))),
-
+        let tests = vec![
+            ("'a'", "", SerdeValue(Value::String("a".into()))),
+            ("'a', ", ", ", SerdeValue(Value::String("a".into()))),
+            ("'a' , ", ", ", SerdeValue(Value::String("a".into()))),
+            ("34", "", SerdeValue(Value::I64(34))),
+            ("34, ", ", ", SerdeValue(Value::I64(34))),
+            ("34 ,", ",", SerdeValue(Value::I64(34))),
             ("54.3, ", ", ", SerdeValue(Value::F64(54.3))),
-            ("54.3",   "", SerdeValue(Value::F64(54.3))),
-            ("54.3 ",  "", SerdeValue(Value::F64(54.3))),
+            ("54.3", "", SerdeValue(Value::F64(54.3))),
+            ("54.3 ", "", SerdeValue(Value::F64(54.3))),
         ];
-        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+        for (i, (input, expected_remain, expected_values)) in tests.iter().enumerate() {
             println!("{}: input={:?}", i, input);
             let (remaining, output) = bind_value(Span::new(input)).unwrap();
 
-            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
-            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+            assert_eq!(
+                &output, expected_values,
+                "expected values for i:{} input:{:?}",
+                i, input
+            );
+            assert_eq!(
+                &remaining.fragment, expected_remain,
+                "expected remaining for i:{} input:{:?}",
+                i, input
+            );
         }
     }
 
@@ -1434,18 +1466,26 @@ mod tests {
     #[test]
     #[cfg(feature = "composer-serde")]
     fn test_bind_value_integer() {
-        let tests= vec![
-            ("34, ",   ", ", SerdeValue(Value::I64(34))),
-            ("34 ",    "",   SerdeValue(Value::I64(34))),
-            ("34 , ",  ", ", SerdeValue(Value::I64(34))),
-            ("34",     "",   SerdeValue(Value::I64(34))),
+        let tests = vec![
+            ("34, ", ", ", SerdeValue(Value::I64(34))),
+            ("34 ", "", SerdeValue(Value::I64(34))),
+            ("34 , ", ", ", SerdeValue(Value::I64(34))),
+            ("34", "", SerdeValue(Value::I64(34))),
         ];
-        for (i,(input, expected_remain, expected_values)) in tests.iter().enumerate() {
+        for (i, (input, expected_remain, expected_values)) in tests.iter().enumerate() {
             println!("input={:?}", input);
             let (remaining, output) = bind_value_integer(Span::new(input)).unwrap();
 
-            assert_eq!(&output, expected_values, "expected values for i:{} input:{:?}", i, input);
-            assert_eq!(&remaining.fragment, expected_remain, "expected remaining for i:{} input:{:?}", i, input);
+            assert_eq!(
+                &output, expected_values,
+                "expected values for i:{} input:{:?}",
+                i, input
+            );
+            assert_eq!(
+                &remaining.fragment, expected_remain,
+                "expected remaining for i:{} input:{:?}",
+                i, input
+            );
         }
     }
 
@@ -1462,10 +1502,17 @@ mod tests {
                     let expected_fragment = input;
 
                     assert_eq!(output, expected_output, "correct output for {:?}", input);
-                    assert_eq!(remaining.fragment, expected_fragment, "input not consumed for {:?}", input);
-                },
+                    assert_eq!(
+                        remaining.fragment, expected_fragment,
+                        "input not consumed for {:?}",
+                        input
+                    );
+                }
                 Err(e) => {
-                    println!("bind_value_ending for input={:?} returned an error={:?}", input, e);
+                    println!(
+                        "bind_value_ending for input={:?} returned an error={:?}",
+                        input, e
+                    );
                     panic!(e)
                 }
             };
@@ -1511,12 +1558,12 @@ mod tests {
         let input = "[a:['a', 'aa', 'aaa'], b:['b'], c:(2, 2.25, 'a'), d:[2], e:[2.234566]]";
 
         match bind_value_named_set(Span::new(input)) {
-            Ok((remaining, output)) =>{
+            Ok((remaining, output)) => {
                 let expected_output = build_expected_bind_values();
 
                 assert_eq!(output, expected_output, "correct output");
                 assert_eq!(remaining.fragment, "", "nothing remaining");
-            },
+            }
             Err(e) => {
                 println!("bind_value_named_set returned an error={:?}", e);
                 panic!(e)

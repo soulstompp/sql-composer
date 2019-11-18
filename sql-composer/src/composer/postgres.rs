@@ -10,7 +10,7 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::error::{ErrorKind, Result};
+use crate::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
@@ -155,7 +155,7 @@ mod tests {
 
     use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
-    use crate::types::{Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
+    use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use postgres::rows::Row;
     use postgres::types::ToSql;

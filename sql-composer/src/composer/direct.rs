@@ -6,7 +6,7 @@ use crate::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
 
 use crate::types::value::ToValue;
 
-use crate::error::{ErrorKind, Result};
+use crate::error::Result;
 
 pub struct Connection();
 
@@ -103,8 +103,6 @@ mod tests {
     use crate::bind_values;
 
     use super::{Composer, DirectComposer, SqlComposition, ToValue};
-
-    use crate::types::Span;
 
     use chrono::prelude::*;
 

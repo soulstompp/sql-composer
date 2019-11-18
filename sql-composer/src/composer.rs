@@ -10,7 +10,7 @@ pub mod rusqlite;
 #[cfg(feature = "composer-serde")]
 pub use crate::parser::bind_value_named_set;
 
-use crate::types::{ParsedItem, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::error::{ErrorKind, Result};
@@ -379,8 +379,6 @@ pub trait Composer: Sized {
         let name = &binding.name;
         let mut sql = String::new();
         let mut new_values = vec![];
-
-        let i = offset;
 
         match self.get_values(name.to_string()) {
             Some(v) => {

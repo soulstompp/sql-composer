@@ -1,18 +1,16 @@
 use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding, SqlComposition,
                    SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
-use crate::error::ErrorKind;
-
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take_until},
           character::complete::multispace0,
-          combinator::opt,
+          combinator::{iterator, opt},
           error::ErrorKind as NomErrorKind,
           sequence::delimited,
           IResult};
 
 #[cfg(feature = "composer-serde")]
-use nom::{bytes::complete::take_while1,
+use nom::{bytes::complete::{take_while1},
           character::complete::{digit1, one_of},
           number::complete::double};
 
@@ -28,54 +26,48 @@ use std::collections::BTreeMap;
 #[cfg(feature = "composer-serde")]
 use std::str::FromStr;
 
-
-named!(
-    _parse_template(Span) -> ParsedItem<SqlComposition>,
-    fold_many1!(
-        complete!(sql_sets),
-        ParsedItem::from_span(SqlComposition::default(), Span::new(""), None).expect("expected to make a Span in _parse_template parser"),
-        |mut acc: ParsedItem<SqlComposition>, items: Vec<Sql>| {
-            for item in items {
-                match item {
-                    Sql::Composition((mut sc, aliases)) => {
-                        for alias in &aliases {
-                            let stmt_path = alias.path().expect("expected alias path");
-
-                            sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
-                        }
-
-                        if acc.item.sql.len() == 0 {
-                            return sc;
-                        }
-
-                        acc.item.push_sql(Sql::Composition((sc, aliases))).unwrap();
-                    }
-                    _ => {
-                        acc.item.push_sql(item).unwrap();
-                    }
-                }
-            }
-
-            acc
-        }
-    )
-);
-
-pub fn parse_template(
+pub fn template(
     span: Span,
     alias: Option<SqlCompositionAlias>,
 ) -> IResult<Span, ParsedItem<SqlComposition>> {
-    let res = _parse_template(span);
+    let comp = SqlComposition::default();
 
-    res.and_then(|(remaining, mut comp)| {
-        if let Some(a) = alias {
-            comp.item
-                .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))))
-                .expect("unable to set position in parse_template");
+    let mut iter = iterator(span, sql_sets);
+
+    let mut comp = iter.fold(ParsedItem::from_span(comp, Span::new(""), None).expect("expected to make a Span in template parser"), |mut acc, items| {
+        for item in items {
+            match item {
+                Sql::Composition((mut sc, aliases)) => {
+                    for alias in &aliases {
+                        let stmt_path = alias.path().expect("expected alias path");
+
+                        sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
+                    }
+
+                    if acc.item.sql.len() == 0 {
+                        return sc;
+                    }
+
+                    acc.item.push_sql(Sql::Composition((sc, aliases))).unwrap();
+                }
+                _ => {
+                    acc.item.push_sql(item).unwrap();
+                }
+            }
         }
 
-        Ok((remaining, comp))
-    })
+        acc
+    });
+
+    let (remaining, _) = iter.finish().unwrap();
+
+    if let Some(a) = alias {
+        comp.item
+            .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))))
+            .expect("unable to set position in template");
+    }
+
+    Ok((remaining, comp))
 }
 
 pub fn sql_sets(span: Span) -> IResult<Span, Vec<Sql>> {
@@ -482,6 +474,7 @@ pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
 
 named!(
     sql_literal_item(Span) -> ParsedItem<SqlLiteral>,
+    complete!(
     do_parse!(
         pos: position!() >>
         parsed: fold_many1!(
@@ -512,7 +505,7 @@ named!(
             p.item.value = p.item.value.trim().to_string();
             p
         })
-    )
+    ))
 );
 
 pub fn sql_ending_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
@@ -742,7 +735,7 @@ named!(
 #[cfg(test)]
 mod tests {
     use super::{bindvar_expecting, bindvar_item, column_list, composer_macro_item,
-                db_object_alias_sql, db_object_item, db_object_sql_set, parse_template,
+                db_object_alias_sql, db_object_item, db_object_sql_set, template,
                 sql_ending_item, sql_literal_item};
 
     #[cfg(feature = "composer-serde")]
@@ -1064,7 +1057,7 @@ mod tests {
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let (span, item) =
-            parse_template(Span::new(input.into()), None).expect("expected Ok from parse_template");
+            template(Span::new(input.into()), None).expect("expected Ok from template");
 
         let expected_span = build_span(Some(1), Some(86), "");
 
@@ -1100,7 +1093,7 @@ mod tests {
     fn test_parse_include_template() {
         let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = parse_template(Span::new(input.into()), None);
+        let out = template(Span::new(input.into()), None);
 
         let expected_span = build_span(Some(1), Some(87), "");
 

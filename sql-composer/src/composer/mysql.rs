@@ -9,7 +9,7 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::error::{ErrorKind, Result};
+use crate::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
@@ -129,7 +129,7 @@ mod tests {
 
     use super::{Composer, ComposerConnection, MysqlComposer};
 
-    use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
+    use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
 

@@ -2,7 +2,7 @@ pub mod value;
 
 use crate::error::{ErrorKind, Result};
 
-use crate::parser::parse_template;
+use crate::parser::template;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -218,7 +218,7 @@ pub struct SqlComposition {
 impl SqlComposition {
     //TODO: properly check remaining along with a few other traits
     pub fn parse(q: &str, alias: Option<SqlCompositionAlias>) -> Result<ParsedItem<Self>> {
-        let (remaining, stmt) = parse_template(Span::new(q.into()), alias).unwrap();
+        let (remaining, stmt) = template(Span::new(q.into()), alias).unwrap();
 
         if remaining.fragment.len() > 0 {
             panic!("found extra information: {}", remaining.to_string());

@@ -10,7 +10,7 @@ use super::{Composer, ComposerConfig, ComposerConnection};
 
 use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::error::{ErrorKind, Result};
+use crate::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
@@ -132,7 +132,7 @@ mod tests {
 
     use super::{Composer, ComposerConnection, RusqliteComposer};
 
-    use crate::types::{Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
+    use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use rusqlite::Row;
     use rusqlite::{Connection, NO_PARAMS};

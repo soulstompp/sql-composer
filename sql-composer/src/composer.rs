@@ -9,9 +9,8 @@ pub mod rusqlite;
 
 #[cfg(feature = "composer-serde")]
 pub use crate::parser::bind_value_named_set;
-pub use crate::parser::parse_template;
 
-use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, Span, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::error::{ErrorKind, Result};

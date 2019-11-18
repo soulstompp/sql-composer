@@ -216,14 +216,15 @@ pub struct SqlComposition {
 }
 
 impl SqlComposition {
-    pub fn from_str(q: &str) -> ParsedItem<Self> {
-        let (remaining, stmt) = parse_template(Span::new(q.into()), None).unwrap();
+    //TODO: properly check remaining along with a few other traits
+    pub fn parse(q: &str, alias: Option<SqlCompositionAlias>) -> Result<ParsedItem<Self>> {
+        let (remaining, stmt) = parse_template(Span::new(q.into()), alias).unwrap();
 
         if remaining.fragment.len() > 0 {
             panic!("found extra information: {}", remaining.to_string());
         }
 
-        stmt
+        Ok(stmt)
     }
 
     pub fn from_path(path: &Path) -> Result<ParsedItem<Self>> {
@@ -232,13 +233,7 @@ impl SqlComposition {
 
         let _res = f.read_to_string(&mut s);
 
-        let (_remaining, stmt) = parse_template(
-            Span::new(s.as_str().into()),
-            Some(SqlCompositionAlias::from_path(path.into())),
-        )
-        .expect("expected completed parse");
-
-        Ok(stmt)
+        Self::parse(s.as_str(), Some(SqlCompositionAlias::from_path(path.into())))
     }
 
     pub fn from_path_name(s: &str) -> Result<ParsedItem<SqlComposition>> {

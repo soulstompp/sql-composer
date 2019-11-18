@@ -1,10 +1,13 @@
 use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding, SqlComposition,
                    SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
+use crate::error::ErrorKind;
+
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take_until},
           character::complete::multispace0,
           combinator::opt,
+          error::ErrorKind as NomErrorKind,
           sequence::delimited,
           IResult};
 
@@ -24,6 +27,7 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "composer-serde")]
 use std::str::FromStr;
+
 
 named!(
     _parse_template(Span) -> ParsedItem<SqlComposition>,
@@ -102,7 +106,7 @@ pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
 
     let c = Sql::Composition((
         ParsedItem::from_span(sc.0, Span::new(""), None)
-            .expect("expected to make a Span in sc _parse_template"),
+            .expect("invalid parsed item from parser composer_macro_sql_set(span: Span)"),
         sc.1,
     ));
 
@@ -429,8 +433,8 @@ pub fn bindvar_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
 
 // name EXPECTING (i|MIN i|MAX i|MIN i MAX i)
 pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
-    let (span, start_quote) = opt(tag("'"))(span)?;
-    let (span, _) = tag_no_case(":bind(")(span)?;
+    let (start_quote_span, start_quote) = opt(tag("'"))(span)?;
+    let (span, _) = tag_no_case(":bind(")(start_quote_span)?;
     let (span, _) = multispace0(span)?;
     let (span, bindvar_name) = take_while_name_char(span)?;
     let (span, _) = multispace0(span)?;
@@ -446,12 +450,11 @@ pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
     let max = expecting.and_then(|m| m.1);
 
     if start_quote.is_some() && end_quote.is_none() {
-        //TODO: proper error instead
-        panic!("start_quote but no end_quote");
+        return Err(nom::Err::Failure((start_quote_span, NomErrorKind::Verify)));
     }
     else if end_quote.is_some() && start_quote.is_none() {
         //TODO: proper error instead
-        panic!("end_quote but no start_quote");
+        return Err(nom::Err::Failure((span, NomErrorKind::Verify)));
     }
 
     let item = ParsedItem::from_span(
@@ -1197,7 +1200,7 @@ mod tests {
     fn test_simple_composed_composer() {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
-        let comp = SqlComposition::from_str(sql_str);
+        let comp = SqlComposition::parse(sql_str, None).unwrap();
 
         let expected = build_parsed_item(
             SqlComposition {

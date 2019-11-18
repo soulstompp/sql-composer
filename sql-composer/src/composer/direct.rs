@@ -102,8 +102,7 @@ impl<'a> Composer for DirectComposer<'a> {
 mod tests {
     use crate::bind_values;
 
-    use super::{Composer, DirectComposer, ToValue};
-    use crate::parser::parse_template;
+    use super::{Composer, DirectComposer, SqlComposition, ToValue};
 
     use crate::types::Span;
 
@@ -128,9 +127,7 @@ mod tests {
             data:         None,
         };
 
-        let (remaining, insert_stmt) = parse_template(Span::new("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into()), None).unwrap();
-
-        assert_eq!(remaining.fragment, "", "nothing remaining");
+        let insert_stmt = SqlComposition::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
 
         let mut composer = DirectComposer::new();
 
@@ -153,9 +150,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';".into()), None).unwrap();
-
-        assert_eq!(remaining.fragment, "", "nothing remaining");
+        let select_stmt = SqlComposition::parse("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';", None).unwrap();
 
         let (bound_sql, _bindings) = composer
             .compose(&select_stmt.item)

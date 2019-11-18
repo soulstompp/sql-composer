@@ -1,6 +1,8 @@
 use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding, SqlComposition,
                    SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral};
 
+use crate::error::Result;
+
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take_until},
           character::complete::multispace0,
@@ -29,45 +31,50 @@ use std::str::FromStr;
 pub fn template(
     span: Span,
     alias: Option<SqlCompositionAlias>,
-) -> IResult<Span, ParsedItem<SqlComposition>> {
+) -> Result<ParsedItem<SqlComposition>> {
     let comp = SqlComposition::default();
 
     let mut iter = iterator(span, sql_sets);
 
-    let mut comp = iter.fold(ParsedItem::from_span(comp, Span::new(""), None).expect("expected to make a Span in template parser"), |mut acc, items| {
-        for item in items {
-            match item {
-                Sql::Composition((mut sc, aliases)) => {
-                    for alias in &aliases {
-                        let stmt_path = alias.path().expect("expected alias path");
+    let mut comp = iter.fold(ParsedItem::from_span(comp, Span::new(""), None), |acc_res, items| {
+        match acc_res {
+            Ok(mut acc) => {
+                for item in items {
+                    match item {
+                        Sql::Composition((mut sc, aliases)) => {
+                            for alias in &aliases {
+                                let stmt_path = alias.path().expect("expected alias path");
 
-                        sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
+                                sc.item.insert_alias(&stmt_path).expect("expected insert_alias");
+                            }
+
+                            if acc.item.sql.len() == 0 {
+                                return Ok(sc);
+                            }
+
+                            acc.item.push_sql(Sql::Composition((sc, aliases)))?;
+                        }
+                        _ => {
+                            acc.item.push_sql(item)?;
+                        }
                     }
-
-                    if acc.item.sql.len() == 0 {
-                        return sc;
-                    }
-
-                    acc.item.push_sql(Sql::Composition((sc, aliases))).unwrap();
                 }
-                _ => {
-                    acc.item.push_sql(item).unwrap();
-                }
+
+                Ok(acc)
             }
+            Err(e) => Err(e)
         }
+    })?;
 
-        acc
-    });
-
-    let (remaining, _) = iter.finish().unwrap();
+    let (_remaining, _) = iter.finish().expect("iterator should always finish");
 
     if let Some(a) = alias {
         comp.item
-            .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))))
-            .expect("unable to set position in template");
+            .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))))?;
     }
 
-    Ok((remaining, comp))
+
+    Ok(comp)
 }
 
 pub fn sql_sets(span: Span) -> IResult<Span, Vec<Sql>> {
@@ -1056,10 +1063,8 @@ mod tests {
         let input =
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let (span, item) =
+        let item =
             template(Span::new(input.into()), None).expect("expected Ok from template");
-
-        let expected_span = build_span(Some(1), Some(86), "");
 
         let expected_item = SqlComposition {
             sql: vec![
@@ -1086,16 +1091,13 @@ mod tests {
         let expected_item = build_parsed_item(expected_item, None, None, "");
 
         assert_eq!(item, expected_item, "items match");
-        assert_eq!(span, expected_span, "spans match");
     }
 
     #[test]
     fn test_parse_include_template() {
         let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = template(Span::new(input.into()), None);
-
-        let expected_span = build_span(Some(1), Some(87), "");
+        let out = template(Span::new(input.into()), None).unwrap();
 
         let expected_comp = SqlComposition {
             sql: vec![
@@ -1121,7 +1123,7 @@ mod tests {
 
         let expected_comp = build_parsed_item(expected_comp, None, None, "");
 
-        assert_eq!(out, Ok((expected_span, expected_comp)));
+        assert_eq!(out, expected_comp);
     }
 
     #[test]

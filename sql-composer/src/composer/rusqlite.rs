@@ -87,8 +87,8 @@ impl<'a> Composer for RusqliteComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, u: usize, _name: String) -> String {
-        format!("?{}", u)
+    fn binding_tag(&self, u: usize, _name: String) -> Result<String> {
+        Ok(format!("?{}", u))
     }
 
     fn compose_count_command(

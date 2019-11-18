@@ -84,8 +84,8 @@ impl<'a> Composer for MysqlComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, _name: String) -> String {
-        format!("?")
+    fn binding_tag(&self, _u: usize, _name: String) -> Result<String> {
+        Ok(format!("?"))
     }
 
     fn compose_count_command(

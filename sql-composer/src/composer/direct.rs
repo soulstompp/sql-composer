@@ -36,7 +36,7 @@ impl<'a> Composer for DirectComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, name: String) -> String {
+    fn binding_tag(&self, _u: usize, name: String) -> Result<String> {
         let mut s = String::new();
 
         if let Some(values) = self.values.get(&name) {
@@ -45,14 +45,15 @@ impl<'a> Composer for DirectComposer<'a> {
                     s.push(',');
                 }
 
-                s.push_str(&value.to_sql_text().unwrap().to_string());
+                let v = &value.to_sql_text()?;
+                s.push_str(&v.to_string());
             }
         }
         else {
             unimplemented!("unexpected binding_tag error!");
         }
 
-        s
+        Ok(s)
     }
 
     fn compose_binding(
@@ -60,7 +61,7 @@ impl<'a> Composer for DirectComposer<'a> {
         binding: SqlBinding,
         offset: usize,
     ) -> Result<(String, Vec<Self::Value>)> {
-        Ok((self.binding_tag(offset, binding.name), vec![]))
+        Ok((self.binding_tag(offset, binding.name)?, vec![]))
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {

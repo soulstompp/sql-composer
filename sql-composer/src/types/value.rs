@@ -2,6 +2,8 @@ use super::Null;
 
 use chrono::prelude::*;
 
+use crate::error::Result;
+
 //borrowed from rusqlite's Value type
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -18,35 +20,35 @@ pub enum Value {
 }
 
 pub trait ToValue {
-    fn to_value(&self) -> Result<Value, ()>;
+    fn to_value(&self) -> Result<Value>;
 
-    fn to_sql_text(&self) -> Result<String, ()> {
+    fn to_sql_text(&self) -> Result<String> {
         let value = self.to_value()?;
 
         Ok(match value {
             Value::Integer(i) => i.to_string(),
             Value::Real(f) => f.to_string(),
             Value::Text(s) => format!("'{}'", s.to_string()),
-            Value::Blob(b) => format!("'{}'", String::from_utf8(b.to_vec()).unwrap()),
+            Value::Blob(b) => format!("'{}'", String::from_utf8(b.to_vec())?),
             Value::Null => format!("NULL"),
         })
     }
 }
 
 impl ToValue for Null {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Null)
     }
 }
 
 impl ToValue for bool {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Integer(*self as i64))
     }
 }
 
 impl ToValue for isize {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Integer(*self as i64))
     }
 }
@@ -74,7 +76,7 @@ macro_rules! from_optional_value(
 macro_rules! from_i64(
     ($t:ty) => (
         impl ToValue for $t {
-            fn to_value(&self) -> Result<Value, ()> {
+            fn to_value(&self) -> Result<Value> {
                 Ok(Value::Integer(i64::from(*self)))
             }
         }
@@ -89,37 +91,37 @@ from_i64!(u16);
 from_i64!(u32);
 
 impl ToValue for i64 {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Integer(*self))
     }
 }
 
 impl ToValue for f64 {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Real(*self))
     }
 }
 
 impl ToValue for String {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Text(self.to_string()))
     }
 }
 
 impl ToValue for &str {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Text(self.to_string()))
     }
 }
 
 impl ToValue for Vec<u8> {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         Ok(Value::Blob(self.to_vec()))
     }
 }
 
 impl<Tz: TimeZone> ToValue for DateTime<Tz> {
-    fn to_value(&self) -> Result<Value, ()> {
+    fn to_value(&self) -> Result<Value> {
         let utc = self.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
         Ok(Value::Text(utc.to_string()))
@@ -129,7 +131,7 @@ impl<Tz: TimeZone> ToValue for DateTime<Tz> {
 macro_rules! from_nullable(
     ($t: ty) => (
         impl ToValue for Option<$t> {
-            fn to_value(&self) -> Result<Value, ()> {
+            fn to_value(&self) -> Result<Value> {
                 match self {
                     Some(v) => v.to_value(),
                     None => Ok(Value::Null)
@@ -166,7 +168,7 @@ impl Rows {
         }
     }
 
-    pub fn push_row(&mut self, r: Row) -> Result<(), ()> {
+    pub fn push_row(&mut self, r: Row) -> Result<()> {
         self.rows.push(r);
 
         Ok(())
@@ -201,7 +203,7 @@ impl Row {
         Row { columns: vec![] }
     }
 
-    pub fn push_column(&mut self, c: Column) -> Result<(), ()> {
+    pub fn push_column(&mut self, c: Column) -> Result<()> {
         self.columns.push(c);
 
         Ok(())

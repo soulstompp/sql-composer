@@ -218,17 +218,17 @@ pub struct SqlComposition {
 impl SqlComposition {
     //TODO: properly check remaining along with a few other traits
     pub fn parse(q: &str, alias: Option<SqlCompositionAlias>) -> Result<ParsedItem<Self>> {
-        let (remaining, stmt) = template(Span::new(q.into()), alias).unwrap();
+        let stmt = template(Span::new(q.into()), alias)?;
 
-        if remaining.fragment.len() > 0 {
-            panic!("found extra information: {}", remaining.to_string());
-        }
+        //if remaining.fragment.len() > 0 {
+            //panic!("found extra information: {}", remaining.to_string());
+        //}
 
         Ok(stmt)
     }
 
     pub fn from_path(path: &Path) -> Result<ParsedItem<Self>> {
-        let mut f = File::open(path).unwrap();
+        let mut f = File::open(path)?;
         let mut s = String::new();
 
         let _res = f.read_to_string(&mut s);
@@ -326,7 +326,7 @@ impl SqlComposition {
 
     pub fn push_generated_end(&mut self, command: Option<String>) -> Result<()> {
         self.push_sql(Sql::Ending(
-            ParsedItem::generated(SqlEnding { value: ";".into() }, command).unwrap(),
+            ParsedItem::generated(SqlEnding { value: ";".into() }, command)?,
         ))
     }
 

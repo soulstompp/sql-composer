@@ -4,15 +4,16 @@ use crate::types::{ParsedItem, ParsedSpan, Position, Span, Sql, SqlBinding, SqlC
 use crate::error::Result;
 
 use nom::{branch::alt,
-          bytes::complete::{tag, tag_no_case, take_until},
+          bytes::complete::{tag, tag_no_case, take, take_until, take_while1},
           character::complete::multispace0,
-          combinator::{iterator, opt, peek},
+          combinator::{iterator, not, opt, peek},
           error::ErrorKind as NomErrorKind,
-          sequence::delimited,
+          multi::many1,
+          sequence::{delimited, terminated},
           IResult};
 
 #[cfg(feature = "composer-serde")]
-use nom::{bytes::complete::{take_while1},
+use nom::{
           character::complete::{digit1, one_of},
           multi::separated_list,
           number::complete::double};
@@ -146,82 +147,77 @@ pub fn composer_macro_item(span: Span) -> IResult<Span, (SqlComposition, Vec<Sql
     Ok((span, (sc, vec![])))
 }
 
-named!(
-    command_distinct_arg(Span) -> Option<ParsedItem<bool>>,
-    do_parse!(
-        position!() >>
-        distinct_tag: opt!(tag_no_case!("distinct")) >>
-        (
-            match distinct_tag {
-                Some(d) => {
-                    Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_distinct_arg"))
-                }
-                None    => None
-            }
-        )
-    )
-);
+pub fn command_distinct_arg(span: Span) -> IResult<Span, Option<ParsedItem<bool>>> {
+    let (span, distinct_tag) = opt(tag_no_case("distinct"))(span)?;
 
-named!(
-    command_all_arg(Span) -> Option<ParsedItem<bool>>,
-    do_parse!(
-        position!() >>
-        all_tag: opt!(tag_no_case!("all")) >>
-        (
-            match all_tag {
-                Some(d) => {
-                    Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_all_arg"))
-                }
-                None    => None
-            }
-        )
-    )
-);
+    let distinct = match distinct_tag {
+        Some(d) => {
+            Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_distinct_arg"))
+        },
+        None    => None
+    };
 
-named!(
-    column_list(Span) -> Vec<ParsedItem<String>>,
-    terminated!(
-        many1!(complete!(column_name)),
-        do_parse!(multispace0 >> tag_no_case!("of") >> multispace0 >> ())
-    )
-);
+    Ok((span, distinct))
+}
 
-named!(
-    column_name(Span) -> ParsedItem<String>,
-    terminated!(
-        do_parse!(
-            position!() >>
-            column: take_while_name_char >>
-            ({
-                let p = ParsedItem::from_span(
-                    column.fragment.to_string(),
-                    column,
-                    None
-                );
+pub fn command_all_arg(span: Span) -> IResult<Span, Option<ParsedItem<bool>>> {
+    let (span, all_tag) = opt(tag_no_case("all"))(span)?;
 
-                p.expect("unable to build ParsedItem of String from column_list parser")
-            })
-          ),
-          opt!(comma_padded)
-    )
-);
+    let all = match all_tag {
+        Some(d) => {
+            Some(ParsedItem::from_span(true, d, None).expect("Unable to parse bool flag from command_all_arg"))
+        }
+        None    => None
+    };
 
-named!(take_while_name_char(Span) -> Span,
-    complete!(do_parse!(
-        name: take_while1!(|c| {
-            match c {
-                'a'..='z' => true,
-                'A'..='Z' => true,
-                '0'..='9' => true,
-                '_' => true,
-                _ => false,
-            }
-        }) >>
-        (
-            name
-        )
-    ))
-);
+    Ok((span, all))
+}
+
+pub fn of_padded(span: Span) -> IResult<Span, ()> {
+    let (span, _) = multispace0(span)?;
+    let (span, _) = tag("of")(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, ()))
+}
+
+pub fn column_list(span: Span) -> IResult<Span, Vec<ParsedItem<String>>> {
+    let (span, columns) = terminated(many1(column_item), of_padded)(span)?;
+
+    Ok((span, columns))
+}
+
+pub fn column_item(span: Span) -> IResult<Span, ParsedItem<String>> {
+    let (span, column) = terminated(column_name, opt(comma_padded))(span)?;
+
+    Ok((span, column))
+}
+
+pub fn column_name(span: Span) -> IResult<Span, ParsedItem<String>> {
+    let (span, column) = take_while_name_char(span)?;
+
+    let p = ParsedItem::from_span(
+        column.fragment.to_string(),
+        column,
+        None
+    ).expect("unable to build ParsedItem of String from column_list parser");
+
+    Ok((span, p))
+}
+
+pub fn take_while_name_char(span: Span) -> IResult<Span, Span> {
+    let (span, name) = take_while1(|c| {
+        match c {
+            'a'..='z' => true,
+            'A'..='Z' => true,
+            '0'..='9' => true,
+            '_' => true,
+            _ => false,
+        }
+    })(span)?;
+
+    Ok((span, name))
+}
 
 pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     let (span, k) = keyword_item(span)?;
@@ -244,61 +240,55 @@ pub fn keyword_item(span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
     Ok((span, item))
 }
 
-named!(keyword_sql(Span) -> Span,
-    do_parse!(
-        keyword: complete!(
-            alt!(
-                command_sql |
-                db_object_pre_sql |
-                db_object_post_sql
-            )
-        ) >>
-        (keyword)
-    )
-);
+pub fn keyword_sql(span: Span) -> IResult<Span, Span> {
+    let (span, keyword) = alt((
+            command_sql,
+            db_object_pre_sql,
+            db_object_post_sql
+    ))(span)?;
 
-named!(command_sql(Span) -> Span,
-    complete!(
-        alt!(
-            tag_no_case!("SELECT") |
-            tag_no_case!("INSERT INTO") |
-            tag_no_case!("UPDATE") |
-            tag_no_case!("WHERE")
-        )
-    )
-);
+    Ok((span, keyword))
+}
 
-named!(db_object_pre_sql(Span) -> Span,
-    complete!(
-        alt!(
-            tag_no_case!("FROM") |
-            tag_no_case!("JOIN")
-        )
-    )
-);
+pub fn command_sql(span: Span) -> IResult<Span, Span> {
+    let (span, command) = alt((
+            tag_no_case("SELECT"),
+            tag_no_case("INSERT INTO"),
+            tag_no_case("UPDATE"),
+            tag_no_case("WHERE")
+    ))(span)?;
 
-named!(db_object_post_sql(Span) -> Span,
-    complete!(
-        alt!(
-            tag_no_case!("ON") |
-            tag_no_case!("USING")
-        )
-    )
-);
+    Ok((span, command))
+}
 
-named!(db_object_alias_sql(Span) -> Span,
-    do_parse!(
-        opt!(tag_no_case!("AS")) >>
-        multispace0 >>
-        not!(peek!(keyword_sql)) >>
-        not!(peek!(tag!("("))) >>
-        alias: take_while_name_char >>
-        multispace0 >>
-        (
-            alias
-        )
-    )
-);
+pub fn db_object_pre_sql(span: Span) -> IResult<Span, Span> {
+    let(span, pre_sql) = alt((
+            tag_no_case("FROM"),
+            tag_no_case("JOIN")
+    ))(span)?;
+
+    Ok((span, pre_sql))
+}
+
+pub fn db_object_post_sql(span: Span) -> IResult<Span, Span> {
+    let (span, post_sql) = alt((
+            tag_no_case("ON"),
+            tag_no_case("USING")
+    ))(span)?;
+
+    Ok((span, post_sql))
+}
+
+pub fn db_object_alias_sql(span: Span) -> IResult<Span, Span> {
+    let (span, _) = opt(tag_no_case("AS"))(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = not(peek(keyword_sql))(span)?;
+    let (span, _) = not(peek(tag("(")))(span)?;
+    let (span, alias) = take_while_name_char(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, alias))
+}
 
 pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     let (span, dbo) = db_object_item(span)?;
@@ -306,9 +296,7 @@ pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     Ok((span, vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
 }
 
-pub fn db_object_item(
-    span: Span,
-) -> IResult<Span, (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>)> {
+pub fn db_object_item(span: Span) -> IResult<Span, (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>)> {
     let (span, keyword) = db_object_pre_sql(span)?;
     let (span, _) = multispace0(span)?;
     let (span, table) = db_object_alias_sql(span)?;
@@ -336,37 +324,35 @@ pub fn db_object_item(
     Ok((span, (pk, po)))
 }
 
-named!(
-    of_list(Span) -> Vec<ParsedItem<SqlCompositionAlias>>,
-    many1!(terminated!(
-        do_parse!(
-            position!() >>
-            of_name: take_while1!(|u| {
-                let c = u as char;
+pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
+    let (span, of_name) = take_while1(|u| {
+        let c = u as char;
 
-                match c {
-                    'a'..='z' => true,
-                    'A'..='Z' => true,
-                    '0'..='9' => true,
-                    '-' | '_' => true,
-                    '.' | '/' | '\\' => true,
-                    _ => false,
-                }
-            }) >> ({
-                //TODO: clean this up properly
-                let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
+        match c {
+            'a'..='z' => true,
+            'A'..='Z' => true,
+            '0'..='9' => true,
+            '-' | '_' => true,
+            '.' | '/' | '\\' => true,
+            _ => false,
+        }
+    })(span)?;
 
-                ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser")
-            })
-        ),
-        opt!(comma_padded)
-    ))
-);
 
-named!(
-    _parse_macro_include_alias(Span) -> Span,
-    dbg!(
-    take_while1!(|u| {
+    let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
+    let pi = ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser");
+
+    Ok((span, pi))
+}
+
+pub fn of_list(span: Span) -> IResult<Span, Vec<ParsedItem<SqlCompositionAlias>>> {
+    let (span, of_list) = many1(terminated(of_item, opt(comma_padded)))(span)?;
+
+    Ok((span, of_list))
+}
+
+pub fn _parse_macro_include_alias(span: Span) -> IResult<Span, &str> {
+    let (span, aliases) = take_while1(|u| {
         let c = u as char;
 
         match c {
@@ -376,58 +362,57 @@ named!(
             '_' | '-' | '.' | '/' => true,
             _ => false,
         }
-    })
-    )
-);
+    })(span)?;
 
-named!(bindvar_expecting(Span) -> (Option<u32>, Option<u32>),
-       do_parse!(
-           tag_no_case!("expecting") >>
-           multispace0 >>
-           expecting: complete!(
-               alt!(
-                   do_parse!(
-                       position!() >>
-                       exact_span: take_while1!(|c:char| c.is_digit(10)) >>
-                       ({
-                           let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
+    Ok((span, aliases.fragment))
+}
 
-                           (Some(exact), Some(exact))
-                       })
-                   ) |
-                   do_parse!(
-                       position!() >>
-                       min_span: opt!(
-                           do_parse!(
-                               tag_no_case!("min") >>
-                               multispace0 >>
-                               min: take_while1!(|c:char| c.is_digit(10)) >>
-                               (min)
-                           )
-                       ) >>
-                       multispace0 >>
-                       max_span: opt!(
-                           do_parse!(
-                               tag_no_case!("max") >>
-                               multispace0 >>
-                               max: take_while1!(|c:char| c.is_digit(10)) >>
-                               (max)
-                           )
-                       ) >>
-                       ({
-                           let min = min_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("min could not be parsed as u32")));
-                           let max = max_span.and_then(|span| Some(span.fragment.to_string().parse::<u32>().expect("max could not be parsed as u32")));
+pub fn bindvar_expecting_exact(span: Span) -> IResult<Span, (Option<u32>, Option<u32>)> {
+    let (span, exact_span) = take_while1(|c:char| c.is_digit(10))(span)?;
 
-                           (min, max)
-                       })
-                )
-                )
-            ) >>
-            ({
-                expecting
-            })
-        )
-);
+    let exact = exact_span.fragment.to_string().parse::<u32>().expect("exact could not be parsed as u32");
+
+    Ok((span, (Some(exact), Some(exact))))
+}
+
+pub fn bindvar_expecting_min(span: Span) -> IResult<Span, u32> {
+    let (span, _) = tag_no_case("min")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, min_span) = take_while1(|c:char| c.is_digit(10))(span)?;
+
+    let min = min_span.fragment.to_string().parse::<u32>().expect("min could not be parsed as u32");
+
+    Ok((span, min))
+}
+
+pub fn bindvar_expecting_max(span: Span) -> IResult<Span, u32> {
+    let (span, _) = tag_no_case("max")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, max_span) = take_while1(|c:char| c.is_digit(10))(span)?;
+
+    let max = max_span.fragment.to_string().parse::<u32>().expect("max could not be parsed as u32");
+
+    Ok((span, max))
+}
+
+pub fn bindvar_expecting_min_max(span: Span) -> IResult<Span, (Option<u32>, Option<u32>)> {
+    let (span, min) = opt(bindvar_expecting_min)(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, max) = opt(bindvar_expecting_max)(span)?;
+
+    Ok((span, (min, max)))
+}
+
+pub fn bindvar_expecting(span: Span) -> IResult<Span, (Option<u32>, Option<u32>)> {
+           let (span, _) = tag_no_case("expecting")(span)?;
+           let (span, _) = multispace0(span)?;
+           let (span, expecting) = alt((
+                   bindvar_expecting_exact,
+                   bindvar_expecting_min_max
+           ))(span)?;
+
+           Ok((span, expecting))
+}
 
 pub fn bindvar_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     let (span, b) = bindvar_item(span)?;
@@ -483,20 +468,23 @@ pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     Ok((span, vec![Sql::Literal(l)]))
 }
 
+pub fn sql_literal(span: Span) -> IResult<Span, Span> {
+    let (span, _) = not(peek(tag(":")))(span)?;
+    let (span, _) = not(peek(tag(";")))(span)?;
+    let (span, _) = not(peek(tag("'")))(span)?;
+    let (span, _) = not(peek(db_object_pre_sql))(span)?;
+    let (span, literal) = take(1u32)(span)?;
+
+    Ok((span, literal))
+}
+
 named!(
     sql_literal_item(Span) -> ParsedItem<SqlLiteral>,
     complete!(
     do_parse!(
         pos: position!() >>
         parsed: fold_many1!(
-            do_parse!(
-                not!(peek!(tag!(":"))) >>
-                not!(peek!(tag!(";"))) >>
-                not!(peek!(tag!("'"))) >>
-                not!(peek!(db_object_pre_sql)) >>
-                literal: take!(1) >>
-                (literal)
-            ),
+            sql_literal,
             ParsedItem::from_span(SqlLiteral::default(), Span::new(""), None).expect("expected to make a Span in parse_sql parser"),
             |mut acc: ParsedItem<SqlLiteral>, item: Span| {
                 acc.item.value.push_str(&item.fragment);

@@ -6,7 +6,7 @@ use crate::error::Result;
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take_until},
           character::complete::multispace0,
-          combinator::{iterator, opt},
+          combinator::{iterator, opt, peek},
           error::ErrorKind as NomErrorKind,
           sequence::delimited,
           IResult};
@@ -14,6 +14,7 @@ use nom::{branch::alt,
 #[cfg(feature = "composer-serde")]
 use nom::{bytes::complete::{take_while1},
           character::complete::{digit1, one_of},
+          multi::separated_list,
           number::complete::double};
 
 #[cfg(feature = "composer-serde")]
@@ -27,6 +28,14 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "composer-serde")]
 use std::str::FromStr;
+
+pub fn comma_padded(span: Span) -> IResult<Span, ()> {
+    let (span, _) = multispace0(span)?;
+    let (span, _) = tag(",")(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, ()))
+}
 
 pub fn template(
     span: Span,
@@ -112,9 +121,7 @@ pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     Ok((span, vec![c]))
 }
 
-pub fn composer_macro_item(
-    span: Span,
-) -> IResult<Span, (SqlComposition, Vec<SqlCompositionAlias>)> {
+pub fn composer_macro_item(span: Span) -> IResult<Span, (SqlComposition, Vec<SqlCompositionAlias>)> {
     let (span, command) = parse_macro_name(span)?;
     let (span, distinct) = command_distinct_arg(span)?;
     let (span, _) = multispace0(span)?;
@@ -195,12 +202,12 @@ named!(
                 p.expect("unable to build ParsedItem of String from column_list parser")
             })
           ),
-          opt!(do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()))
+          opt!(comma_padded)
     )
 );
 
 named!(take_while_name_char(Span) -> Span,
-    do_parse!(
+    complete!(do_parse!(
         name: take_while1!(|c| {
             match c {
                 'a'..='z' => true,
@@ -213,7 +220,7 @@ named!(take_while_name_char(Span) -> Span,
         (
             name
         )
-    )
+    ))
 );
 
 pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
@@ -352,9 +359,7 @@ named!(
                 ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser")
             })
         ),
-        opt!(do_parse!(
-            multispace0 >> tag!(",") >> multispace0 >> ()
-        ))
+        opt!(comma_padded)
     ))
 );
 
@@ -452,7 +457,6 @@ pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
         return Err(nom::Err::Failure((start_quote_span, NomErrorKind::Verify)));
     }
     else if end_quote.is_some() && start_quote.is_none() {
-        //TODO: proper error instead
         return Err(nom::Err::Failure((span, NomErrorKind::Verify)));
     }
 
@@ -536,22 +540,6 @@ pub fn sql_ending_item(span: Span) -> IResult<Span, ParsedItem<SqlEnding>> {
     Ok((span, item))
 }
 
-named!(
-    sql_ending_item_old(Span) -> ParsedItem<SqlEnding>,
-    do_parse!(
-        position!() >>
-        ending: tag!(";") >>
-        multispace0 >>
-        (
-            ParsedItem::from_span(
-                SqlEnding::new(ending.fragment.to_string()).expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
-                ending,
-                None
-            ).expect("expected Ok from ParsedItem::from_span in parse_sql_end")
-        )
-    )
-);
-
 #[cfg(feature = "composer-serde")]
 pub fn bind_value_text(span: Span) -> IResult<Span, SerdeValue> {
     let (span, _) = one_of("'")(span)?;
@@ -563,6 +551,7 @@ pub fn bind_value_text(span: Span) -> IResult<Span, SerdeValue> {
     let (span, _) = one_of("'")(span)?;
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
+
     Ok((span, SerdeValue(Value::String(found.fragment.to_string()))))
 }
 
@@ -571,6 +560,7 @@ pub fn bind_value_integer(span: Span) -> IResult<Span, SerdeValue> {
     let (span, found) = digit1(span)?;
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
+
     Ok((
         span,
         SerdeValue(Value::I64(
@@ -586,158 +576,153 @@ pub fn bind_value_real(span: Span) -> IResult<Span, SerdeValue> {
     let (span, _) = multispace0(span)?;
     let (span, _) = check_bind_value_ending(span)?;
     let (span, _) = multispace0(span)?;
+
     Ok((span, SerdeValue(Value::F64(value))))
 }
 
-#[cfg(feature = "composer-serde")]
-named!(
-    check_bind_value_ending(Span) -> Span,
-    alt!(
-        eof!()           | // shortest first
-        peek!(tag!(")")) |
-        peek!(tag!("]")) |
-        peek!(tag!(","))
-    )
+named!(ending(Span) -> Span,
+    eof!()
 );
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value(Span) -> (SerdeValue),
-    do_parse!(
-        value: complete!(
-            alt!(
-                do_parse!(t: bind_value_text >> (t))    |
-                do_parse!(i: bind_value_integer >> (i)) |  // must parse int before real
-                do_parse!(r: bind_value_real >> (r))
-            )
-        ) >>
-        ({
-            value
-        })
-    )
-);
+pub fn check_bind_value_ending(span: Span) -> IResult<Span, Span> {
+    let (span, _) = alt((ending, peek(tag(")")), peek(tag("]")), peek(tag(","))))(span)?;
+
+    Ok((span, span))
+}
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_set(Span) -> Vec<SerdeValue>,
-    do_parse!(
-        start: opt!(complete!(alt!(tag!("[") | tag!("(")))) >>
-        list: fold_many1!(
-            do_parse!(
-                value: bind_value >>
-                multispace0 >>
-                opt!(complete!(tag!(","))) >>
-                multispace0 >>
-                (value)
-            ),
-            vec![], |mut acc: Vec<SerdeValue>, item: SerdeValue| {
-                acc.push(item);
-                acc
-            }) >>
-        end: opt!(complete!(alt!(tag!("]") | tag!(")")))) >>
-        ({
-            if let Some(s) = start {
-                if let Some(e) = end {
-                    if s.fragment == "[" && e.fragment != "]" {
-                        panic!("bind_value_set: no corresponding '[' for ']'");
-                    }
-                    else if s.fragment == "(" && e.fragment != ")" {
-                        panic!("bind_value_set: no corresponding ')' for '('");
-                    }
-                }
-                else {
-                    panic!("bind_value_set: no matching end found for start: {:?}", s);
-                }
+pub fn bind_value(span: Span) -> IResult<Span, SerdeValue> {
+    let (span, value) = alt((
+            bind_value_text,
+            bind_value_integer,
+            bind_value_real
+    ))(span)?;
+
+    Ok((span, value))
+}
+
+#[cfg(feature = "composer-serde")]
+pub fn bind_value_separated(span: Span) -> IResult<Span, SerdeValue> {
+    let (span, value) = bind_value(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = opt(tag(","))(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, value))
+}
+
+#[cfg(feature = "composer-serde")]
+pub fn bind_value_set(span: Span) -> IResult<Span, Vec<SerdeValue>> {
+    let (start_span, start) = opt(alt((tag("["), tag("("))))(span)?;
+    let mut list_iter = iterator(start_span, bind_value_separated);
+
+    let list = list_iter.fold(vec![], |mut acc: Vec<SerdeValue>, item: SerdeValue| {
+        acc.push(item);
+        acc
+    });
+
+    let (span, _) = list_iter.finish().unwrap();
+
+    let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
+
+    if let Some(s) = start {
+        if let Some(e) = end {
+            if s.fragment == "[" && e.fragment != "]" {
+                return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
             }
-            else {
-                if let Some(e) = end {
-                    panic!("bind_value_set: found ending {} with no starter", e.fragment);
-                }
+            else if s.fragment == "(" && e.fragment != ")" {
+                return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
             }
+        }
+        else {
+            return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
+        }
+    }
+    else {
+        if let Some(e) = end {
+            return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
+        }
+    }
 
-            list
-        })
-)
-);
+    Ok((span, list))
+}
 
 #[cfg(feature = "composer-serde")]
 //"a:[a_value, aa_value, aaa_value], b:b_value, c: (c_value, cc_value, ccc_value), d: d_value";
-named!(
-    bind_value_kv_pair(Span) -> (Span, Vec<SerdeValue>),
-    do_parse!(
-        key: take_while_name_char >>
-        multispace0 >>
-        tag!(":") >>
-        multispace0 >>
-        values: bind_value_set >>
-        ({
-            (key, values)
-        })
-    )
-);
+pub fn bind_value_kv_pair(span: Span) -> IResult<Span, (Span, Vec<SerdeValue>)> {
+    let (span, key) = take_while_name_char(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = tag(":")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, values) = bind_value_set(span)?;
+
+    Ok((span, (key, values)))
+}
+
+#[cfg(feature = "composer-serde")]
+//"a_value, aa_value, aaa_value
+pub fn bind_value_named_item(span: Span) -> IResult<Span, (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)> {
+    let (span, start) = alt((tag("["), tag("(")))(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, kv) = separated_list(comma_padded, bind_value_kv_pair)(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, (start, kv, end)))
+}
 
 #[cfg(feature = "composer-serde")]
 //"[a:[a_value, aa_value, aaa_value], b:b_value], [..=]";
-named!(
-    pub bind_value_named_set(Span) -> BTreeMap<String, Vec<SerdeValue>>,
-    fold_many1!(
-        do_parse!(
-            //XXX: failed with Incomplete(Size(1) when start was opt!
-            start: complete!(alt!(tag!("[") | tag!("("))) >>
-            multispace0 >>
-            kv: separated_list!(
-                do_parse!(multispace0 >> tag!(",") >> multispace0 >> ()),
-                bind_value_kv_pair
-            ) >>
-            multispace0 >>
-            end: opt!(complete!(alt!(tag!("]") | tag!(")")))) >>
-            multispace0 >>
-            ((start, kv, end))
-        ),
-        BTreeMap::new(), |mut acc: BTreeMap<String, Vec<SerdeValue>>, items: (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
-            let s = items.0;
-            let end = items.2;
+pub fn bind_value_named_set(span: Span) -> IResult<Span, BTreeMap<String, Vec<SerdeValue>>> {
+    let mut iter = iterator(span, bind_value_named_item);
 
-            for (key, values) in items.1 {
-                let key = key.fragment.to_string();
+    let (_, map) = iter.fold(Ok((span, BTreeMap::new())), |acc_res: IResult<Span, BTreeMap<String, Vec<SerdeValue>>>, items: (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
+        match acc_res {
+            Ok((span, mut acc)) => {
+                let s = items.0;
+                let end = items.2;
 
-                let entry = acc.entry(key).or_insert(vec![]);
+                for (key, values) in items.1 {
+                    let key = key.fragment.to_string();
 
-                for v in values {
-                    entry.push(v);
+                    let entry = acc.entry(key).or_insert(vec![]);
+
+                    for v in values {
+                        entry.push(v);
+                    }
                 }
-            }
 
-            if let Some(e) = end {
-                if s.fragment == "[" && e.fragment != "]" {
-                    panic!("bind_value_named_set: no corresponding ']'for '['");
+                if let Some(e) = end {
+                    if s.fragment == "[" && e.fragment != "]" {
+                        return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
+                    }
+                    else if s.fragment == "(" && e.fragment != ")" {
+                        return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
+                    }
                 }
-                else if s.fragment == "(" && e.fragment != ")" {
-                    panic!("bind_value_named_set: no corresponding ')'for '('");
+                else {
+                    return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
                 }
-            }
-            else {
-                panic!("bind_value_named_set: no matching end found for start: {:?}, end:{:?}", s, end);
-            }
 
-            acc
+                Ok((span, acc))
+            },
+            Err(e) => Err(e)
         }
-    )
-);
+    })?;
+
+    let (span, _) = iter.finish().unwrap();
+
+    Ok((span, map))
+}
 
 #[cfg(feature = "composer-serde")]
-named!(
-    bind_value_named_sets(Span) -> Vec<BTreeMap<String, Vec<SerdeValue>>>,
-    do_parse!(
-        values: separated_list!(
-            do_parse!(multispace0 >> complete!(tag!(",")) >> multispace0 >> ()),
-            bind_value_named_set
-        ) >>
-        (
-            values
-        )
-    )
-);
+pub fn bind_value_named_sets(span: Span) -> IResult<Span, Vec<BTreeMap<String, Vec<SerdeValue>>>> {
+    let (span, values) = separated_list(comma_padded, bind_value_named_set)(span)?;
+
+    Ok((span, values))
+}
 
 #[cfg(test)]
 mod tests {

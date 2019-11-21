@@ -614,23 +614,15 @@ pub fn bind_value_set(span: Span) -> IResult<Span, Vec<SerdeValue>> {
 
     let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
 
-    if let Some(s) = start {
-        if let Some(e) = end {
-            if s.fragment == "[" && e.fragment != "]" {
-                return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
-            }
-            else if s.fragment == "(" && e.fragment != ")" {
-                return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
-            }
-        }
-        else {
-            return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
-        }
-    }
-    else {
-        if let Some(e) = end {
-            return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
-        }
+    match (start, end) {
+        (Some(s), Some(e)) => match (s.fragment, e.fragment) {
+            ("[", "]") => (),
+            ("(", ")") => (),
+            (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+        },
+        (Some(s), None) => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+        (None, Some(e)) => return Err(nom::Err::Failure((e, NomErrorKind::Verify))),
+        (None, None) => (),
     }
 
     Ok((span, list))
@@ -682,16 +674,13 @@ pub fn bind_value_named_set(span: Span) -> IResult<Span, BTreeMap<String, Vec<Se
                     }
                 }
 
-                if let Some(e) = end {
-                    if s.fragment == "[" && e.fragment != "]" {
-                        return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
-                    }
-                    else if s.fragment == "(" && e.fragment != ")" {
-                        return Err(nom::Err::Failure((e, NomErrorKind::Verify)));
-                    }
-                }
-                else {
-                    return Err(nom::Err::Failure((s, NomErrorKind::Verify)));
+                match end {
+                    Some(e) => match (s.fragment, e.fragment) {
+                        ("[", "]") => (),
+                        ("(", ")") => (),
+                        (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+                    },
+                    None => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
                 }
 
                 Ok((span, acc))

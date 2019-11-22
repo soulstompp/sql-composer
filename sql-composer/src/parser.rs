@@ -10,6 +10,7 @@ use nom::{branch::alt,
           error::ErrorKind as NomErrorKind,
           multi::many1,
           sequence::{delimited, terminated},
+          InputLength,
           IResult};
 
 #[cfg(feature = "composer-serde")]
@@ -568,9 +569,19 @@ pub fn bind_value_real(span: Span) -> IResult<Span, SerdeValue> {
     Ok((span, SerdeValue(Value::F64(value))))
 }
 
-named!(ending(Span) -> Span,
-    eof!()
-);
+pub fn ending(span: Span) -> IResult<Span, Span> {
+    //! Checks for end of input
+    //!
+    //! succeeds if input_len is zero
+    //! Returns an Eof Error if input_len is non-zero.
+    //!   Returns Error rather than Failure to indicate
+    //!   "I didn't match" vs "match can not succeed"
+    if span.input_len() == 0 {
+        Ok((span, span))
+    } else {
+        Err(nom::Err::Error((span, NomErrorKind::Eof)))
+    }
+}
 
 #[cfg(feature = "composer-serde")]
 pub fn check_bind_value_ending(span: Span) -> IResult<Span, Span> {
@@ -704,8 +715,8 @@ pub fn bind_value_named_sets(span: Span) -> IResult<Span, Vec<BTreeMap<String, V
 #[cfg(test)]
 mod tests {
     use super::{bindvar_expecting, bindvar_item, column_list, composer_macro_item,
-                db_object_alias_sql, db_object_item, db_object_sql_set, template,
-                sql_ending_item, sql_literal_item};
+                db_object_alias_sql, db_object_item, db_object_sql_set, ending,
+                template, sql_ending_item, sql_literal_item};
 
     #[cfg(feature = "composer-serde")]
     use super::{bind_value, bind_value_integer, bind_value_named_set, bind_value_named_sets,
@@ -1446,6 +1457,43 @@ mod tests {
                 "expected remaining for i:{} input:{:?}",
                 i, input
             );
+        }
+    }
+    #[test]
+    fn test_ending(){
+        let success_cases = [""];
+        let failure_cases = ["foo", " ", "\n"];
+
+        for &input in success_cases.iter() {
+            match ending(Span::new(input)) {
+                Ok((remaining, output)) => {
+                    let expected_output = Span::new(input);
+                    let expected_fragment = input;
+
+                    assert_eq!(output, expected_output, "correct output for {:?}", input);
+                    assert_eq!(remaining.fragment, expected_fragment,
+                               "input not consumed for {:?}", input
+                    );
+                }
+                Err(e) => {
+                    println!("ending for input={:?} returned an error={:?}",
+                             input, e);
+                    panic!(e)
+                }
+            };
+        }
+
+        for &input in failure_cases.iter() {
+            match ending(Span::new(input)) {
+                Ok((remaining, output)) => {
+                    assert!(false, "ending() for input={:?} should not have succeeded. remaining:{:?} output:{:?}",
+                            input, remaining, output);
+                }
+                Err(e) => {
+                    assert!(true, "ending() for input='{:?}' returned an error={:?}",
+                        input, e);
+                }
+            };
         }
     }
 

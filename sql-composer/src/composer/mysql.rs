@@ -60,10 +60,10 @@ impl<'a> ComposerConnection<'a> for Pool {
 
 pub struct MysqlComposer<'a> {
     #[allow(dead_code)]
-    config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
+    config: ComposerConfig,
+    values: BTreeMap<String, Vec<&'a dyn ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a dyn ToValue>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
+    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
 }
 
 impl<'a> MysqlComposer<'a> {
@@ -84,8 +84,8 @@ impl<'a> Composer for MysqlComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, _name: String) -> Result<String> {
-        Ok(format!("?"))
+    fn place_holder(&self, u: usize, _name: String) -> Result<String> {
+        self._build_place_holder("?", false, u)
     }
 
     fn compose_count_command(
@@ -138,7 +138,6 @@ mod tests {
     use dotenv::dotenv;
     use std::env;
 
-
     #[derive(Debug, PartialEq)]
     struct Person {
         id:   i32,
@@ -147,11 +146,10 @@ mod tests {
     }
 
     fn setup_db() -> Pool {
-
         dotenv().ok();
-        let pool = Pool::new(
-            env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL")
-        ).unwrap();
+        let pool =
+            Pool::new(env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL"))
+                .unwrap();
 
         pool.prep_exec("DROP TABLE IF EXISTS person;", ()).unwrap();
 
@@ -314,7 +312,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -376,7 +376,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 1)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -457,7 +459,8 @@ mod tests {
     fn test_count_command() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::parse(":count(src/tests/values/double-include.tql);", None).unwrap();
+        let stmt =
+            SqlComposition::parse(":count(src/tests/values/double-include.tql);", None).unwrap();
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 

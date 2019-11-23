@@ -44,7 +44,9 @@ impl<'a> ComposerConnection<'a> for Connection {
         let (sql, bind_vars) = c.compose(s)?;
 
         //TODO: support a DriverError type to handle this better
-        let stmt = self.prepare(&sql).or_else(|_| Err("this isn't a good drive error yet"))?;
+        let stmt = self
+            .prepare(&sql)
+            .or_else(|_| Err("this isn't a good drive error yet"))?;
 
         Ok((stmt, bind_vars))
     }
@@ -87,7 +89,7 @@ impl<'a> Composer for RusqliteComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, u: usize, _name: String) -> Result<String> {
+    fn place_holder(&self, u: usize, _name: String) -> Result<String> {
         Ok(format!("?{}", u))
     }
 
@@ -271,7 +273,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -352,7 +356,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -441,7 +447,9 @@ mod tests {
             });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, _mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, _mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -551,11 +559,8 @@ mod tests {
     fn test_count_command() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::parse(
-            ":count(src/tests/values/double-include.tql);",
-            None,
-        )
-        .expect("unable to parse template");
+        let stmt = SqlComposition::parse(":count(src/tests/values/double-include.tql);", None)
+            .expect("unable to parse template");
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ?1 AS col_1, ?2 AS col_2, ?3 AS col_3, ?4 AS col_4 UNION ALL SELECT ?5 AS col_1, ?6 AS col_2, ?7 AS col_3, ?8 AS col_4 UNION ALL SELECT ?9 AS col_1, ?10 AS col_2, ?11 AS col_3, ?12 AS col_4 ) AS count_main";
 

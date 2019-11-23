@@ -182,9 +182,10 @@ pub trait Composer: Sized {
                     }
                 }
                 Sql::DbObject(dbo) => {
-                    let dbo_alias = SqlCompositionAlias::DbObject(
-                        SqlDbObject::new(dbo.item.object_name.to_string(), None)?,
-                    );
+                    let dbo_alias = SqlCompositionAlias::DbObject(SqlDbObject::new(
+                        dbo.item.object_name.to_string(),
+                        None,
+                    )?);
 
                     if let Some(mv) = self.mock_values().get(&dbo_alias) {
                         let (mock_sql, mock_values) = self.mock_compose(mv, i)?;
@@ -233,37 +234,41 @@ pub trait Composer: Sized {
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
         match &composition.item.command {
-            Some(s) => {
-                match s.item().to_lowercase().as_str() {
-                    "compose" => {
-                        let mut out = composition.clone();
+            Some(s) => match s.item().to_lowercase().as_str() {
+                "compose" => {
+                    let mut out = composition.clone();
 
-                        out.item.command = None;
+                    out.item.command = None;
 
-                        match &out.item.of[0].item().path() {
-                            Some(path) => match self
-                                .mock_values()
-                                .get(&SqlCompositionAlias::Path(path.into()))
-                            {
-                                Some(e) => Ok(self.mock_compose(e, offset)?),
-                                None => self.compose_statement(
-                                    &out.item.aliases.get(&out.item.of[0].item()).expect("get called but none found at that position"),
-                                    offset,
-                                    child,
-                                ),
-                            },
+                    match &out.item.of[0].item().path() {
+                        Some(path) => match self
+                            .mock_values()
+                            .get(&SqlCompositionAlias::Path(path.into()))
+                        {
+                            Some(e) => Ok(self.mock_compose(e, offset)?),
                             None => self.compose_statement(
-                                &out.item.aliases.get(&out.item.of[0].item()).expect("get called but none found at that position"),
+                                &out.item
+                                    .aliases
+                                    .get(&out.item.of[0].item())
+                                    .expect("get called but none found at that position"),
                                 offset,
                                 child,
                             ),
-                        }
+                        },
+                        None => self.compose_statement(
+                            &out.item
+                                .aliases
+                                .get(&out.item.of[0].item())
+                                .expect("get called but none found at that position"),
+                            offset,
+                            child,
+                        ),
                     }
-                    "count" => self.compose_count_command(composition, offset, child),
-                    "union" => self.compose_union_command(composition, offset, child),
-                    c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into()))
                 }
-            }
+                "count" => self.compose_count_command(composition, offset, child),
+                "union" => self.compose_union_command(composition, offset, child),
+                c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into())),
+            },
             None => self.compose_statement(&composition, offset, child),
         }
     }
@@ -341,7 +346,10 @@ pub trait Composer: Sized {
         let mut i = 0usize;
 
         if composition.item.of.len() < 2 {
-            bail!(ErrorKind::CompositionCommandArgInvalid("union".into(), "requires 2 or more alias names".into()));
+            bail!(ErrorKind::CompositionCommandArgInvalid(
+                "union".into(),
+                "requires 2 or more alias names".into()
+            ));
         }
 
         for alias in composition.item.of.iter() {
@@ -386,7 +394,7 @@ pub trait Composer: Sized {
                         sql.push_str(", ");
                     }
 
-                    sql.push_str(&self.binding_tag(new_values.len() + offset, name.to_string())?);
+                    sql.push_str(&self.place_holder(new_values.len() + offset, name.to_string())?);
 
                     new_values.push(*iv);
 
@@ -400,34 +408,58 @@ pub trait Composer: Sized {
                         return Ok((sql, new_values));
                     }
                     else {
-                        bail!(ErrorKind::CompositionBindingValueInvalid(name.into(), "cannot be NULL and no value provided".into()));
+                        bail!(ErrorKind::CompositionBindingValueInvalid(
+                            name.into(),
+                            "cannot be NULL and no value provided".into()
+                        ));
                     }
                 }
 
                 if let Some(min) = binding.min_values {
                     if found < min {
-                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), format!("found {} > min {}", found, min)));
+                        bail!(ErrorKind::CompositionBindingValueCount(
+                            name.into(),
+                            format!("found {} > min {}", found, min)
+                        ));
                     }
                 }
 
                 if let Some(max) = binding.max_values {
                     if found > max {
-                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), format!("found {} < max {}", found, max)));
+                        bail!(ErrorKind::CompositionBindingValueCount(
+                            name.into(),
+                            format!("found {} < max {}", found, max)
+                        ));
                     }
                 }
                 else {
                     if binding.min_values.is_none() && found > 1 {
-                        bail!(ErrorKind::CompositionBindingValueCount(name.into(), "does not accept more than one value".into()));
+                        bail!(ErrorKind::CompositionBindingValueCount(
+                            name.into(),
+                            "does not accept more than one value".into()
+                        ));
                     }
                 }
             }
-            None => bail!(ErrorKind::CompositionBindingValueCount(name.into(), "requires a value".into()))
+            None => bail!(ErrorKind::CompositionBindingValueCount(
+                name.into(),
+                "requires a value".into()
+            )),
         };
 
         Ok((sql, new_values))
     }
 
-    fn binding_tag(&self, u: usize, name: String) -> Result<String>;
+    fn place_holder(&self, u: usize, name: String) -> Result<String>;
+
+    fn _build_place_holder(&self, marker: &str, positional: bool, u: usize) -> Result<String> {
+        if positional {
+            Ok(format!("{}{}", marker, u))
+        }
+        else {
+            Ok(format!("{}", marker))
+        }
+    }
 
     fn get_values(&self, name: String) -> Option<&Vec<Self::Value>>;
 
@@ -458,7 +490,9 @@ pub trait Composer: Sized {
         let mut expected_columns: Option<u8> = None;
 
         if mock_values.is_empty() {
-            bail!(ErrorKind::MockCompositionArgsInvalid("mock_values cannot be empty".into()));
+            bail!(ErrorKind::MockCompositionArgsInvalid(
+                "mock_values cannot be empty".into()
+            ));
         }
         else {
             for row in mock_values.iter() {
@@ -475,7 +509,7 @@ pub trait Composer: Sized {
                         sql.push_str(", ")
                     }
 
-                    sql.push_str(&self.binding_tag(i, name.to_string())?);
+                    sql.push_str(&self.place_holder(i, name.to_string())?);
                     sql.push_str(&format!(" AS {}", &name));
 
                     values.push(*value);

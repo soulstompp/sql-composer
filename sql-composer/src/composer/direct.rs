@@ -13,10 +13,10 @@ pub struct Connection();
 #[derive(Default)]
 pub struct DirectComposer<'a> {
     #[allow(dead_code)]
-    config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
+    config: ComposerConfig,
+    values: BTreeMap<String, Vec<&'a dyn ToValue>>,
     root_mock_values: Vec<BTreeMap<String, &'a str>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
+    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
 }
 
 impl<'a> DirectComposer<'a> {
@@ -36,7 +36,7 @@ impl<'a> Composer for DirectComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, name: String) -> Result<String> {
+    fn place_holder(&self, _u: usize, name: String) -> Result<String> {
         let mut s = String::new();
 
         if let Some(values) = self.values.get(&name) {
@@ -50,7 +50,7 @@ impl<'a> Composer for DirectComposer<'a> {
             }
         }
         else {
-            unimplemented!("unexpected binding_tag error!");
+            unimplemented!("unexpected place_holder error!");
         }
 
         Ok(s)
@@ -61,7 +61,7 @@ impl<'a> Composer for DirectComposer<'a> {
         binding: SqlBinding,
         offset: usize,
     ) -> Result<(String, Vec<Self::Value>)> {
-        Ok((self.binding_tag(offset, binding.name)?, vec![]))
+        Ok((self.place_holder(offset, binding.name)?, vec![]))
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {

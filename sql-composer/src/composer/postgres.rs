@@ -52,15 +52,23 @@ impl<'a> ComposerConnection<'a> for Connection {
 
 #[cfg(feature = "composer-serde")]
 impl ToSql for SerdeValue {
-    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        w: &mut Vec<u8>,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
         match &self.0 {
             Value::String(s) => {
-                <String as ToSql>::to_sql(s, ty, w).expect("unable to convert Value::String via to_sql");
+                <String as ToSql>::to_sql(s, ty, w)
+                    .expect("unable to convert Value::String via to_sql");
             }
             Value::I64(i) => {
-                <i64 as ToSql>::to_sql(i, ty, w).expect("unable to convert Value::String via to_sql");            }
+                <i64 as ToSql>::to_sql(i, ty, w)
+                    .expect("unable to convert Value::String via to_sql");
+            }
             Value::F64(f) => {
-                <f64 as ToSql>::to_sql(f, ty, w).expect("unable to convert Value::String via to_sql");
+                <f64 as ToSql>::to_sql(f, ty, w)
+                    .expect("unable to convert Value::String via to_sql");
             }
             _ => unimplemented!("unable to convert unexpected Value type"),
         }
@@ -83,13 +91,17 @@ impl ToSql for SerdeValue {
     to_sql_checked!();
 }
 
+//TODO: the config needs a Binder::{Question, PositionalQuestion, Dollar, PositionalDollar}
+//
+//TODO: the config needs a Dialect
+//Dialect::{MySQL, SQLite, PostgreSQL}
 #[derive(Default)]
 pub struct PostgresComposer<'a> {
     #[allow(dead_code)]
-    config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
+    config: ComposerConfig,
+    values: BTreeMap<String, Vec<&'a dyn ToSql>>,
     root_mock_values: Vec<BTreeMap<String, &'a dyn ToSql>>,
-    mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToSql>>>,
+    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToSql>>>,
 }
 
 impl<'a> PostgresComposer<'a> {
@@ -110,8 +122,8 @@ impl<'a> Composer for PostgresComposer<'a> {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, u: usize, _name: String) -> Result<String> {
-        Ok(format!("${}", u))
+    fn place_holder(&self, u: usize, _name: String) -> Result<String> {
+        self._build_place_holder("$", true, u)
     }
 
     fn compose_count_command(
@@ -178,8 +190,9 @@ mod tests {
 
         Connection::connect(
             env::var("PG_DATABASE_URL").expect("Missing variable PG_DATABASE_URL"),
-            TlsMode::None
-        ).unwrap()
+            TlsMode::None,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -286,7 +299,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -339,7 +354,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -401,7 +418,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -469,11 +488,8 @@ mod tests {
     fn test_count_command() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::parse(
-            ":count(src/tests/values/double-include.tql);",
-            None,
-        )
-        .unwrap();
+        let stmt =
+            SqlComposition::parse(":count(src/tests/values/double-include.tql);", None).unwrap();
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 ) AS count_main";
 

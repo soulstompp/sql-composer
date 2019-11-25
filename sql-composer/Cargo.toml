@@ -6,14 +6,17 @@ edition = '2018'
 
 [features]
 dbd-mysql = ["mysql"]
-dbd-rusqlite = ["rusqlite"]
 dbd-postgres = ["postgres"]
+dbd-rusqlite = ["rusqlite"]
+dbd-tokio-postgres = ["futures", "futures-state-stream", "tokio", "tokio-core", "tokio-postgres"]
 composer-serde = ["serde", "serde-value"]
 
 [dependencies]
 chrono = "0.4"
 dotenv = "0.15.0"
 error-chain = "0.12.1"
+futures = { version = "0.1.7", optional = true }
+futures-state-stream = { version = "0.2.0", optional = true }
 nom = "5.0.1"
 nom_locate = "1.0.0"
 mysql = { version = "16.0.2", optional = true }
@@ -22,3 +25,6 @@ postgres = { version = "0.15.2", optional = true }
 serde = { version = "1.0.89", optional = true }
 serde-value = { version = "0.6.0", optional = true }
 time = "0.1.40"
+tokio = { version = "0.1.22",  optional = true }
+tokio-core = { version = "0.1.17", optional = true }
+tokio-postgres = { version = "0.3.0",  optional = true }

@@ -6,6 +6,8 @@ pub mod mysql;
 pub mod postgres;
 #[cfg(feature = "dbd-rusqlite")]
 pub mod rusqlite;
+#[cfg(feature = "dbd-tokio-postgres")]
+pub mod tokio_postgres;
 
 #[cfg(feature = "composer-serde")]
 pub use crate::parser::bind_value_named_set;

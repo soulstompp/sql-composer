@@ -31,6 +31,15 @@ extern crate nom_locate;
 #[macro_use]
 pub mod composer;
 
+#[cfg(all(feature = "dbd-tokio-postgres"))]
+extern crate futures;
+#[cfg(all(feature = "dbd-tokio-postgres"))]
+extern crate futures_state_stream;
+#[cfg(all(feature = "dbd-tokio-postgres"))]
+extern crate tokio_core;
+#[cfg(all(feature = "dbd-tokio-postgres"))]
+extern crate tokio_postgres;
+
 #[cfg(all(feature = "dbd-postgres", feature="composer-serde"))]
 #[macro_use]
 extern crate postgres;

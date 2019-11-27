@@ -138,7 +138,7 @@ pub struct ComposerConfig {
 }
 
 pub trait Composer: Sized {
-    type Value: Copy;
+    type Value: Clone;
 
     fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>)> {
         let item = ParsedItem::generated(s.clone(), None)?;
@@ -398,7 +398,8 @@ pub trait Composer: Sized {
 
                     sql.push_str(&self.place_holder(new_values.len() + offset, name.to_string())?);
 
-                    new_values.push(*iv);
+                    let iv = iv.clone();
+                    new_values.push(iv);
 
                     found += 1;
                 }
@@ -514,7 +515,8 @@ pub trait Composer: Sized {
                     sql.push_str(&self.place_holder(i, name.to_string())?);
                     sql.push_str(&format!(" AS {}", &name));
 
-                    values.push(*value);
+                    let value = value.clone();
+                    values.push(value);
 
                     i += 1;
                 }

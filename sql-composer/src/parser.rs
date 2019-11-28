@@ -651,16 +651,40 @@ pub fn bind_value_kv_pair(span: Span) -> IResult<Span, (Span, Vec<SerdeValue>)> 
 }
 
 #[cfg(feature = "composer-serde")]
-//"a_value, aa_value, aaa_value
-pub fn bind_value_named_item(span: Span) -> IResult<Span, (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)> {
+pub fn bracket_start<'a>(span: Span) -> IResult<Span, (Span, String)> {
+    let (span, _) = multispace0(span)?;
     let (span, start) = alt((tag("["), tag("(")))(span)?;
     let (span, _) = multispace0(span)?;
-    let (span, kv) = separated_list(comma_padded, bind_value_kv_pair)(span)?;
-    let (span, _) = multispace0(span)?;
-    let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
-    let (span, _) = multispace0(span)?;
 
-    Ok((span, (start, kv, end)))
+    let result = match start.fragment {
+        "[" => "]",
+        "(" => ")",
+        _ => unreachable!(),
+    };
+
+    Ok((span, (start, result.to_string())))
+}
+
+#[cfg(feature = "composer-serde")]
+fn bracket_end<'a>(end_str: String) -> Box<dyn Fn(Span) -> IResult<Span, Span>> {
+    Box::new(move |span| {
+        let (span, _) = multispace0(span)?;
+        let (span, end) = tag(end_str.as_str())(span)?;
+        let (span, _) = multispace0(span)?;
+        Ok((span, end))
+    })
+}
+
+#[cfg(feature = "composer-serde")]
+//"a_value, aa_value, aaa_value
+pub fn bind_value_named_item(span: Span) -> IResult<Span, Vec<(Span, Vec<SerdeValue>)>> {
+    let (span, (_start, end_str)) = bracket_start(span)?;
+
+    let (span, kv) = separated_list(comma_padded, bind_value_kv_pair)(span)?;
+
+    let (span, _end) = bracket_end(end_str)(span)?;
+
+    Ok((span, kv))
 }
 
 #[cfg(feature = "composer-serde")]
@@ -668,13 +692,10 @@ pub fn bind_value_named_item(span: Span) -> IResult<Span, (Span, Vec<(Span, Vec<
 pub fn bind_value_named_set(span: Span) -> IResult<Span, BTreeMap<String, Vec<SerdeValue>>> {
     let mut iter = iterator(span, bind_value_named_item);
 
-    let (_, map) = iter.fold(Ok((span, BTreeMap::new())), |acc_res: IResult<Span, BTreeMap<String, Vec<SerdeValue>>>, items: (Span, Vec<(Span, Vec<SerdeValue>)>, Option<Span>)| {
+    let (_, map) = iter.fold(Ok((span, BTreeMap::new())), |acc_res: IResult<Span, BTreeMap<String, Vec<SerdeValue>>>, items: Vec<(Span, Vec<SerdeValue>)>| {
         match acc_res {
             Ok((span, mut acc)) => {
-                let s = items.0;
-                let end = items.2;
-
-                for (key, values) in items.1 {
+                for (key, values) in items {
                     let key = key.fragment.to_string();
 
                     let entry = acc.entry(key).or_insert(vec![]);
@@ -683,16 +704,6 @@ pub fn bind_value_named_set(span: Span) -> IResult<Span, BTreeMap<String, Vec<Se
                         entry.push(v);
                     }
                 }
-
-                match end {
-                    Some(e) => match (s.fragment, e.fragment) {
-                        ("[", "]") => (),
-                        ("(", ")") => (),
-                        (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
-                    },
-                    None => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
-                }
-
                 Ok((span, acc))
             },
             Err(e) => Err(e)

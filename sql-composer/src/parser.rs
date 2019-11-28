@@ -725,7 +725,7 @@ pub fn bind_value_named_sets(span: Span) -> IResult<Span, Vec<BTreeMap<String, V
 #[cfg(test)]
 mod tests {
     use super::{bindvar_expecting, bindvar_item, column_item, column_list, composer_macro_item,
-                db_object_alias_sql, db_object_item, db_object_sql_set, ending,
+                db_object_alias_sql, db_object_item, db_object_sql_set, ending, of_padded,
                 template, sql_ending_item, sql_literal_item};
 
     #[cfg(feature = "composer-serde")]
@@ -1220,6 +1220,22 @@ mod tests {
                 println!("parse_column span={:?}", span);
                 assert_eq!(item.item, expected_fragment, "parse_column returns item");
                 assert_eq!(span.fragment, expected_span_fragment, "parse_column returns span fragment")
+            },
+            Err(e) => panic!("parse_column failed with e={:?}", e)
+        }
+    }
+
+    #[test]
+    fn test_of_padded() {
+        let input = "of ";
+        let expected_item = ();  // of_padded returns an empty item
+
+        match of_padded(Span::new(input.into())) {
+            Ok((span, item)) => {
+                println!("of_padded item={:?}", item);
+                println!("of_padded span={:?}", span);
+                assert_eq!(item, expected_item, "of_padded returned item");
+                assert_eq!(span.fragment, "".to_string(), "returns empty span")
             },
             Err(e) => panic!("parse_column failed with e={:?}", e)
         }

@@ -1244,19 +1244,18 @@ mod tests {
     fn test_parse_multi_column_list() {
         let input = "col_1, col_2, col_3 of ";
 
-        let expected_span = build_span(Some(1), Some(23), "");
+        let expected_remaining_fragment = "";
+        let expected_fragments = vec!("col_1", "col_2", "col_3");
 
-        let expected_item = vec![
-            build_parsed_item("col_1".to_string(), None, Some(0), "col_1"),
-            build_parsed_item("col_2".to_string(), None, Some(7), "col_2"),
-            build_parsed_item("col_3".to_string(), None, Some(14), "col_3"),
-        ];
-
-        let (span, item) =
-            column_list(Span::new(input.into())).expect("expected Ok from column_list");
-
-        assert_eq!(item, expected_item, "items match");
-        assert_eq!(span, expected_span, "spans match");
+        match column_list(Span::new(input.into())) {
+            Ok((span, items)) => {
+                println!("items: {:?}, span {:?}", items, span);
+                let items: Vec<String> = items.into_iter().map(|i| i.item).collect();
+                assert_eq!(items, expected_fragments, "items match");
+                assert_eq!(span.fragment, expected_remaining_fragment, "span fragments match");
+            },
+            Err(e) => panic!("column_list failed with e={:?}", e)
+        }
     }
 
     #[test]

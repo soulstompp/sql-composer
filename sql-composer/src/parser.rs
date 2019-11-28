@@ -576,10 +576,9 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
     //! Returns an Eof Error if input_len is non-zero.
     //!   Returns Error rather than Failure to indicate
     //!   "I didn't match" vs "match can not succeed"
-    if span.input_len() == 0 {
-        Ok((span, span))
-    } else {
-        Err(nom::Err::Error((span, NomErrorKind::Eof)))
+    match span.input_len() {
+        0 => Ok((span, span)),
+        _ => Err(nom::Err::Error((span, NomErrorKind::Eof)))
     }
 }
 

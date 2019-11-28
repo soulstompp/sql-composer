@@ -8,7 +8,7 @@ use nom::{branch::alt,
           character::complete::multispace0,
           combinator::{iterator, not, opt, peek},
           error::ErrorKind as NomErrorKind,
-          multi::many1,
+          multi::{many1, separated_list},
           sequence::{delimited, terminated},
           InputLength,
           IResult};
@@ -16,7 +16,6 @@ use nom::{branch::alt,
 #[cfg(feature = "composer-serde")]
 use nom::{
           character::complete::{digit1, one_of},
-          multi::separated_list,
           number::complete::double};
 
 #[cfg(feature = "composer-serde")]
@@ -183,7 +182,8 @@ pub fn of_padded(span: Span) -> IResult<Span, ()> {
 }
 
 pub fn column_list(span: Span) -> IResult<Span, Vec<ParsedItem<String>>> {
-    let (span, columns) = terminated(many1(column_item), of_padded)(span)?;
+    let (span, columns) = separated_list(comma_padded, column_name)(span)?;
+    let (span, _) = of_padded(span)?;
 
     Ok((span, columns))
 }

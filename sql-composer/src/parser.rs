@@ -724,7 +724,7 @@ pub fn bind_value_named_sets(span: Span) -> IResult<Span, Vec<BTreeMap<String, V
 
 #[cfg(test)]
 mod tests {
-    use super::{bindvar_expecting, bindvar_item, column_list, composer_macro_item,
+    use super::{bindvar_expecting, bindvar_item, column_item, column_list, composer_macro_item,
                 db_object_alias_sql, db_object_item, db_object_sql_set, ending,
                 template, sql_ending_item, sql_literal_item};
 
@@ -1205,6 +1205,24 @@ mod tests {
         );
 
         assert_eq!(comp, expected);
+    }
+
+    #[test]
+    fn test_parse_column_item() {
+        let input = "col_1 , of ";
+        let expected_fragment = "col_1";
+        let expected_span_fragment = "of ";
+
+        let result = column_item(Span::new(input.into()));
+        match result {
+            Ok((span, item)) => {
+                println!("parse_column item={:?}", item);
+                println!("parse_column span={:?}", span);
+                assert_eq!(item.item, expected_fragment, "parse_column returns item");
+                assert_eq!(span.fragment, expected_span_fragment, "parse_column returns span fragment")
+            },
+            Err(e) => panic!("parse_column failed with e={:?}", e)
+        }
     }
 
     #[test]

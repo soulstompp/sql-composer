@@ -666,24 +666,28 @@ pub fn bracket_start<'a>(span: Span) -> IResult<Span, (Span, String)> {
 }
 
 #[cfg(feature = "composer-serde")]
-fn bracket_end<'a>(end_str: String) -> Box<dyn Fn(Span) -> IResult<Span, Span>> {
-    Box::new(move |span| {
-        let (span, _) = multispace0(span)?;
-        let (span, end) = tag(end_str.as_str())(span)?;
-        let (span, _) = multispace0(span)?;
-        Ok((span, end))
-    })
+pub fn bracket_start_fn<'a>(span: Span) -> IResult<Span, (Span, impl FnOnce(Span<'a>) -> IResult<Span, Span>)>
+{
+    let (span, start) = alt((tag("["), tag("(")))(span)?;
+    let (span, _) = multispace0(span)?;
+
+    let bracket_end_func = tag::<&'static str, Span, _>( match start.fragment {
+        "[" => "]",
+        "(" => ")",
+        _ => unreachable!(),
+    });
+
+    Ok((span, (start, Box::new(bracket_end_func))))
 }
 
 #[cfg(feature = "composer-serde")]
 //"a_value, aa_value, aaa_value
 pub fn bind_value_named_item(span: Span) -> IResult<Span, Vec<(Span, Vec<SerdeValue>)>> {
-    let (span, (_start, end_str)) = bracket_start(span)?;
-
+    let (span, (start, bracket_end_fn)) = bracket_start_fn(span)?;
     let (span, kv) = separated_list(comma_padded, bind_value_kv_pair)(span)?;
+    let (span, end) = bracket_end_fn(span)?;
 
-    let (span, _end) = bracket_end(end_str)(span)?;
-
+    println!("bind_value_named_item matched set: '{}', '{}'", start.fragment, end.fragment);
     Ok((span, kv))
 }
 

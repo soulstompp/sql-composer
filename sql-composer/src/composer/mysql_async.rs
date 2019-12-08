@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::{prelude::ToValue, Stmt};
+use mysql_async::{prelude::ToValue, Value, Stmt};
 
-#[cfg(feature = "composer-serde")]
-use mysql::Value;
+//#[cfg(feature = "composer-serde")]
+//use mysql_async::Value;
 
 use super::{Composer, ComposerConfig, ComposerConnection};
 
@@ -17,10 +17,13 @@ use crate::types::SerdeValue;
 #[cfg(feature = "composer-serde")]
 use serde_value::Value as SerdeValueEnum;
 
-use mysql::Pool;
+use mysql_async::Pool;
 
 use std::marker::PhantomData;
 
+use std::sync::Arc;
+
+/*
 #[cfg(feature = "composer-serde")]
 impl Into<Value> for SerdeValue {
     fn into(self) -> Value {
@@ -32,10 +35,11 @@ impl Into<Value> for SerdeValue {
         }
     }
 }
+
 impl<'a> ComposerConnection<'a> for Pool {
-    type Composer = MysqlComposer<'a>;
-    type Value = &'a (dyn ToValue + 'a);
-    type Statement = Stmt<'a>;
+    type Composer = Arc<dyn ToValue >;
+    type Value = Arc<dyn ToValue >;
+    type Statement = MysqlComposer<'a>;
 
     fn compose(
         &'a self,
@@ -49,7 +53,6 @@ impl<'a> ComposerConnection<'a> for Pool {
             values,
             root_mock_values,
             mock_values,
-            phantom: PhantomData,
         };
 
         let (sql, bind_vars) = c.compose(s)?;
@@ -60,17 +63,18 @@ impl<'a> ComposerConnection<'a> for Pool {
         Ok((stmt, bind_vars))
     }
 }
+*/
 
-pub struct MysqlComposer<'a> {
+pub struct MysqlAsyncComposer<'a> {
     #[allow(dead_code)]
-    config:           ComposerConfig,
-    values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
-    root_mock_values: Vec<BTreeMap<String, &'a dyn ToValue>>,
-    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
-    phantom: PhantomData<&'a dyn ToValue>,
+    config: ComposerConfig,
+    values: BTreeMap<String, Vec<&'a (dyn ToValue )>>,
+    root_mock_values: Vec<BTreeMap<String, &'a (dyn ToValue )>>,
+    mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a (dyn ToValue )>>>,
+    phantom: PhantomData<&'a (dyn ToValue )>,
 }
 
-impl<'a> MysqlComposer<'a> {
+impl<'a> MysqlAsyncComposer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
@@ -82,15 +86,15 @@ impl<'a> MysqlComposer<'a> {
     }
 }
 
-impl<'a> Composer for MysqlComposer<'a> {
-    type Value = &'a (dyn ToValue + 'a);
+impl<'a> Composer for MysqlAsyncComposer<'a> {
+    type Value = &'a (dyn ToValue );
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, _name: String) -> Result<String> {
-        Ok(format!("?"))
+    fn place_holder(&self, u: usize, _name: String) -> Result<String> {
+        self._build_place_holder("?", false, u)
     }
 
     fn compose_count_command(
@@ -132,18 +136,116 @@ impl<'a> Composer for MysqlComposer<'a> {
 mod tests {
     use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
-    use super::{Composer, ComposerConnection, MysqlComposer};
+    use super::{Composer, ComposerConnection, MysqlAsyncComposer};
 
     use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
-    use mysql::prelude::ToValue;
-    use mysql::{from_row, Pool, Row};
+
+    use futures::Future;
+
+    use mysql_async::prelude::*;
+    use mysql_async::prelude::{ToValue};
+    use mysql_async::{from_row, Params, Pool, Row, Value};
 
     use std::collections::HashMap;
 
     use dotenv::dotenv;
     use std::env;
 
+    use std::sync::Arc;
 
+    /// Same as `tokio::run`, but will panic if future panics and will return the result
+    /// of future execution.
+    pub fn run<F, T, U>(future: F) -> Result<T, U>
+    where
+        F: Future<Item = T, Error = U> + Send + 'static,
+        T: Send + 'static,
+        U: Send + 'static,
+    {
+        let mut runtime = tokio::runtime::Runtime::new().unwrap();
+        let result = runtime.block_on(future);
+        runtime.shutdown_on_idle().wait().unwrap();
+        result
+    }
+
+    #[test]
+    fn it_runs_example() {
+        #[derive(Debug, PartialEq, Eq, Clone)]
+        struct Payment {
+            customer_id: i32,
+            amount: i32,
+            account_name: Option<String>,
+        }
+
+        let payments = vec![
+            Payment { customer_id: 1, amount: 2, account_name: None },
+            Payment { customer_id: 3, amount: 4, account_name: Some("foo".into()) },
+            Payment { customer_id: 5, amount: 6, account_name: None },
+            Payment { customer_id: 7, amount: 8, account_name: None },
+            Payment { customer_id: 9, amount: 10, account_name: Some("bar".into()) },
+        ];
+
+        let payments_clone = payments.clone();
+
+        let mut composer = MysqlAsyncComposer::new();
+
+        let pool =
+            Pool::new(env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL"));
+
+        let future = pool.get_conn().and_then(|conn| {
+            // Create temporary table
+            conn.drop_query(
+                r"CREATE TEMPORARY TABLE payment (
+                customer_id int not null,
+                amount int not null,
+                account_name text
+            )")
+        }).and_then(move |conn| {
+            // Save payments
+                let insert_stmt = SqlComposition::parse("INSERT INTO payment (customer_id, amount, account_name)
+                    VALUES (:bind(customer_id), :bind(amount), :bind(account_name));"
+                    , None)
+                    .unwrap();
+
+                composer.values = bind_values!(&(dyn ToValue + '_):
+                    "customer_id" => [&payments[0].customer_id],
+                    "amount" => [&payments[0].amount.into()],
+                    "account_name" => [&payments[0].account_name]
+                );
+
+                let (bound_sql, bindings) = composer.compose(&insert_stmt.item).expect("compose should work");
+
+                let values: Vec<Value> = bindings.iter().map(|b| {
+                    b.to_value()
+                }).collect();
+
+                let params = Params::Positional(values);
+
+                conn.batch_exec(bound_sql, vec![params])
+        }).and_then(|conn| {
+            // Load payments from database.
+            conn.prep_exec("SELECT customer_id, amount, account_name FROM payment", ())
+        }).and_then(|result| {
+            // Collect payments
+            result.map_and_drop(|row| {
+                let (customer_id, amount, account_name) = mysql_async::from_row(row);
+                Payment {
+                    customer_id: customer_id,
+                    amount: amount,
+                    account_name: account_name,
+                }
+            })
+        }).and_then(|(_ /* conn */, payments)| {
+            // The destructor of a connection will return it to the pool,
+            // but pool should be disconnected explicitly because it's
+            // an asynchronous procedure.
+            pool.disconnect().map(|_| payments)
+        });
+
+        let loaded_payments = run(future).unwrap();
+        assert_eq!(loaded_payments, payments);
+    }
+
+    /*
     #[derive(Debug, PartialEq)]
     struct Person {
         id:   i32,
@@ -151,12 +253,12 @@ mod tests {
         data: Option<String>,
     }
 
-    fn setup_db() -> Pool {
-
+    #[test]
+    fn test_binding() {
         dotenv().ok();
-        let pool = Pool::new(
-            env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL")
-        ).unwrap();
+
+        let pool =
+            Pool::new(env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL"));
 
         pool.prep_exec("DROP TABLE IF EXISTS person;", ()).unwrap();
 
@@ -171,12 +273,6 @@ mod tests {
         )
         .unwrap();
 
-        pool
-    }
-
-    #[test]
-    fn test_binding() {
-        let pool = setup_db();
 
         let person = Person {
             id:   0,
@@ -319,7 +415,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 0)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -381,7 +479,9 @@ mod tests {
         });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1).expect("mock_compose should work");
+        let (mut mock_bound_sql, mock_bindings) = composer
+            .mock_compose(&mock_values, 1)
+            .expect("mock_compose should work");
 
         mock_bound_sql.push(';');
 
@@ -462,7 +562,8 @@ mod tests {
     fn test_count_command() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::parse(":count(src/tests/values/double-include.tql);", None).unwrap();
+        let stmt =
+            SqlComposition::parse(":count(src/tests/values/double-include.tql);", None).unwrap();
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
@@ -751,4 +852,5 @@ mod tests {
 
         assert_eq!(values, expected, "exected values");
     }
+*/
 }

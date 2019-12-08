@@ -2,6 +2,8 @@ pub mod direct;
 
 #[cfg(feature = "dbd-mysql")]
 pub mod mysql;
+#[cfg(feature = "dbd-mysql-async")]
+pub mod mysql_async;
 #[cfg(feature = "dbd-postgres")]
 pub mod postgres;
 #[cfg(feature = "dbd-rusqlite")]
@@ -14,6 +16,8 @@ use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAl
 use std::collections::{BTreeMap, HashMap};
 
 use crate::error::{ErrorKind, Result};
+
+use std::marker::PhantomData;
 
 pub trait ComposerConnection<'a> {
     type Composer;

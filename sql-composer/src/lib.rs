@@ -35,6 +35,13 @@ pub mod composer;
 #[macro_use]
 extern crate postgres;
 
+#[cfg(all(feature = "dbd-mysql-async"))]
+#[macro_use]
+extern crate mysql_async;
+#[cfg(all(feature = "dbd-mysql-async"))]
+extern crate tokio;
+
+
 pub mod error;
 pub mod parser;
 mod tests;

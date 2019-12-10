@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate sql_composer;
+
 use std::collections::{BTreeMap, HashMap};
 
 use mysql::{prelude::ToValue, Stmt};
@@ -5,11 +8,11 @@ use mysql::{prelude::ToValue, Stmt};
 #[cfg(feature = "composer-serde")]
 use mysql::Value;
 
-use super::{Composer, ComposerConfig, ComposerConnection};
+use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::error::Result;
+use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
@@ -30,8 +33,24 @@ impl Into<Value> for SerdeValue {
         }
     }
 }
+
+pub trait ComposerConnection<'a> {
+    type Composer;
+    //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
+    type Value;
+    type Statement;
+
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>)>;
+}
+
 impl<'a> ComposerConnection<'a> for Pool {
-    type Composer = MysqlComposer<'a>;
+    type Composer = Composer<'a>;
     type Value = &'a (dyn ToValue + 'a);
     type Statement = Stmt<'a>;
 
@@ -42,8 +61,8 @@ impl<'a> ComposerConnection<'a> for Pool {
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>)> {
-        let c = MysqlComposer {
-            config: MysqlComposer::config(),
+        let c = Composer {
+            config: Composer::config(),
             values,
             root_mock_values,
             mock_values,
@@ -58,7 +77,7 @@ impl<'a> ComposerConnection<'a> for Pool {
     }
 }
 
-pub struct MysqlComposer<'a> {
+pub struct Composer<'a> {
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
@@ -66,7 +85,7 @@ pub struct MysqlComposer<'a> {
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
 }
 
-impl<'a> MysqlComposer<'a> {
+impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
@@ -77,7 +96,7 @@ impl<'a> MysqlComposer<'a> {
     }
 }
 
-impl<'a> Composer for MysqlComposer<'a> {
+impl<'a> ComposerTrait for Composer<'a> {
     type Value = &'a (dyn ToValue + 'a);
 
     fn config() -> ComposerConfig {
@@ -125,11 +144,11 @@ impl<'a> Composer for MysqlComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
+    //use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
-    use super::{Composer, ComposerConnection, MysqlComposer};
+    use super::{Composer, ComposerConnection, ComposerTrait};
 
-    use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
+    use sql_composer::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
 
@@ -179,7 +198,7 @@ mod tests {
             data: None,
         };
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         let insert_stmt = SqlComposition::parse(
             "INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
@@ -251,7 +270,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -291,7 +310,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -345,7 +364,7 @@ mod tests {
         let stmt =
             SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],
@@ -423,7 +442,7 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -461,7 +480,7 @@ mod tests {
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],
@@ -500,7 +519,7 @@ mod tests {
 
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -549,7 +568,7 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -601,7 +620,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],
@@ -665,7 +684,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],

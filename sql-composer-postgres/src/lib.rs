@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate sql_composer;
+
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
@@ -6,11 +9,11 @@ use postgres::types::ToSql;
 use postgres::types::{IsNull, Type};
 use postgres::Connection;
 
-use super::{Composer, ComposerConfig, ComposerConnection};
+use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
-use crate::error::Result;
+use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use crate::types::SerdeValue;
@@ -21,8 +24,23 @@ use serde_value::Value;
 #[cfg(feature = "composer-serde")]
 use std::error::Error;
 
+pub trait ComposerConnection<'a> {
+    type Composer;
+    //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
+    type Value;
+    type Statement;
+
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>)>;
+}
+
 impl<'a> ComposerConnection<'a> for Connection {
-    type Composer = PostgresComposer<'a>;
+    type Composer = Composer<'a>;
     type Value = &'a (dyn ToSql + 'a);
     type Statement = Statement<'a>;
 
@@ -33,9 +51,9 @@ impl<'a> ComposerConnection<'a> for Connection {
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>)> {
-        let c = PostgresComposer {
+        let c = Composer {
             #[allow(dead_code)]
-            config: PostgresComposer::config(),
+            config: Composer::config(),
             values,
             root_mock_values,
             mock_values,
@@ -84,7 +102,7 @@ impl ToSql for SerdeValue {
 }
 
 #[derive(Default)]
-pub struct PostgresComposer<'a> {
+pub struct Composer<'a> {
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
@@ -92,7 +110,7 @@ pub struct PostgresComposer<'a> {
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToSql>>>,
 }
 
-impl<'a> PostgresComposer<'a> {
+impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
@@ -103,7 +121,7 @@ impl<'a> PostgresComposer<'a> {
     }
 }
 
-impl<'a> Composer for PostgresComposer<'a> {
+impl<'a> ComposerTrait for Composer<'a> {
     type Value = &'a (dyn ToSql + 'a);
 
     fn config() -> ComposerConfig {
@@ -151,11 +169,9 @@ impl<'a> Composer for PostgresComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, ComposerConnection, PostgresComposer};
+    use super::{Composer, ComposerConnection, ComposerTrait};
 
-    use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
-
-    use crate::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
+    use sql_composer::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use postgres::rows::Row;
     use postgres::types::ToSql;
@@ -210,7 +226,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
                                        "name" => [&person.name],
@@ -269,7 +285,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -315,7 +331,7 @@ mod tests {
 
         let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -370,7 +386,7 @@ mod tests {
         let stmt =
             SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -438,7 +454,7 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
                                        "a" => [&"a_value"],
@@ -477,7 +493,7 @@ mod tests {
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 ) AS count_main";
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -515,7 +531,7 @@ mod tests {
 
         let expected_bound_sql = "SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 UNION SELECT $13 AS col_1, $14 AS col_2, $15 AS col_3, $16 AS col_4 UNION ALL SELECT $17 AS col_1, $18 AS col_2, $19 AS col_3, $20 AS col_4 UNION SELECT $21 AS col_1, $22 AS col_2, $23 AS col_3, $24 AS col_4 UNION ALL SELECT $25 AS col_1, $26 AS col_2, $27 AS col_3, $28 AS col_4 UNION ALL SELECT $29 AS col_1, $30 AS col_2, $31 AS col_3, $32 AS col_4";
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -564,7 +580,7 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -614,7 +630,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],
@@ -679,7 +695,7 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = PostgresComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
         "a" => [&"a_value"],

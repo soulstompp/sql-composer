@@ -4,8 +4,6 @@ pub mod direct;
 pub mod mysql;
 #[cfg(feature = "dbd-postgres")]
 pub mod postgres;
-#[cfg(feature = "dbd-rusqlite")]
-pub mod rusqlite;
 
 #[cfg(feature = "composer-serde")]
 pub use crate::parser::bind_value_named_set;
@@ -132,7 +130,7 @@ macro_rules! bind_values(
 #[derive(Default)]
 pub struct ComposerConfig {
     #[allow(dead_code)]
-    start: usize,
+    pub start: usize,
 }
 
 pub trait Composer: Sized {

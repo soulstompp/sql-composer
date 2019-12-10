@@ -1,0 +1,4 @@
+SELECT COUNT(foo_id)
+FROM (
+  :compose(src/tests/simple-template.tql)
+);

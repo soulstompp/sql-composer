@@ -1,5 +1,6 @@
 [workspace]
 members = [
   "sql-composer",
+  "sql-composer-rusqlite",
   "sql-composer-cli"  
 ]

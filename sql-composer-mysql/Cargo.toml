@@ -5,7 +5,7 @@ authors = ["Kenny Flegal <soulstompp@gmail.com>"]
 edition = '2018'
 
 [features]
-composer-serde = ["serde", "serde-value", "sql-composer/composer-serde"]
+composer-serde = ["serde", "serde-value"]
 
 [dependencies]
 #chrono = "0.4"

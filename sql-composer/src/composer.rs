@@ -1,6 +1,3 @@
-#[cfg(feature = "composer-serde")]
-pub use crate::parser::bind_value_named_set;
-
 use crate::types::{ParsedItem, Sql, SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 

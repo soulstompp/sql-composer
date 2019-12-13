@@ -1,17 +1,20 @@
+#[macro_use]
+extern crate sql_composer;
+
 use std::collections::{BTreeMap, HashMap};
 
-use super::{Composer, ComposerConfig};
+use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 
-use crate::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
+use sql_composer::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
 
-use crate::types::value::ToValue;
+use sql_composer::types::value::ToValue;
 
-use crate::error::Result;
+use sql_composer::error::Result;
 
 pub struct Connection();
 
 #[derive(Default)]
-pub struct DirectComposer<'a> {
+pub struct Composer<'a> {
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
@@ -19,7 +22,7 @@ pub struct DirectComposer<'a> {
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
 }
 
-impl<'a> DirectComposer<'a> {
+impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
             config: Self::config(),
@@ -29,7 +32,7 @@ impl<'a> DirectComposer<'a> {
     }
 }
 
-impl<'a> Composer for DirectComposer<'a> {
+impl<'a> ComposerTrait for Composer<'a> {
     type Value = &'a str;
 
     fn config() -> ComposerConfig {
@@ -101,9 +104,7 @@ impl<'a> Composer for DirectComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bind_values;
-
-    use super::{Composer, DirectComposer, SqlComposition, ToValue};
+    use super::{ComposerTrait, Composer, SqlComposition, ToValue};
 
     use chrono::prelude::*;
 
@@ -128,7 +129,7 @@ mod tests {
 
         let insert_stmt = SqlComposition::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None).unwrap();
 
-        let mut composer = DirectComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
         "name" => [&person.name],

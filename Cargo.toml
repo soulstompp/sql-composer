@@ -2,6 +2,7 @@
 members = [
   "sql-composer",
   "sql-composer-cli",
+  "sql-composer-direct",
   "sql-composer-mysql",
   "sql-composer-postgres",
   "sql-composer-rusqlite",

@@ -1,5 +1,3 @@
-pub mod direct;
-
 #[cfg(feature = "composer-serde")]
 pub use crate::parser::bind_value_named_set;
 

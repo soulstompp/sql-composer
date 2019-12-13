@@ -15,12 +15,20 @@ use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
-use crate::types::SerdeValue;
-
-#[cfg(feature = "composer-serde")]
 use serde_value::Value as SerdeValueEnum;
 
 use mysql::Pool;
+
+#[cfg(feature = "composer-serde")]
+#[derive(Clone, Debug)]
+pub struct SerdeValue(pub SerdeValueEnum);
+
+#[cfg(feature = "composer-serde")]
+impl PartialEq for SerdeValue {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
 
 #[cfg(feature = "composer-serde")]
 impl Into<Value> for SerdeValue {

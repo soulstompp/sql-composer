@@ -1,10 +1,14 @@
 #[macro_use]
 extern crate sql_composer;
 
+#[macro_use]
+extern crate postgres;
+
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
 use postgres::types::ToSql;
+
 #[cfg(feature = "composer-serde")]
 use postgres::types::{IsNull, Type};
 use postgres::Connection;
@@ -14,9 +18,6 @@ use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 use sql_composer::error::Result;
-
-#[cfg(feature = "composer-serde")]
-use crate::types::SerdeValue;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
@@ -69,16 +70,27 @@ impl<'a> ComposerConnection<'a> for Connection {
 }
 
 #[cfg(feature = "composer-serde")]
+#[derive(Clone, Debug)]
+pub struct SerdeValue(pub Value);
+
+#[cfg(feature = "composer-serde")]
+impl PartialEq for SerdeValue {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+#[cfg(feature = "composer-serde")]
 impl ToSql for SerdeValue {
     fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
         match &self.0 {
             Value::String(s) => {
-                <String as ToSql>::to_sql(s, ty, w).expect("unable to convert Value::String via to_sql");
+                <String as ToSql>::to_sql(&s, ty, w).expect("unable to convert Value::String via to_sql");
             }
             Value::I64(i) => {
-                <i64 as ToSql>::to_sql(i, ty, w).expect("unable to convert Value::String via to_sql");            }
+                <i64 as ToSql>::to_sql(&i, ty, w).expect("unable to convert Value::String via to_sql");            }
             Value::F64(f) => {
-                <f64 as ToSql>::to_sql(f, ty, w).expect("unable to convert Value::String via to_sql");
+                <f64 as ToSql>::to_sql(&f, ty, w).expect("unable to convert Value::String via to_sql");
             }
             _ => unimplemented!("unable to convert unexpected Value type"),
         }

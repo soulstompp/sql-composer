@@ -5,16 +5,11 @@ authors = ["Kenny Flegal <soulstompp@gmail.com>"]
 edition = '2018'
 
 [features]
-composer-serde = ["serde", "serde-value"]
+composer-serde = ["serde-value"]
 
 [dependencies]
-#chrono = "0.4"
 dotenv = "0.15.0"
-#error-chain = "0.12.1"
-#nom = "5.0.1"
-#nom_locate = "1.0.0"
-sql-composer={ path="../sql-composer" }
-postgres = "0.15.2"
-serde = { version = "1.0.89", optional = true }
+postgres = { version = "0.15.2" }
 serde-value = { version = "0.6.0", optional = true }
-#time = "0.1.40"
+sql-composer = { path="../sql-composer", version = "0.1.0" }
+#sql-composer-serde = { path = "../sql-composer-serde", optional = true }

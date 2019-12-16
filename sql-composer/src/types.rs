@@ -13,9 +13,6 @@ pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<& 'a str>;
 
-#[cfg(feature = "composer-serde")]
-use serde_value::Value;
-
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -509,16 +506,5 @@ impl SqlBinding {
 impl fmt::Display for SqlBinding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name)
-    }
-}
-
-#[cfg(feature = "composer-serde")]
-#[derive(Clone, Debug)]
-pub struct SerdeValue(pub Value);
-
-#[cfg(feature = "composer-serde")]
-impl PartialEq for SerdeValue {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.0 == rhs.0
     }
 }

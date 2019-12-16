@@ -1,18 +1,24 @@
 use quicli::prelude::*;
 use structopt::StructOpt;
 
-use sql_composer::types::{SerdeValue, SqlComposition};
-use std::collections::{BTreeMap, HashMap};
-
-use sql_composer::composer::ComposerConnection;
+#[macro_use]
+extern crate sql_composer;
 
 use sql_composer::parser::bind_value_named_set;
-use sql_composer::types::{CompleteStr, Span};
+
+//use sql_composer::types::{SqlComposition};
+use std::collections::{BTreeMap, HashMap};
+
+//use sql_composer::composer::ComposerConnection;
+
+use sql_composer::types::Span;
 
 use serde_value::Value;
 
 use std::io;
 use std::path::Path;
+
+//use sql_composer::types::SerdeValue;
 
 #[cfg(feature = "dbd-mysql")]
 use mysql::prelude::ToValue as MySqlToSql;
@@ -21,6 +27,8 @@ use mysql::Pool;
 #[cfg(feature = "dbd-mysql")]
 use mysql::Value as MySqlValue;
 
+#[cfg(feature = "dbd-postgres")]
+use sql_composer_postgres::{Composer, ComposerConnection, SerdeValue as ComposerSerdeValue};
 #[cfg(feature = "dbd-postgres")]
 use postgres::types as pg_types;
 #[cfg(feature = "dbd-postgres")]
@@ -103,10 +111,10 @@ fn query(args: QueryArgs) -> CliResult {
 
     let uri = args.uri;
 
-    let mut parsed_values: BTreeMap<String, Vec<SerdeValue>> = BTreeMap::new();
+    let mut parsed_values: BTreeMap<String, Vec<ComposerSerdeValue>> = BTreeMap::new();
 
     if let Some(b) = args.bind {
-        let (_remaining, bvns) = bind_value_named_set(Span::new(CompleteStr(&b))).unwrap();
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
 
         parsed_values = bvns;
     }
@@ -146,7 +154,7 @@ fn query(args: QueryArgs) -> CliResult {
 fn query_mysql(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
+    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
 ) -> CliResult {
     let pool = Pool::new(uri).unwrap();
 
@@ -175,9 +183,9 @@ fn query_mysql(
                         Some(MySqlValue::Bytes(b)) => {
                             Value::String(String::from_utf8(b.to_vec()).unwrap())
                         }
-                        Some(MySqlValue::Int(i)) => Value::I64(*i),
-                        Some(MySqlValue::UInt(u)) => Value::U64(*u),
-                        Some(MySqlValue::Float(f)) => Value::F64(*f),
+                        Some(MySqlValue::Int(i)) => Value::I64(i),
+                        Some(MySqlValue::UInt(u)) => Value::U64(u),
+                        Some(MySqlValue::Float(f)) => Value::F64(f),
                         Some(MySqlValue::Date(
                             year,
                             month,
@@ -187,13 +195,13 @@ fn query_mysql(
                             seconds,
                             micro_seconds,
                         )) => Value::Seq(vec![
-                            Value::U16(*year),
-                            Value::U8(*month),
-                            Value::U8(*day),
-                            Value::U8(*hour),
-                            Value::U8(*minutes),
-                            Value::U8(*seconds),
-                            Value::U32(*micro_seconds),
+                            Value::U16(year),
+                            Value::U8(month),
+                            Value::U8(day),
+                            Value::U8(hour),
+                            Value::U8(minutes),
+                            Value::U8(seconds),
+                            Value::U32(micro_seconds),
                         ]),
                         Some(MySqlValue::Time(
                             is_negative,
@@ -203,12 +211,12 @@ fn query_mysql(
                             seconds,
                             micro_seconds,
                         )) => Value::Seq(vec![
-                            Value::Bool(*is_negative),
-                            Value::U32(*days),
-                            Value::U8(*hours),
-                            Value::U8(*minutes),
-                            Value::U8(*seconds),
-                            Value::U32(*micro_seconds),
+                            Value::Bool(is_negative),
+                            Value::U32(days),
+                            Value::U8(hours),
+                            Value::U8(minutes),
+                            Value::U8(seconds),
+                            Value::U32(micro_seconds),
                         ]),
                         None => unreachable!("A none value isn't right"),
                     };
@@ -234,7 +242,7 @@ fn query_mysql(
 fn query_postgres(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
+    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
 ) -> CliResult {
     let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
 
@@ -292,7 +300,7 @@ fn query_postgres(
 fn query_rusqlite(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
+    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
 ) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {

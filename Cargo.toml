@@ -6,4 +6,5 @@ members = [
   "sql-composer-mysql",
   "sql-composer-postgres",
   "sql-composer-rusqlite",
+  "sql-composer-serde",
 ]

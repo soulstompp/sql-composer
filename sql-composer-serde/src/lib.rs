@@ -24,94 +24,94 @@ use std::collections::BTreeMap;
 
 use std::str::FromStr;
 
-    pub fn bind_value_text(span: Span) -> IResult<Span, Value> {
-        let (span, _) = one_of("'")(span)?;
-        let (span, found) = take_while1(|c: char| match c {
-            '\'' => false,
-            ']' => false,
-            _ => true,
-        })(span)?;
-        let (span, _) = one_of("'")(span)?;
-        let (span, _) = multispace0(span)?;
-        let (span, _) = check_bind_value_ending(span)?;
+pub fn bind_value_text(span: Span) -> IResult<Span, Value> {
+    let (span, _) = one_of("'")(span)?;
+    let (span, found) = take_while1(|c: char| match c {
+        '\'' => false,
+        ']' => false,
+        _ => true,
+    })(span)?;
+    let (span, _) = one_of("'")(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
 
-        Ok((span, Value::String(found.fragment.to_string())))
+    Ok((span, Value::String(found.fragment.to_string())))
+}
+
+pub fn bind_value_integer(span: Span) -> IResult<Span, Value> {
+    let (span, found) = digit1(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+
+    Ok((
+            span,
+            Value::I64(
+                i64::from_str(&found.fragment)
+                .expect("unable to parse integer found by bind_value_integer"),
+            ),
+    ))
+}
+
+pub fn bind_value_real(span: Span) -> IResult<Span, Value> {
+    let (span, value) = double(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = check_bind_value_ending(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, Value::F64(value)))
+}
+
+pub fn check_bind_value_ending(span: Span) -> IResult<Span, Span> {
+    let (span, _) = alt((ending, peek(tag(")")), peek(tag("]")), peek(tag(","))))(span)?;
+
+    Ok((span, span))
+}
+
+pub fn bind_value(span: Span) -> IResult<Span, Value> {
+    let (span, value) = alt((
+            bind_value_text,
+            bind_value_integer,
+            bind_value_real
+    ))(span)?;
+
+    Ok((span, value))
+}
+
+pub fn bind_value_separated(span: Span) -> IResult<Span, Value> {
+    let (span, value) = bind_value(span)?;
+    let (span, _) = multispace0(span)?;
+    let (span, _) = opt(tag(","))(span)?;
+    let (span, _) = multispace0(span)?;
+
+    Ok((span, value))
+}
+
+pub fn bind_value_set(span: Span) -> IResult<Span, Vec<Value>> {
+    let (start_span, start) = opt(alt((tag("["), tag("("))))(span)?;
+    let mut list_iter = iterator(start_span, bind_value_separated);
+
+    let list = list_iter.fold(vec![], |mut acc: Vec<Value>, item: Value| {
+        acc.push(item);
+        acc
+    });
+
+    let (span, _) = list_iter.finish().unwrap();
+
+    let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
+
+    match (start, end) {
+        (Some(s), Some(e)) => match (s.fragment, e.fragment) {
+            ("[", "]") => (),
+            ("(", ")") => (),
+            (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+        },
+        (Some(s), None) => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+        (None, Some(e)) => return Err(nom::Err::Failure((e, NomErrorKind::Verify))),
+        (None, None) => (),
     }
 
-    pub fn bind_value_integer(span: Span) -> IResult<Span, Value> {
-        let (span, found) = digit1(span)?;
-        let (span, _) = multispace0(span)?;
-        let (span, _) = check_bind_value_ending(span)?;
-
-        Ok((
-                span,
-                Value::I64(
-                        i64::from_str(&found.fragment)
-                        .expect("unable to parse integer found by bind_value_integer"),
-                ),
-        ))
-    }
-
-    pub fn bind_value_real(span: Span) -> IResult<Span, Value> {
-        let (span, value) = double(span)?;
-        let (span, _) = multispace0(span)?;
-        let (span, _) = check_bind_value_ending(span)?;
-        let (span, _) = multispace0(span)?;
-
-        Ok((span, Value::F64(value)))
-    }
-
-    pub fn check_bind_value_ending(span: Span) -> IResult<Span, Span> {
-        let (span, _) = alt((ending, peek(tag(")")), peek(tag("]")), peek(tag(","))))(span)?;
-
-        Ok((span, span))
-    }
-
-    pub fn bind_value(span: Span) -> IResult<Span, Value> {
-        let (span, value) = alt((
-                bind_value_text,
-                bind_value_integer,
-                bind_value_real
-        ))(span)?;
-
-        Ok((span, value))
-    }
-
-    pub fn bind_value_separated(span: Span) -> IResult<Span, Value> {
-        let (span, value) = bind_value(span)?;
-        let (span, _) = multispace0(span)?;
-        let (span, _) = opt(tag(","))(span)?;
-        let (span, _) = multispace0(span)?;
-
-        Ok((span, value))
-    }
-
-    pub fn bind_value_set(span: Span) -> IResult<Span, Vec<Value>> {
-        let (start_span, start) = opt(alt((tag("["), tag("("))))(span)?;
-        let mut list_iter = iterator(start_span, bind_value_separated);
-
-        let list = list_iter.fold(vec![], |mut acc: Vec<Value>, item: Value| {
-            acc.push(item);
-            acc
-        });
-
-        let (span, _) = list_iter.finish().unwrap();
-
-        let (span, end) = opt(alt((tag("]"), tag(")"))))(span)?;
-
-        match (start, end) {
-            (Some(s), Some(e)) => match (s.fragment, e.fragment) {
-                ("[", "]") => (),
-                ("(", ")") => (),
-                (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
-            },
-            (Some(s), None) => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
-            (None, Some(e)) => return Err(nom::Err::Failure((e, NomErrorKind::Verify))),
-            (None, None) => (),
-        }
-
-        Ok((span, list))
-    }
+    Ok((span, list))
+}
 
     //"a:[a_value, aa_value, aaa_value], b:b_value, c: (c_value, cc_value, ccc_value), d: d_value";
 pub fn bind_value_kv_pair(span: Span) -> IResult<Span, (Span, Vec<Value>)> {

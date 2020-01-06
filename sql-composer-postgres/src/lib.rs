@@ -11,7 +11,7 @@ use postgres::types::ToSql;
 
 #[cfg(feature = "composer-serde")]
 use postgres::types::{IsNull, Type};
-use postgres::Connection;
+pub use postgres::{Connection, TlsMode};
 
 use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 

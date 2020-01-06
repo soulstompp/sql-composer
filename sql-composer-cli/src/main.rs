@@ -3,13 +3,13 @@ use structopt::StructOpt;
 
 #[macro_use]
 extern crate sql_composer;
+#[macro_use]
+extern crate sql_composer_serde;
 
-use sql_composer::parser::bind_value_named_set;
+use sql_composer_serde::bind_value_named_set;
 
-//use sql_composer::types::{SqlComposition};
+use sql_composer::types::{SqlComposition};
 use std::collections::{BTreeMap, HashMap};
-
-//use sql_composer::composer::ComposerConnection;
 
 use sql_composer::types::Span;
 
@@ -18,28 +18,30 @@ use serde_value::Value;
 use std::io;
 use std::path::Path;
 
-//use sql_composer::types::SerdeValue;
-
+#[cfg(feature = "dbd-mysql")]
+use sql_composer_mysql::{Composer as MySqlComposer, ComposerConnection as MysqlComposerConnection};
 #[cfg(feature = "dbd-mysql")]
 use mysql::prelude::ToValue as MySqlToSql;
 #[cfg(feature = "dbd-mysql")]
 use mysql::Pool;
 #[cfg(feature = "dbd-mysql")]
-use mysql::Value as MySqlValue;
+use sql_composer_mysql::{Value as MySqlValue, SerdeValue as MySqlSerdeValue, SerdeValueEnum as MySqlSerdeValueEnum};
 
 #[cfg(feature = "dbd-postgres")]
-use sql_composer_postgres::{Composer, ComposerConnection, SerdeValue as ComposerSerdeValue};
+use sql_composer_postgres::{Composer as PgComposer, ComposerConnection as PgComposerConnection};
 #[cfg(feature = "dbd-postgres")]
 use postgres::types as pg_types;
 #[cfg(feature = "dbd-postgres")]
 use postgres::types::ToSql as PgToSql;
 #[cfg(feature = "dbd-postgres")]
-use postgres::{Connection as PgConnection, TlsMode as PgTlsMode};
+use sql_composer_postgres::{Connection as PgConnection, TlsMode as PgTlsMode, SerdeValue as PgSerdeValue};
 
+#[cfg(feature = "dbd-rusqlite")]
+use sql_composer_rusqlite::{Composer as RusqliteComposer, ComposerConnection as RusqliteComposerConnection};
 #[cfg(feature = "dbd-rusqlite")]
 pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
 #[cfg(feature = "dbd-rusqlite")]
-use rusqlite::Connection as RusqliteConnection;
+use sql_composer_rusqlite::{Connection as RusqliteConnection, SerdeValue as RusqliteSerdeValue};
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -111,21 +113,13 @@ fn query(args: QueryArgs) -> CliResult {
 
     let uri = args.uri;
 
-    let mut parsed_values: BTreeMap<String, Vec<ComposerSerdeValue>> = BTreeMap::new();
-
-    if let Some(b) = args.bind {
-        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
-
-        parsed_values = bvns;
-    }
-
     if uri.starts_with("mysql://") {
         if cfg!(feature = "dbd-mysql") == false {
             panic!("cli not built with dbd-mysql feature");
         }
 
         #[cfg(feature = "dbd-mysql")]
-        query_mysql(uri, comp, parsed_values)?;
+        query_mysql(uri, comp, args.bind)?;
     }
     else if uri.starts_with("postgres://") {
         if cfg!(feature = "dbd-postgres") == false {
@@ -133,7 +127,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-postgres")]
-        query_postgres(uri, comp, parsed_values)?;
+        query_postgres(uri, comp, args.bind)?;
     }
     else if uri.starts_with("sqlite://") {
         if cfg!(feature = "dbd-rusqlite") == false {
@@ -141,7 +135,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-rusqlite")]
-        query_rusqlite(uri, comp, parsed_values)?;
+        query_rusqlite(uri, comp, args.bind)?;
     }
     else {
         panic!("unknown uri type: {}", uri);
@@ -154,13 +148,28 @@ fn query(args: QueryArgs) -> CliResult {
 fn query_mysql(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
+    bindings: Option<String>,
 ) -> CliResult {
     let pool = Pool::new(uri).unwrap();
+    
+    let mut parsed_values: BTreeMap<String, Vec<MySqlSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+            let entry = acc.entry(k.to_string()).or_insert(vec![]);
+
+            *entry = v.iter().map(|x| MySqlSerdeValue(x.clone())).collect();
+
+            acc
+        });
+    }
 
     let values: BTreeMap<String, Vec<&dyn MySqlToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
+
             *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
 
             acc
@@ -183,9 +192,9 @@ fn query_mysql(
                         Some(MySqlValue::Bytes(b)) => {
                             Value::String(String::from_utf8(b.to_vec()).unwrap())
                         }
-                        Some(MySqlValue::Int(i)) => Value::I64(i),
-                        Some(MySqlValue::UInt(u)) => Value::U64(u),
-                        Some(MySqlValue::Float(f)) => Value::F64(f),
+                        Some(MySqlValue::Int(i)) => Value::I64(*i),
+                        Some(MySqlValue::UInt(u)) => Value::U64(*u),
+                        Some(MySqlValue::Float(f)) => Value::F64(*f),
                         Some(MySqlValue::Date(
                             year,
                             month,
@@ -195,13 +204,13 @@ fn query_mysql(
                             seconds,
                             micro_seconds,
                         )) => Value::Seq(vec![
-                            Value::U16(year),
-                            Value::U8(month),
-                            Value::U8(day),
-                            Value::U8(hour),
-                            Value::U8(minutes),
-                            Value::U8(seconds),
-                            Value::U32(micro_seconds),
+                            Value::U16(*year),
+                            Value::U8(*month),
+                            Value::U8(*day),
+                            Value::U8(*hour),
+                            Value::U8(*minutes),
+                            Value::U8(*seconds),
+                            Value::U32(*micro_seconds),
                         ]),
                         Some(MySqlValue::Time(
                             is_negative,
@@ -211,12 +220,12 @@ fn query_mysql(
                             seconds,
                             micro_seconds,
                         )) => Value::Seq(vec![
-                            Value::Bool(is_negative),
-                            Value::U32(days),
-                            Value::U8(hours),
-                            Value::U8(minutes),
-                            Value::U8(seconds),
-                            Value::U32(micro_seconds),
+                            Value::Bool(*is_negative),
+                            Value::U32(*days),
+                            Value::U8(*hours),
+                            Value::U8(*minutes),
+                            Value::U8(*seconds),
+                            Value::U32(*micro_seconds),
                         ]),
                         None => unreachable!("A none value isn't right"),
                     };
@@ -242,12 +251,26 @@ fn query_mysql(
 fn query_postgres(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
+    bindings: Option<String>,
 ) -> CliResult {
     let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
 
+    let mut parsed_values: BTreeMap<String, Vec<PgSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+            let entry = acc.entry(k.to_string()).or_insert(vec![]);
+
+            *entry = v.iter().map(|x| PgSerdeValue(x.clone())).collect();
+
+            acc
+        });
+    }
+
     let values: BTreeMap<String, Vec<&dyn PgToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
             *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
 
@@ -300,7 +323,7 @@ fn query_postgres(
 fn query_rusqlite(
     uri: String,
     comp: SqlComposition,
-    params: BTreeMap<String, Vec<ComposerSerdeValue>>,
+    bindings: Option<String>,
 ) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
@@ -317,8 +340,22 @@ fn query_rusqlite(
         }
     };
 
+    let mut parsed_values: BTreeMap<String, Vec<RusqliteSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+            let entry = acc.entry(k.to_string()).or_insert(vec![]);
+
+            *entry = v.iter().map(|x| RusqliteSerdeValue(x.clone())).collect();
+
+            acc
+        });
+    }
+
     let values: BTreeMap<String, Vec<&dyn RusqliteToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
             *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
 

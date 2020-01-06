@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use mysql::{prelude::ToValue, Stmt};
 
 #[cfg(feature = "composer-serde")]
-use mysql::Value;
+pub use mysql::Value;
 
 use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
 
@@ -15,7 +15,7 @@ use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
-use serde_value::Value as SerdeValueEnum;
+pub use serde_value::Value as SerdeValueEnum;
 
 use mysql::Pool;
 
@@ -164,7 +164,6 @@ mod tests {
 
     use dotenv::dotenv;
     use std::env;
-
 
     #[derive(Debug, PartialEq)]
     struct Person {

@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 
 #[cfg(feature = "composer-serde")]
 use rusqlite::types::ToSqlOutput;
-use rusqlite::{Connection, Statement};
+pub use rusqlite::Connection;
+use rusqlite::Statement;
 
 pub use rusqlite::types::{Null, ToSql};
 

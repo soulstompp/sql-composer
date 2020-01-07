@@ -123,7 +123,7 @@ pub struct ComposerConfig {
     pub start: usize,
 }
 
-pub trait Composer: Sized {
+pub trait ComposerTrait: Sized {
     type Value: Copy;
 
     fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>)> {

@@ -12,7 +12,7 @@ use rusqlite::Statement;
 
 pub use rusqlite::types::{Null, ToSql};
 
-use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
 use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
@@ -159,7 +159,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 mod tests {
     //use sql_composer::composer::{bind_values, mock_db_object_values, mock_path_values, mock_values};
 
-    use super::{Composer, ComposerTrait, ComposerConnection};
+    use super::{Composer, ComposerConnection, ComposerTrait};
 
     use sql_composer::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
 

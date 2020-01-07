@@ -7,7 +7,6 @@ extern crate sql_composer;
 #[macro_use]
 extern crate postgres;
 
-
 use std::collections::{BTreeMap, HashMap};
 
 use postgres::stmt::Statement;
@@ -17,7 +16,7 @@ use postgres::types::ToSql;
 use postgres::types::{IsNull, Type};
 pub use postgres::{Connection, TlsMode};
 
-use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
 use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 

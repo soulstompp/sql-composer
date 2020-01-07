@@ -10,7 +10,7 @@ use mysql::{prelude::ToValue, Stmt};
 #[cfg(feature = "composer-serde")]
 pub use mysql::Value;
 
-use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
 use sql_composer::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
@@ -158,9 +158,9 @@ mod tests {
 
     use super::{Composer, ComposerConnection, ComposerTrait};
 
-    use sql_composer::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
+    use sql_composer::types::{SqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use std::collections::HashMap;
 

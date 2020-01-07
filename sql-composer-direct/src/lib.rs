@@ -5,7 +5,7 @@ extern crate sql_composer;
 
 use std::collections::{BTreeMap, HashMap};
 
-use sql_composer::composer::{Composer as ComposerTrait, ComposerConfig};
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
 use sql_composer::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
 
@@ -106,7 +106,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComposerTrait, Composer, SqlComposition, ToValue};
+    use super::{Composer, ComposerTrait, SqlComposition, ToValue};
 
     use chrono::prelude::*;
 

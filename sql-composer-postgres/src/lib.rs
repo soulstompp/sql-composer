@@ -3,8 +3,10 @@
 #[macro_use]
 extern crate sql_composer;
 
+#[cfg(feature = "composer-serde")]
 #[macro_use]
 extern crate postgres;
+
 
 use std::collections::{BTreeMap, HashMap};
 

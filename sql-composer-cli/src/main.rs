@@ -166,7 +166,7 @@ fn query(args: QueryArgs) -> CliResult {
 
 #[cfg(feature = "dbd-mysql")]
 fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
-    let pool = Pool::new(uri).unwrap();
+    let pool = Pool::new(uri)?;
 
     let mut parsed_values: BTreeMap<String, Vec<MySqlSerdeValue>> = BTreeMap::new();
 
@@ -195,7 +195,7 @@ fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> C
 
     let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
-    let driver_rows = prep_stmt.execute(bindings.as_slice()).unwrap();
+    let driver_rows = prep_stmt.execute(bindings.as_slice())?;
 
     let vv = driver_rows
         .into_iter()
@@ -267,7 +267,7 @@ fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> C
 
 #[cfg(feature = "dbd-postgres")]
 fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
-    let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
+    let conn = PgConnection::connect(uri, PgTlsMode::None)?;
 
     let mut parsed_values: BTreeMap<String, Vec<PgSerdeValue>> = BTreeMap::new();
 
@@ -295,7 +295,7 @@ fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -
 
     let (prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
-    let driver_rows = &prep_stmt.query(&bindings).unwrap();
+    let driver_rows = &prep_stmt.query(&bindings)?;
 
     let vv = driver_rows
         .iter()
@@ -339,12 +339,12 @@ fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -
 fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
-        "sqlite://:memory:" => RusqliteConnection::open_in_memory().unwrap(),
+        "sqlite://:memory:" => RusqliteConnection::open_in_memory()?,
         u @ _ => {
             if u.starts_with("sqlite://") {
                 let (_, path_str) = u.split_at(9);
 
-                RusqliteConnection::open(Path::new(path_str)).unwrap()
+                RusqliteConnection::open(Path::new(path_str))?
             }
             else {
                 unreachable!("query_rusqlite called with the wrong type of uri");
@@ -384,11 +384,12 @@ fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -
         .map(String::from)
         .collect();
 
-    let driver_rows = prep_stmt
-        .query_map(&bindings, |driver_row| {
-            let map = column_names.iter().enumerate().fold(
-                BTreeMap::new(),
-                |mut acc, (i, column_name)| {
+    let driver_rows = prep_stmt.query_map(&bindings, |driver_row| {
+        let map =
+            column_names
+                .iter()
+                .enumerate()
+                .fold(BTreeMap::new(), |mut acc, (i, column_name)| {
                     let _ = acc.entry(Value::String(column_name.to_string())).or_insert(
                         match driver_row.get_raw(i) {
                             RusqliteValueRef::Null => Value::Unit,
@@ -404,17 +405,15 @@ fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -
                     );
 
                     acc
-                },
-            );
+                });
 
-            Ok(map)
-        })
-        .unwrap();
+        Ok(map)
+    })?;
 
     let mut seq = vec![];
 
     for driver_row in driver_rows {
-        seq.push(Value::Map(driver_row.unwrap()));
+        seq.push(Value::Map(driver_row?));
     }
 
     output(Value::Seq(seq));

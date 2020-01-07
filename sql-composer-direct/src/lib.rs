@@ -1,3 +1,5 @@
+// this is used during tests, must be at root
+#[allow(unused_imports)]
 #[macro_use]
 extern crate sql_composer;
 

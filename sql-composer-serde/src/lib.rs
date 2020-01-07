@@ -154,11 +154,11 @@ pub fn bracket_start_fn<'a>(span: Span) -> IResult<Span, (Span, impl FnOnce(Span
 
 //"a_value, aa_value, aaa_value
 pub fn bind_value_named_item(span: Span) -> IResult<Span, Vec<(Span, Vec<Value>)>> {
-    let (span, (start, bracket_end_fn)) = bracket_start_fn(span)?;
+    let (span, (_start, bracket_end_fn)) = bracket_start_fn(span)?;
     let (span, kv) = separated_list(comma_padded, bind_value_kv_pair)(span)?;
-    let (span, end) = bracket_end_fn(span)?;
+    let (span, _end) = bracket_end_fn(span)?;
 
-    println!("bind_value_named_item matched set: '{}', '{}'", start.fragment, end.fragment);
+    // println!("bind_value_named_item matched set: '{}', '{}'", start.fragment, end.fragment);
     Ok((span, kv))
 }
 
@@ -300,7 +300,7 @@ mod tests {
             );
         }
     }
-    
+
     #[test]
     fn test_check_bind_value_ending() {
         for &input in [")", "]", ",", ""].iter() {

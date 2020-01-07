@@ -1,50 +1,63 @@
-use quicli::prelude::*;
+use quicli::prelude::{CliResult, Verbosity};
 use structopt::StructOpt;
 
-#[macro_use]
-extern crate sql_composer;
-#[macro_use]
-extern crate sql_composer_serde;
-
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use sql_composer_serde::bind_value_named_set;
 
-use sql_composer::types::SqlComposition;
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use sql_composer::types::{Span, SqlComposition};
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use std::collections::{BTreeMap, HashMap};
 
-use sql_composer::types::Span;
-
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use serde_value::Value;
 
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use std::io;
-use std::path::Path;
 
 #[cfg(feature = "dbd-mysql")]
-use mysql::prelude::ToValue as MySqlToSql;
+use mysql::{prelude::ToValue as MySqlToSql, Pool};
 #[cfg(feature = "dbd-mysql")]
-use mysql::Pool;
-#[cfg(feature = "dbd-mysql")]
-use sql_composer_mysql::{Composer as MySqlComposer, ComposerConnection as MysqlComposerConnection};
-#[cfg(feature = "dbd-mysql")]
-use sql_composer_mysql::{SerdeValue as MySqlSerdeValue, SerdeValueEnum as MySqlSerdeValueEnum,
-                         Value as MySqlValue};
+use sql_composer_mysql::{ComposerConnection as MysqlComposerConnection,
+                         SerdeValue as MySqlSerdeValue, Value as MySqlValue};
 
 #[cfg(feature = "dbd-postgres")]
 use postgres::types as pg_types;
 #[cfg(feature = "dbd-postgres")]
 use postgres::types::ToSql as PgToSql;
 #[cfg(feature = "dbd-postgres")]
-use sql_composer_postgres::{Composer as PgComposer, ComposerConnection as PgComposerConnection};
-#[cfg(feature = "dbd-postgres")]
-use sql_composer_postgres::{Connection as PgConnection, SerdeValue as PgSerdeValue,
+use sql_composer_postgres::{ComposerConnection as PgComposerConnection,
+                            Connection as PgConnection, SerdeValue as PgSerdeValue,
                             TlsMode as PgTlsMode};
 
 #[cfg(feature = "dbd-rusqlite")]
 pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
 #[cfg(feature = "dbd-rusqlite")]
-use sql_composer_rusqlite::{Composer as RusqliteComposer,
-                            ComposerConnection as RusqliteComposerConnection};
+use sql_composer_rusqlite::{ComposerConnection as RusqliteComposerConnection,
+                            Connection as RusqliteConnection, SerdeValue as RusqliteSerdeValue};
 #[cfg(feature = "dbd-rusqlite")]
-use sql_composer_rusqlite::{Connection as RusqliteConnection, SerdeValue as RusqliteSerdeValue};
+use std::path::Path;
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -111,8 +124,12 @@ fn setup(verbosity: Verbosity) -> CliResult {
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
 
-    let parsed_comp = SqlComposition::from_path_name(&args.path).unwrap();
-    let comp = parsed_comp.item;
+    #[cfg(any(
+        feature = "dbd-mysql",
+        feature = "dbd-postgres",
+        feature = "dbd-rusqlite"
+    ))]
+    let comp = SqlComposition::from_path_name(&args.path).unwrap().item;
 
     let uri = args.uri;
 
@@ -405,6 +422,11 @@ fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -
     Ok(())
 }
 
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 fn output(v: Value) {
     let mut serializer = serde_json::Serializer::new(io::stdout());
     serde_transcode::transcode(v, &mut serializer).unwrap();

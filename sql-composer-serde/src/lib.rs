@@ -1,21 +1,14 @@
-#[macro_use]
-extern crate sql_composer;
-
-use sql_composer::error::Result;
-
 use sql_composer::parser::{comma_padded, ending, take_while_name_char};
 use sql_composer::types::Span;
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take, take_until, take_while1},
+    bytes::complete::{tag, take_while1},
     character::complete::{digit1, one_of, multispace0},
-    combinator::{iterator, not, opt, peek},
+    combinator::{iterator, opt, peek},
     error::ErrorKind as NomErrorKind,
-    multi::{many1, separated_list},
+    multi::{separated_list},
     number::complete::double,
-    sequence::{delimited, terminated},
-    InputLength,
     IResult};
 
 use serde_value::Value;

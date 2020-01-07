@@ -225,6 +225,7 @@ impl SqlComposition {
     }
 
     pub fn from_path(path: &Path) -> Result<ParsedItem<Self>> {
+        // TODO: include path in error.
         let mut f = File::open(path)?;
         let mut s = String::new();
 

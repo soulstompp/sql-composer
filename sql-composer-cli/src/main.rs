@@ -8,7 +8,7 @@ extern crate sql_composer_serde;
 
 use sql_composer_serde::bind_value_named_set;
 
-use sql_composer::types::{SqlComposition};
+use sql_composer::types::SqlComposition;
 use std::collections::{BTreeMap, HashMap};
 
 use sql_composer::types::Span;
@@ -19,27 +19,30 @@ use std::io;
 use std::path::Path;
 
 #[cfg(feature = "dbd-mysql")]
-use sql_composer_mysql::{Composer as MySqlComposer, ComposerConnection as MysqlComposerConnection};
-#[cfg(feature = "dbd-mysql")]
 use mysql::prelude::ToValue as MySqlToSql;
 #[cfg(feature = "dbd-mysql")]
 use mysql::Pool;
 #[cfg(feature = "dbd-mysql")]
-use sql_composer_mysql::{Value as MySqlValue, SerdeValue as MySqlSerdeValue, SerdeValueEnum as MySqlSerdeValueEnum};
+use sql_composer_mysql::{Composer as MySqlComposer, ComposerConnection as MysqlComposerConnection};
+#[cfg(feature = "dbd-mysql")]
+use sql_composer_mysql::{SerdeValue as MySqlSerdeValue, SerdeValueEnum as MySqlSerdeValueEnum,
+                         Value as MySqlValue};
 
-#[cfg(feature = "dbd-postgres")]
-use sql_composer_postgres::{Composer as PgComposer, ComposerConnection as PgComposerConnection};
 #[cfg(feature = "dbd-postgres")]
 use postgres::types as pg_types;
 #[cfg(feature = "dbd-postgres")]
 use postgres::types::ToSql as PgToSql;
 #[cfg(feature = "dbd-postgres")]
-use sql_composer_postgres::{Connection as PgConnection, TlsMode as PgTlsMode, SerdeValue as PgSerdeValue};
+use sql_composer_postgres::{Composer as PgComposer, ComposerConnection as PgComposerConnection};
+#[cfg(feature = "dbd-postgres")]
+use sql_composer_postgres::{Connection as PgConnection, SerdeValue as PgSerdeValue,
+                            TlsMode as PgTlsMode};
 
 #[cfg(feature = "dbd-rusqlite")]
-use sql_composer_rusqlite::{Composer as RusqliteComposer, ComposerConnection as RusqliteComposerConnection};
-#[cfg(feature = "dbd-rusqlite")]
 pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
+#[cfg(feature = "dbd-rusqlite")]
+use sql_composer_rusqlite::{Composer as RusqliteComposer,
+                            ComposerConnection as RusqliteComposerConnection};
 #[cfg(feature = "dbd-rusqlite")]
 use sql_composer_rusqlite::{Connection as RusqliteConnection, SerdeValue as RusqliteSerdeValue};
 
@@ -145,13 +148,9 @@ fn query(args: QueryArgs) -> CliResult {
 }
 
 #[cfg(feature = "dbd-mysql")]
-fn query_mysql(
-    uri: String,
-    comp: SqlComposition,
-    bindings: Option<String>,
-) -> CliResult {
+fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
     let pool = Pool::new(uri).unwrap();
-    
+
     let mut parsed_values: BTreeMap<String, Vec<MySqlSerdeValue>> = BTreeMap::new();
 
     if let Some(b) = bindings {
@@ -167,13 +166,15 @@ fn query_mysql(
     }
 
     let values: BTreeMap<String, Vec<&dyn MySqlToSql>> =
-        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
-            let entry = acc.entry(k.to_string()).or_insert(vec![]);
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
 
-            *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
+                *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
 
-            acc
-        });
+                acc
+            });
 
     let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
@@ -248,11 +249,7 @@ fn query_mysql(
 }
 
 #[cfg(feature = "dbd-postgres")]
-fn query_postgres(
-    uri: String,
-    comp: SqlComposition,
-    bindings: Option<String>,
-) -> CliResult {
+fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
     let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
 
     let mut parsed_values: BTreeMap<String, Vec<PgSerdeValue>> = BTreeMap::new();
@@ -270,12 +267,14 @@ fn query_postgres(
     }
 
     let values: BTreeMap<String, Vec<&dyn PgToSql>> =
-        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
-            let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+                *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
 
-            acc
-        });
+                acc
+            });
 
     let (prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
@@ -320,11 +319,7 @@ fn query_postgres(
 }
 
 #[cfg(feature = "dbd-rusqlite")]
-fn query_rusqlite(
-    uri: String,
-    comp: SqlComposition,
-    bindings: Option<String>,
-) -> CliResult {
+fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
         "sqlite://:memory:" => RusqliteConnection::open_in_memory().unwrap(),
@@ -355,12 +350,14 @@ fn query_rusqlite(
     }
 
     let values: BTreeMap<String, Vec<&dyn RusqliteToSql>> =
-        parsed_values.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
-            let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+                *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
 
-            acc
-        });
+                acc
+            });
 
     let (mut prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 

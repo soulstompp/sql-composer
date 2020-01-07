@@ -704,7 +704,11 @@ mod tests {
         "col_3_values" => [&"bb_value", &"b_value"]
         );
 
-        composer.mock_values = mock_path_values!(&dyn ToSql: "../sql-composer/src/tests/values/include.tql" => [{
+        // TODO: relative path handling in includes needs work
+        //       and specification.  mocking doubly so
+        //       This path needs to match the include path referenced
+        //       in the tql file rather than the path to the tql file.
+        composer.mock_values = mock_path_values!(&dyn ToSql: "src/tests/values/include.tql" => [{
             "col_1" => &"ee_value",
             "col_2" => &"dd_value",
             "col_3" => &"bb_value",

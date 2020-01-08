@@ -129,7 +129,7 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let comp = SqlComposition::from_path_name(&args.path).unwrap().item;
+    let comp = SqlComposition::from_path(&args.path).unwrap().item;
 
     let uri = args.uri;
 

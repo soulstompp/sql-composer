@@ -277,7 +277,7 @@ mod tests {
     fn test_mock_bind_simple_template() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+        let stmt = SqlComposition::from_path("src/tests/values/simple.tql").unwrap();
 
         let mut composer = Composer::new();
 
@@ -317,7 +317,7 @@ mod tests {
     fn test_bind_include_template() {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
+        let stmt = SqlComposition::from_path("src/tests/values/include.tql").unwrap();
 
         let mut composer = Composer::new();
 
@@ -371,7 +371,7 @@ mod tests {
         let pool = setup_db();
 
         let stmt =
-            SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
+            SqlComposition::from_path("src/tests/values/double-include.tql").unwrap();
 
         let mut composer = Composer::new();
 
@@ -746,7 +746,7 @@ mod tests {
     fn it_composes_from_connection() {
         let conn = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+        let stmt = SqlComposition::from_path("src/tests/values/simple.tql").unwrap();
 
         let bind_values = bind_values!(&dyn ToValue:
         "a" => [&"a_value"],

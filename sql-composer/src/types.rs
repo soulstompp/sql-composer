@@ -13,8 +13,7 @@ pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<& 'a str>;
 
-use std::fs::File;
-use std::io::prelude::*;
+use std::fs;
 
 pub struct Null();
 
@@ -123,17 +122,21 @@ impl SqlCompositionAlias {
         Ok(SqlCompositionAlias::Path(PathBuf::from(&s)))
     }
 
-    pub fn from_path(p: &Path) -> Self {
-        SqlCompositionAlias::Path(p.into())
+    // TODO: Use Path/Pathbuf Into and From traits
+
+    pub fn from_path<P>(path: P) -> Self
+    where
+        P: Into<PathBuf> + std::fmt::Debug,
+    {
+        // TODO: include path in error.
+        SqlCompositionAlias::Path(path.into())
     }
 
     pub fn path(&self) -> Option<PathBuf> {
-        //! Returns the path as a PathBuf
-        if let SqlCompositionAlias::Path(p) = self {
-            Some(p.to_path_buf())
-        }
-        else {
-            None
+        match self {
+            // PathBuf doesn't impl Copy, so use to_path_buf for a new one
+            SqlCompositionAlias::Path(p) => Some(p.to_path_buf()),
+            _ => None,
         }
     }
 }
@@ -224,20 +227,13 @@ impl SqlComposition {
         Ok(stmt)
     }
 
-    pub fn from_path(path: &Path) -> Result<ParsedItem<Self>> {
-        // TODO: include path in error.
-        let mut f = File::open(path)?;
-        let mut s = String::new();
+    pub fn from_path<P>(path: P) -> Result<ParsedItem<Self>>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let s = fs::read_to_string(path.as_ref())?;
 
-        let _res = f.read_to_string(&mut s);
-
-        Self::parse(s.as_str(), Some(SqlCompositionAlias::from_path(path.into())))
-    }
-
-    pub fn from_path_name(s: &str) -> Result<ParsedItem<SqlComposition>> {
-        let p = Path::new(s);
-
-        Self::from_path(p)
+        Self::parse(&s, Some(SqlCompositionAlias::from_path(path.as_ref())))
     }
 
     pub fn column_list(&self) -> Result<Option<String>> {

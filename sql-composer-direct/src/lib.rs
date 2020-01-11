@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binding() -> EmptyResult {
+    fn test_db_binding() -> EmptyResult {
         let now = Local::now();
 
         let person = Person {
@@ -133,9 +133,9 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "name" => [&person.name],
-        "time_created" => [&person.time_created],
-        "data" => [&person.data]
+                                       "name"         => [&person.name],
+                                       "time_created" => [&person.time_created],
+                                       "data"         => [&person.data]
         );
 
         let (bound_sql, _bindings) = composer.compose(&insert_stmt.item)?;

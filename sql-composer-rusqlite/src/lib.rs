@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, HashMap};
 
 #[cfg(feature = "composer-serde")]
 use rusqlite::types::ToSqlOutput;
-pub use rusqlite::Connection;
+pub use rusqlite::types::{Null, ToSql};
 use rusqlite::Statement;
 
-pub use rusqlite::types::{Null, ToSql};
+pub use rusqlite::Connection;
 
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
@@ -29,6 +29,18 @@ pub struct SerdeValue(pub Value);
 impl PartialEq for SerdeValue {
     fn eq(&self, rhs: &Self) -> bool {
         self.0 == rhs.0
+    }
+}
+
+#[cfg(feature = "composer-serde")]
+impl ToSql for SerdeValue {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        match &self.0 {
+            Value::String(s) => Ok(ToSqlOutput::from(s.as_str())),
+            Value::I64(i) => Ok(ToSqlOutput::from(*i)),
+            Value::F64(f) => Ok(ToSqlOutput::from(*f)),
+            _ => unimplemented!("unsupported type"),
+        }
     }
 }
 
@@ -63,7 +75,6 @@ impl<'a> ComposerConnection<'a> for Connection {
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>)> {
         let c = Composer {
-            #[allow(dead_code)]
             config: Composer::config(),
             values,
             root_mock_values,
@@ -78,18 +89,7 @@ impl<'a> ComposerConnection<'a> for Connection {
     }
 }
 
-#[cfg(feature = "composer-serde")]
-impl ToSql for SerdeValue {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        match &self.0 {
-            Value::String(s) => Ok(ToSqlOutput::from(s.as_str())),
-            Value::I64(i) => Ok(ToSqlOutput::from(*i)),
-            Value::F64(f) => Ok(ToSqlOutput::from(*f)),
-            _ => unimplemented!("unsupported type"),
-        }
-    }
-}
-
+#[derive(Default)]
 pub struct Composer<'a> {
     pub config:           ComposerConfig,
     pub values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
@@ -102,8 +102,7 @@ impl<'a> Composer<'a> {
         Self {
             config:           Self::config(),
             values:           BTreeMap::new(),
-            root_mock_values: vec![],
-            mock_values:      HashMap::new(),
+            ..Default::default()
         }
     }
 }
@@ -174,6 +173,7 @@ mod tests {
     // Return empty result to allow use of ? in tests
     type EmptyResult = Result<()>;
 
+    // Default not implemented for TimeSpec
     #[derive(Debug, PartialEq)]
     struct Person {
         id:           i32,
@@ -185,6 +185,9 @@ mod tests {
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().expect("Failed to open in memory sqlite");
 
+        // What's the type needed for second arg?
+        // conn.execute("DROP TABLE IF EXISTS person;", &[]).unwrap();
+
         conn.execute(
             "CREATE TABLE person (
                id              INTEGER PRIMARY KEY,
@@ -193,7 +196,8 @@ mod tests {
                data            BLOB
              )",
             NO_PARAMS,
-        ).expect("Expected to create person table");
+        )
+        .expect("Expected to create person table");
 
         conn
     }
@@ -209,14 +213,17 @@ mod tests {
             data:         None,
         };
 
-        let insert_stmt = ParsedItemSql::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None)?;
+        let insert_stmt = ParsedItemSql::parse(
+            "INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));",
+            None,
+        )?;
 
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "name" => [&person.name],
-        "time_created" => [&person.time_created],
-        "data" => [&person.data]
+                                       "name"         => [&person.name],
+                                       "time_created" => [&person.time_created],
+                                       "data"         => [&person.data]
         );
 
         let (bound_sql, bindings) = composer.compose(&insert_stmt.item)?;
@@ -238,15 +245,14 @@ mod tests {
 
         let mut stmt = conn.prepare(&bound_sql)?;
 
-        let person_iter = stmt
-            .query_map(&bindings, |row| {
-                Ok(Person {
-                    id:           row.get(0).unwrap(),
-                    name:         row.get(1).unwrap(),
-                    time_created: row.get(2).unwrap(),
-                    data:         row.get(3).unwrap(),
-                })
-            })?;
+        let person_iter = stmt.query_map(&bindings, |row| {
+            Ok(Person {
+                id:           row.get(0).unwrap(),
+                name:         row.get(1).unwrap(),
+                time_created: row.get(2).unwrap(),
+                data:         row.get(3).unwrap(),
+            })
+        })?;
 
         let mut people: Vec<Person> = vec![];
 
@@ -288,10 +294,10 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
         );
 
         let mock_values = mock_values!(&dyn ToSql: {
@@ -311,18 +317,17 @@ mod tests {
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
-            })?;
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
+            })
+        })?;
 
         for row in rows {
             values.push(row?);
@@ -330,19 +335,17 @@ mod tests {
 
         let mut mock_prep_stmt = conn.prepare(&mock_bound_sql)?;
 
-        let rows = mock_prep_stmt
-            .query_map(&mock_bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = mock_prep_stmt.query_map(&mock_bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             mock_values.push(row?);
@@ -362,11 +365,11 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"]
         );
 
         let mock_values = mock_values!(&dyn ToSql: {
@@ -391,18 +394,17 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
-            }) ?;
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
+            })
+        })?;
 
         for row in rows {
             values.push(row?);
@@ -412,18 +414,17 @@ mod tests {
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rows = mock_prep_stmt
-            .query_map(&mock_bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
-            }) ?;
+        let rows = mock_prep_stmt.query_map(&mock_bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
+            })
+        })?;
 
         for row in rows {
             mock_values.push(row?);
@@ -444,12 +445,12 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"]
         );
 
         let mock_values = mock_values!(&dyn ToSql: {
@@ -469,7 +470,7 @@ mod tests {
             "col_2" => &"b_value",
             "col_3" => &"c_value",
             "col_4" => &"d_value"
-            });
+        });
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
         let (mut mock_bound_sql, _mock_bindings) = composer.mock_compose(&mock_values, 0)?;
@@ -480,46 +481,44 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
-            })?;
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
+            })
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
+        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
+
         let mut mock_prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        let rows = mock_prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = mock_prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             mock_values.push(row?);
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
         Ok(())
     }
@@ -540,41 +539,40 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+
+        assert_eq!(bound_sql, expected_sql, "preparable statements match");
 
         let mut prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
-        assert_eq!(bound_sql, expected_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -590,14 +588,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
@@ -608,9 +606,7 @@ mod tests {
 
         let mut values: Vec<Vec<Option<i64>>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| Ok(vec![row.get(0)?]))
-            ?;
+        let rows = prep_stmt.query_map(&bindings, |row| Ok(vec![row.get(0)?]))?;
 
         for row in rows {
             values.push(row?);
@@ -633,14 +629,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
@@ -651,24 +647,23 @@ mod tests {
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
+        // TODO: why are values 0, 1 and 2 swapped vs mysql?
         let expected_values = vec![
             vec!["a_value", "b_value", "c_value", "d_value"],
             vec!["d_value", "f_value", "b_value", "a_value"],
@@ -697,14 +692,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"ee_value", &"d_value"],
-        "col_3_values" => [&"bb_value", &"b_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"ee_value", &"d_value"],
+                                       "col_3_values" => [&"bb_value", &"b_value"]
         );
 
         // TODO: relative path handling in includes needs work
@@ -719,30 +714,28 @@ mod tests {
         }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -764,14 +757,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
         composer.mock_values = mock_path_values!(&dyn ToSql: "../sql-composer/src/tests/values/double-include.tql" => [{
@@ -779,14 +772,14 @@ mod tests {
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
-            },
-            {
+        },
+        {
             "col_1" => &"dd_value",
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
-            },
-            {
+        },
+        {
             "col_1" => &"aa_value",
             "col_2" => &"bb_value",
             "col_3" => &"cc_value",
@@ -794,30 +787,28 @@ mod tests {
         }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -839,14 +830,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
         composer.mock_values = mock_db_object_values!(&dyn ToSql: "main" => [{
@@ -855,13 +846,13 @@ mod tests {
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
         },
-            {
+        {
             "col_1" => &"dd_value",
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
         },
-            {
+        {
             "col_1" => &"aa_value",
             "col_2" => &"bb_value",
             "col_3" => &"cc_value",
@@ -869,30 +860,28 @@ mod tests {
         }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let mut prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -904,31 +893,28 @@ mod tests {
         let stmt: ParsedItemSql = "src/tests/values/simple.tql".try_into()?;
 
         let bind_values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
         );
 
-        let (mut prep_stmt, bindings) = conn
-            .compose(&stmt.item, bind_values, vec![], HashMap::new())
-            ?;
+        let (mut prep_stmt, bindings) =
+            conn.compose(&stmt.item, bind_values, vec![], HashMap::new())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        let rows = prep_stmt
-            .query_map(&bindings, |row| {
-                (0..4).fold(Ok(Vec::new()), |acc, i| {
-                    if let Ok(mut acc) = acc {
-                        acc.push(row.get(i)?);
-                        Ok(acc)
-                    }
-                    else {
-                        acc
-                    }
-                })
+        let rows = prep_stmt.query_map(&bindings, |row| {
+            (0..4).fold(Ok(Vec::new()), |acc, i| {
+                if let Ok(mut acc) = acc {
+                    acc.push(row.get(i)?);
+                    Ok(acc)
+                }
+                else {
+                    acc
+                }
             })
-            ?;
+        })?;
 
         for row in rows {
             values.push(row?);

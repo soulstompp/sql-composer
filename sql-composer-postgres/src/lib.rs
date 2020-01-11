@@ -14,6 +14,7 @@ use postgres::types::ToSql;
 
 #[cfg(feature = "composer-serde")]
 use postgres::types::{IsNull, Type};
+
 pub use postgres::{Connection, TlsMode};
 
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
@@ -24,6 +25,42 @@ use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value;
+
+#[cfg(feature = "composer-serde")]
+#[derive(Clone, Debug)]
+pub struct SerdeValue(pub Value);
+
+#[cfg(feature = "composer-serde")]
+impl PartialEq for SerdeValue {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+#[cfg(feature = "composer-serde")]
+impl ToSql for SerdeValue {
+    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
+        match &self.0 {
+            Value::String(s) => {
+                <String as ToSql>::to_sql(&s, ty, w).expect("unable to convert Value::String via to_sql");
+            }
+            Value::I64(i) => {
+                <i64 as ToSql>::to_sql(&i, ty, w).expect("unable to convert Value::String via to_sql");            }
+            Value::F64(f) => {
+                <f64 as ToSql>::to_sql(&f, ty, w).expect("unable to convert Value::String via to_sql");
+            }
+            _ => unimplemented!("unable to convert unexpected Value type"),
+        }
+
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        <String as ToSql>::accepts(ty) || <i64 as ToSql>::accepts(ty) || <f64 as ToSql>::accepts(ty)
+    }
+
+    to_sql_checked!();
+}
 
 #[cfg(feature = "composer-serde")]
 use std::error::Error;
@@ -56,7 +93,6 @@ impl<'a> ComposerConnection<'a> for Connection {
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
     ) -> Result<(Self::Statement, Vec<Self::Value>)> {
         let c = Composer {
-            #[allow(dead_code)]
             config: Composer::config(),
             values,
             root_mock_values,
@@ -71,52 +107,10 @@ impl<'a> ComposerConnection<'a> for Connection {
     }
 }
 
-#[cfg(feature = "composer-serde")]
-#[derive(Clone, Debug)]
-pub struct SerdeValue(pub Value);
-
-#[cfg(feature = "composer-serde")]
-impl PartialEq for SerdeValue {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.0 == rhs.0
-    }
-}
-
-#[cfg(feature = "composer-serde")]
-impl ToSql for SerdeValue {
-    fn to_sql(&self, ty: &Type, w: &mut Vec<u8>) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>> {
-        match &self.0 {
-            Value::String(s) => {
-                <String as ToSql>::to_sql(&s, ty, w).expect("unable to convert Value::String via to_sql");
-            }
-            Value::I64(i) => {
-                <i64 as ToSql>::to_sql(&i, ty, w).expect("unable to convert Value::String via to_sql");            }
-            Value::F64(f) => {
-                <f64 as ToSql>::to_sql(&f, ty, w).expect("unable to convert Value::String via to_sql");
-            }
-            _ => unimplemented!("unable to convert unexpected Value type"),
-        }
-
-        Ok(IsNull::No)
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        if <String as ToSql>::accepts(ty)
-            || <i64 as ToSql>::accepts(ty)
-            || <f64 as ToSql>::accepts(ty)
-        {
-            true
-        }
-        else {
-            false
-        }
-    }
-
-    to_sql_checked!();
-}
-
 #[derive(Default)]
 pub struct Composer<'a> {
+    // config field is unused in this crate but is included
+    // for compat with composers which do use config (e.g. rusqlite)
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToSql>>,
@@ -129,8 +123,7 @@ impl<'a> Composer<'a> {
         Self {
             config:           Self::config(),
             values:           BTreeMap::new(),
-            root_mock_values: Vec::new(),
-            mock_values:      HashMap::new(),
+            ..Default::default()
         }
     }
 }
@@ -197,9 +190,12 @@ mod tests {
     use dotenv::dotenv;
     use std::env;
 
+    use std::convert::TryInto;
+
+    // Return empty result to allow use of ? in tests
     type EmptyResult = Result<()>;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, Default, PartialEq)]
     struct Person {
         id:   i32,
         name: String,
@@ -217,9 +213,10 @@ mod tests {
     }
 
     #[test]
-    fn test_binding() -> EmptyResult {
+    fn test_db_binding() -> EmptyResult {
         let conn = setup_db();
 
+        // TODO: why doesn't it work to do this in setup_db()?
         conn.execute("DROP TABLE IF EXISTS person;", &[])?;
 
         conn.execute(
@@ -234,7 +231,7 @@ mod tests {
         let person = Person {
             id:   0,
             name: "Steven".to_string(),
-            data: None,
+            ..Default::default()
         };
 
         let insert_stmt = ParsedItemSql::parse(
@@ -301,10 +298,10 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
         );
 
         let mock_values = mock_values!(&dyn ToSql: {
@@ -348,12 +345,11 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"]
-        );
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"]);
 
         let mock_values = mock_values!(&dyn ToSql: {
             "col_1" => &"e_value",
@@ -403,12 +399,12 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"]
         );
 
         let mock_values = mock_values!(&dyn ToSql: {
@@ -443,6 +439,8 @@ mod tests {
             values.push(get_row_values(row));
         }
 
+        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
+
         let mock_prep_stmt = conn.prepare(&bound_sql)?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
@@ -451,7 +449,6 @@ mod tests {
             mock_values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
         Ok(())
     }
@@ -462,7 +459,7 @@ mod tests {
 
         let stmt = ParsedItemSql::parse("SELECT col_1, col_2, col_3, col_4 FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
 
-        let expected_sql = "SELECT col_1, col_2, col_3, col_4 FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 ) AS main WHERE col_1 in ( $13, $14 ) AND col_3 IN ( $15, $16 );";
+        let expected_bound_sql = "SELECT col_1, col_2, col_3, col_4 FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 ) AS main WHERE col_1 in ( $13, $14 ) AND col_3 IN ( $15, $16 );";
 
         let expected_values = vec![
             vec!["d_value", "f_value", "b_value", "a_value"],
@@ -484,7 +481,7 @@ mod tests {
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
 
-        assert_eq!(bound_sql, expected_sql, "preparable statements match");
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let prep_stmt = conn.prepare(&bound_sql)?;
 
@@ -493,6 +490,7 @@ mod tests {
         for row in &prep_stmt.query(&bindings)? {
             values.push(get_row_values(row));
         }
+
         assert_eq!(values, expected_values, "expected values");
         Ok(())
     }
@@ -508,14 +506,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
@@ -524,13 +522,13 @@ mod tests {
 
         let prep_stmt = conn.prepare(&bound_sql)?;
 
-        let mut values: Vec<Vec<Option<i64>>> = vec![];
+        let mut values: Vec<Vec<i64>> = vec![];
 
         for row in &prep_stmt.query(&bindings)? {
             values.push(vec![row.get(0)]);
         }
 
-        let expected_values: Vec<Vec<Option<i64>>> = vec![vec![Some(3)]];
+        let expected_values: Vec<Vec<i64>> = vec![vec![3]];
 
         assert_eq!(values, expected_values, "exected values");
         Ok(())
@@ -547,14 +545,14 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
         );
 
         let (bound_sql, bindings) = composer.compose(&stmt.item)?;
@@ -569,6 +567,7 @@ mod tests {
             values.push(get_row_values(row));
         }
 
+        // TODO: why are values 0 and 1 swapped vs mysql?
         let expected_values = vec![
             vec!["e_value", "d_value", "b_value", "a_value"],
             vec!["d_value", "f_value", "b_value", "a_value"],
@@ -597,24 +596,25 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"ee_value", &"d_value"],
-        "col_3_values" => [&"bb_value", &"b_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"ee_value", &"d_value"],
+                                       "col_3_values" => [&"bb_value", &"b_value"]
         );
 
         composer.mock_values = mock_path_values!(&dyn ToSql: "src/tests/values/include.tql" => [{
-        "col_1" => &"ee_value",
-        "col_2" => &"dd_value",
-        "col_3" => &"bb_value",
-        "col_4" => &"aa_value"
+            "col_1" => &"ee_value",
+            "col_2" => &"dd_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
         }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let prep_stmt = conn.prepare(&bound_sql)?;
 
@@ -624,7 +624,6 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -646,39 +645,37 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
-        composer.mock_values = mock_path_values!(&dyn ToSql: "src/tests/values/double-include.tql" => [
-                    {
-                    "col_1" => &"dd_value",
-                    "col_2" => &"ff_value",
-                    "col_3" => &"bb_value",
-                    "col_4" => &"aa_value"
-                    },
-                    {
-                    "col_1" => &"dd_value",
-                    "col_2" => &"ff_value",
-                    "col_3" => &"bb_value",
-                    "col_4" => &"aa_value"
-                  },
-                    {
-                    "col_1" => &"aa_value",
-                    "col_2" => &"bb_value",
-                    "col_3" => &"cc_value",
-                    "col_4" => &"dd_value"
-                    }
-
-        ]);
+        composer.mock_values = mock_path_values!(&dyn ToSql: "src/tests/values/double-include.tql" => [{
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
+        {
+            "col_1" => &"dd_value",
+            "col_2" => &"ff_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
+        },
+        {
+            "col_1" => &"aa_value",
+            "col_2" => &"bb_value",
+            "col_3" => &"cc_value",
+            "col_4" => &"dd_value"
+        }]);
 
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let prep_stmt = conn.prepare(&bound_sql)?;
 
@@ -688,7 +685,6 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -710,17 +706,17 @@ mod tests {
         let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
-        let mock_values = mock_db_object_values!(&dyn ToSql: "main" => [{
+        composer.mock_values = mock_db_object_values!(&dyn ToSql: "main" => [{
             "col_1" => &"dd_value",
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
@@ -733,16 +729,14 @@ mod tests {
             "col_4" => &"aa_value"
         },
         {
-
             "col_1" => &"aa_value",
             "col_2" => &"bb_value",
             "col_3" => &"cc_value",
             "col_4" => &"dd_value"
         }]);
 
-        composer.mock_values = mock_values;
-
         let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, false)?;
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
         let prep_stmt = conn.prepare(&bound_sql)?;
 
@@ -752,7 +746,6 @@ mod tests {
             values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
         assert_eq!(values, expected_values, "exected values");
         Ok(())
     }
@@ -764,10 +757,10 @@ mod tests {
         let stmt: ParsedItemSql = "src/tests/values/simple.tql".try_into()?;
 
         let bind_values = bind_values!(&dyn ToSql:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
         );
 
         let (prep_stmt, bindings) =

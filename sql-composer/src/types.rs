@@ -1,3 +1,28 @@
+//! Useful Types for parsing sql and tql.
+//!
+//!## Notes
+//!### TryFrom trait implementation
+//!
+//! We have implemented several concrete implementations of `TryFrom`.
+//! We would have preferred to implement `TryFrom` with a generic type constraint of `Into<PathBuf>`,
+//! but this is blocked by [Bug 50133].
+//!
+//! The underlying method, `SqlComposition::from_path()` provides a
+//! work around for any missing concrete implementations.
+//!
+//! [Bug 50133]: <https://github.com/rust-lang/rust/issues/50133>
+//!
+//! ``` ignore
+//! // Will not compile due to rust-lang/rust#50133
+//! impl ParsedItem<SqlComposition> {
+//!     pub fn try_from<P>(path: P) -> Result<Self>
+//!         where P: Into<PathBuf> + Debug {
+//!             let path = path.into();
+//!             let s = fs::read_to_string(&path)?;
+//!             SqlComposition::parse(&s, Some(SqlCompositionAlias::from_path(path)))
+//!         }
+//! }
+//! ```
 pub mod value;
 
 use crate::error::{Error, ErrorKind, Result};
@@ -271,6 +296,11 @@ impl SqlComposition {
         Ok(stmt)
     }
 
+    /// Reads the file at path and parses with `Self::parse()`
+    ///
+    /// Relative paths are resolved from the directory where the code is executed.
+    ///
+    /// Can fail reading the contents of path or while parsing the contents.
     pub fn from_path<P>(path: P) -> Result<ParsedItem<Self>>
     where
         P: AsRef<Path> + Debug,
@@ -421,16 +451,7 @@ impl ParsedItemSql {
     }
 }
 
-/// Implements `TryInto` Trait to convert a Path into a ParsedItemSql.
-///
-/// Automatically provides a `TryFrom` implementation.
-///
-/// Reads the file at path and parses with `SqlComposition::parse()`.
 /// Equivalent to `SqlComposition::from_path(path)`.
-/// Relative paths are resolved from the directory where
-/// the code is executed.
-///
-/// Can fail reading the contents of path or parsing.
 ///
 /// # Examples
 ///
@@ -460,22 +481,6 @@ impl ParsedItemSql {
 ///   Ok(())
 /// }
 /// ```
-///
-/// Concrete `TryFrom` implementations are required because of a
-/// collision with the blanket `TryFrom` implementation.
-/// See Bug 50133 : <https://github.com/rust-lang/rust/issues/50133>
-///
-/// ``` ignore
-/// // Not allowed!
-/// impl ParsedItem<SqlComposition> {
-///     pub fn try_from<P>(path: P) -> Result<Self>
-///         where P: Into<PathBuf> + Debug {
-///             let path = path.into();
-///             let s = fs::read_to_string(&path)?;
-///             SqlComposition::parse(&s, Some(SqlCompositionAlias::from_path(path)))
-///         }
-/// }
-/// ```
 impl TryFrom<&Path> for ParsedItemSql {
     type Error = Error;
     fn try_from(path: &Path) -> Result<Self> {
@@ -483,9 +488,7 @@ impl TryFrom<&Path> for ParsedItemSql {
     }
 }
 
-/// Implements `TryInto` Trait to convert a PathBuf into a ParsedItemSql.
-///
-/// See TryInfo<Path> implementation for details and motivation.
+/// Equivalent to `SqlComposition::from_path(path)`.
 ///
 /// # Examples
 ///
@@ -522,9 +525,7 @@ impl TryFrom<PathBuf> for ParsedItemSql {
     }
 }
 
-/// Implements `TryInto` Trait to convert a str into a ParsedItemSql.
-///
-/// See TryInfo<Path> implementation for details and motivation.
+/// Equivalent to `SqlComposition::from_path(path)`.
 ///
 /// # Examples
 ///
@@ -559,9 +560,7 @@ impl TryFrom<&str> for ParsedItemSql {
     }
 }
 
-/// Implements `TryInto` Trait to convert a String into a ParsedItemSql.
-///
-/// See TryInfo<Path> implementation for details and motivation.
+/// Equivalent to `SqlComposition::from_path(path)`.
 ///
 /// # Examples
 ///

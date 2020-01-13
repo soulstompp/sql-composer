@@ -42,7 +42,7 @@ pub fn template(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlCompo
     let mut iter = iterator(span, sql_sets);
 
     let mut comp = iter.fold(
-        ParsedItem::from_span(comp, Span::new(""), None),
+        ParsedItem::from_span(comp, Span::new("")),
         |acc_res, items| match acc_res {
             Ok(mut acc) => {
                 for item in items {
@@ -100,7 +100,7 @@ pub fn parse_macro_name(span: Span) -> IResult<Span, ParsedItem<String>> {
 
     Ok((
         span,
-        ParsedItem::from_span(name.fragment.to_string(), name, None)
+        ParsedItem::from_span(name.fragment.to_string(), name)
             .expect("invalid parsed item came from parser parse_macro_name"),
     ))
 }
@@ -109,7 +109,7 @@ pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
     let (span, sc) = composer_macro_item(span)?;
 
     let c = Sql::Composition((
-        ParsedItem::from_span(sc.0, Span::new(""), None)
+        ParsedItem::from_span(sc.0, Span::new(""))
             .expect("invalid parsed item from parser composer_macro_sql_set(span: Span)"),
         sc.1,
     ));
@@ -149,7 +149,7 @@ pub fn command_distinct_arg(span: Span) -> IResult<Span, Option<ParsedItem<bool>
 
     let distinct = match distinct_tag {
         Some(d) => Some(
-            ParsedItem::from_span(true, d, None)
+            ParsedItem::from_span(true, d)
                 .expect("Unable to parse bool flag from command_distinct_arg"),
         ),
         None => None,
@@ -163,7 +163,7 @@ pub fn command_all_arg(span: Span) -> IResult<Span, Option<ParsedItem<bool>>> {
 
     let all = match all_tag {
         Some(d) => Some(
-            ParsedItem::from_span(true, d, None)
+            ParsedItem::from_span(true, d)
                 .expect("Unable to parse bool flag from command_all_arg"),
         ),
         None => None,
@@ -196,7 +196,7 @@ pub fn column_item(span: Span) -> IResult<Span, ParsedItem<String>> {
 pub fn column_name(span: Span) -> IResult<Span, ParsedItem<String>> {
     let (span, column) = take_while_name_char(span)?;
 
-    let p = ParsedItem::from_span(column.fragment.to_string(), column, None)
+    let p = ParsedItem::from_span(column.fragment.to_string(), column)
         .expect("unable to build ParsedItem of String from column_list parser");
 
     Ok((span, p))
@@ -228,7 +228,6 @@ pub fn keyword_item(span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
         SqlKeyword::new(keyword.fragment.to_string())
             .expect("SqlKeyword::new() failed unexpectedly from keyword parser"),
         keyword,
-        None,
     )
     .expect("expected Ok from ParsedItem::from_span in keyword parser");
 
@@ -295,7 +294,7 @@ pub fn db_object_item(
         value: keyword.fragment.to_string(),
     };
 
-    let pk = ParsedItem::from_span(k, keyword, None)
+    let pk = ParsedItem::from_span(k, keyword)
         .expect("unable to build ParsedItem of SqlDbObject in db_object parser");
 
     let object_alias = alias.and_then(|a| Some(a.fragment.to_string()));
@@ -306,7 +305,7 @@ pub fn db_object_item(
         object_alias,
     };
 
-    let po = ParsedItem::from_span(object, table, None)
+    let po = ParsedItem::from_span(object, table)
         .expect("unable to build ParsedItem of SqlDbObject in db_object parser");
 
     Ok((span, (pk, po)))
@@ -328,9 +327,11 @@ pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
 
     //TODO: if we are going to disinguish between path and raw sql we should do it here in the
     //parser not in the real types
+    // TODO: fix SqlCompositionAlias::from_span
+    // let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
     let alias = SqlCompositionAlias::from(PathBuf::from(of_name.fragment));
     let pi =
-        ParsedItem::from_span(alias, of_name, None).expect("unable to build parsed item for alias");
+        ParsedItem::from_span(alias, of_name).expect("unable to build parsed item for alias");
 
     Ok((span, pi))
 }
@@ -454,7 +455,6 @@ pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
         )
         .expect("SqlBinding::new() failed unexpectedly from bindvar parser"),
         bindvar_name,
-        None,
     )
     .expect("expected Ok from ParsedItem::from_span in bindvar parser");
 
@@ -484,7 +484,7 @@ named!(
         pos: position!() >>
         parsed: fold_many1!(
             sql_literal,
-            ParsedItem::from_span(SqlLiteral::default(), Span::new(""), None).expect("expected to make a Span in parse_sql parser"),
+            ParsedItem::from_span(SqlLiteral::default(), Span::new("")).expect("expected to make a Span in parse_sql parser"),
             |mut acc: ParsedItem<SqlLiteral>, item: Span| {
                 acc.item.value.push_str(&item.fragment);
                 acc
@@ -520,7 +520,6 @@ pub fn sql_ending_item(span: Span) -> IResult<Span, ParsedItem<SqlEnding>> {
         SqlEnding::new(ending.fragment.to_string())
             .expect("SqlEnding::new() failed unexpectedly from parse_sql_end parser"),
         ending,
-        None,
     )
     .expect("expected Ok from ParsedItem::from_span in parse_sql_end");
 
@@ -881,7 +880,6 @@ mod tests {
             ..Default::default()
         };
 
-        //panic!("expected_item: {:?}", expected_item);
         let expected_item = build_parsed_item(expected_item, None, None, "");
 
         assert_eq!(item, expected_item, "items match");

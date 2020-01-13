@@ -235,10 +235,10 @@ impl<T> ParsedItem<T>
 where
     T: Debug + Default + PartialEq + Clone,
 {
-    pub fn from_span(item: T, span: Span, alias: Option<SqlCompositionAlias>) -> Result<Self> {
+    pub fn from_span(item: T, span: Span) -> Result<Self> {
         Ok(Self {
             item:     item,
-            position: Position::Parsed(ParsedSpan::new(span, alias)),
+            position: Position::Parsed(ParsedSpan::new(span, None)),
         })
     }
 
@@ -409,7 +409,6 @@ impl SqlComposition {
                         value: value.into(),
                     },
                     span,
-                    None,
                 )
                 .unwrap(),
             )),

@@ -1,4 +1,4 @@
-use crate::types::{ParsedItem, ParsedItemSql, Sql, SqlBinding, SqlComposition,
+use crate::types::{ParsedItem, ParsedSqlComposition, Sql, SqlBinding, SqlComposition,
                    SqlCompositionAlias, SqlDbObject};
 use std::collections::{BTreeMap, HashMap};
 
@@ -135,7 +135,7 @@ pub trait ComposerTrait: Sized {
 
     fn compose_statement(
         &self,
-        sc: &ParsedItemSql,
+        sc: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -217,7 +217,7 @@ pub trait ComposerTrait: Sized {
 
     fn compose_command<'c>(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -259,14 +259,14 @@ pub trait ComposerTrait: Sized {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_count_default_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -311,14 +311,14 @@ pub trait ComposerTrait: Sized {
 
     fn compose_union_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_union_default_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {

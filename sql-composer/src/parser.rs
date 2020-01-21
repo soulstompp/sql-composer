@@ -1,4 +1,4 @@
-use crate::types::{ParsedItem, ParsedItemSql, ParsedSpan, Position, Span, Sql, SqlBinding,
+use crate::types::{ParsedItem, ParsedSqlComposition, ParsedSpan, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
@@ -38,7 +38,7 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
 pub fn template(
     span: Span,
     alias: Option<SqlCompositionAlias>,
-) -> Result<ParsedItemSql> {
+) -> Result<ParsedSqlComposition> {
     let comp = SqlComposition::default();
 
     let mut iter = iterator(span, sql_sets);
@@ -533,7 +533,7 @@ mod tests {
                 sql_ending_item, sql_literal_item, template};
 
     use crate::error::Result;
-    use crate::types::{ParsedItem, ParsedItemSql, Span, Sql, SqlComposition, SqlCompositionAlias,
+    use crate::types::{ParsedItem, ParsedSqlComposition, Span, Sql, SqlComposition, SqlCompositionAlias,
                        SqlDbObject, SqlEnding, SqlLiteral};
 
     use std::collections::HashMap;
@@ -576,37 +576,37 @@ mod tests {
         )]
     }
 
-    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItemSql> {
+    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = HashMap::new();
 
         let p = "src/tests/simple-template.tql";
 
         acc.entry(SqlCompositionAlias::from(p)).or_insert(
-            ParsedItemSql::try_from(p).expect("expected to parse into ParsedItemSql"),
+            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
         acc
     }
 
-    fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItemSql> {
+    fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = simple_alias_hash();
 
         let p = "src/tests/include-template.tql";
 
         acc.entry(SqlCompositionAlias::from(p)).or_insert(
-            ParsedItemSql::try_from(p).expect("expected to parse into ParsedItemSql"),
+            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
         acc
     }
 
-    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedItemSql> {
+    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = HashMap::new();
 
         let p = "src/tests/include-template.tql";
 
         acc.entry(SqlCompositionAlias::from(p)).or_insert(
-            ParsedItemSql::try_from(p).expect("expected to parse into ParsedItemSql"),
+            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
         acc
@@ -615,7 +615,7 @@ mod tests {
     fn simple_template_comp(
         shift_line: Option<u32>,
         shift_offset: Option<usize>,
-    ) -> ParsedItemSql {
+    ) -> ParsedSqlComposition {
         let _shift_line = shift_line.unwrap_or(0);
         let _shift_offset = shift_offset.unwrap_or(0);
 
@@ -642,7 +642,7 @@ mod tests {
         build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_comp() -> ParsedItemSql {
+    fn include_template_comp() -> ParsedSqlComposition {
         let item = SqlComposition {
             position: Some(build_parsed_path_position(
                 "src/tests/include-template.tql".into(),
@@ -668,7 +668,7 @@ mod tests {
     fn simple_template_compose_comp(
         shift_line: Option<u32>,
         shift_offset: Option<usize>,
-    ) -> ParsedItemSql {
+    ) -> ParsedSqlComposition {
         let shift_line = shift_line.unwrap_or(0);
         let shift_offset = shift_offset.unwrap_or(0);
 
@@ -687,7 +687,7 @@ mod tests {
         build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_compose_comp() -> ParsedItemSql {
+    fn include_template_compose_comp() -> ParsedSqlComposition {
         let item = SqlComposition {
             command: Some(build_parsed_string("compose", None, Some(16), "compose")),
             of: include_aliases(),
@@ -906,8 +906,8 @@ mod tests {
 
     #[test]
     fn test_parse_file_template() {
-        let stmt = ParsedItemSql::try_from("src/tests/simple-template.tql")
-            .expect("expected Ok from ParsedItemSql try_from");
+        let stmt = ParsedSqlComposition::try_from("src/tests/simple-template.tql")
+            .expect("expected Ok from ParsedSqlComposition try_from");
 
         let expected = simple_template_comp(None, None);
 
@@ -916,8 +916,8 @@ mod tests {
 
     #[test]
     fn test_parse_file_inclusive_template() {
-        let stmt = ParsedItemSql::try_from("src/tests/include-template.tql")
-            .expect("expected Ok from ParsedItemSql try_from");
+        let stmt = ParsedSqlComposition::try_from("src/tests/include-template.tql")
+            .expect("expected Ok from ParsedSqlComposition try_from");
         let expected = include_template_comp();
 
         assert_eq!(stmt, expected);
@@ -973,7 +973,7 @@ mod tests {
     fn test_simple_composed_composer() -> EmptyResult {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
-        let comp = ParsedItemSql::parse(sql_str, None)?;
+        let comp = ParsedSqlComposition::parse(sql_str, None)?;
 
         let expected = build_parsed_item(
             SqlComposition {

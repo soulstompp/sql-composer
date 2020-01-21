@@ -15,7 +15,7 @@ use mysql::Pool;
 
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
-use sql_composer::types::{ParsedItemSql, SqlComposition, SqlCompositionAlias};
+use sql_composer::types::{ParsedSqlComposition, SqlComposition, SqlCompositionAlias};
 
 use sql_composer::error::Result;
 
@@ -120,7 +120,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -129,7 +129,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_union_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -161,7 +161,7 @@ mod tests {
     use mysql::{from_row, Pool, Row};
 
     use sql_composer::error::Result;
-    use sql_composer::types::{ParsedItemSql, SqlCompositionAlias, SqlDbObject};
+    use sql_composer::types::{ParsedSqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use std::collections::HashMap;
 
@@ -213,7 +213,7 @@ mod tests {
             ..Default::default()
         };
 
-        let insert_stmt = ParsedItemSql::parse(
+        let insert_stmt = ParsedSqlComposition::parse(
             "INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
             None,
         )?;
@@ -233,7 +233,7 @@ mod tests {
 
         &pool.prep_exec(&bound_sql, &bindings.as_slice())?;
 
-        let select_stmt = ParsedItemSql::parse("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';", None)?;
+        let select_stmt = ParsedSqlComposition::parse("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';", None)?;
 
         let (bound_sql, bindings) = composer.compose(&select_stmt.item)?;
 
@@ -278,7 +278,7 @@ mod tests {
     fn test_mock_bind_simple_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedItemSql = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
 
         let mut composer = Composer::new();
 
@@ -325,7 +325,7 @@ mod tests {
     fn test_bind_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedItemSql = "src/tests/values/include.tql".try_into()?;
+        let stmt: ParsedSqlComposition = "src/tests/values/include.tql".try_into()?;
 
         let mut composer = Composer::new();
 
@@ -379,7 +379,7 @@ mod tests {
     fn test_bind_double_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedItemSql = "src/tests/values/double-include.tql".try_into()?;
+        let stmt: ParsedSqlComposition = "src/tests/values/double-include.tql".try_into()?;
 
         let mut composer = Composer::new();
 
@@ -450,7 +450,7 @@ mod tests {
     fn test_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -492,7 +492,7 @@ mod tests {
     fn test_count_command() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse(":count(src/tests/values/double-include.tql);", None)?;
+        let stmt = ParsedSqlComposition::parse(":count(src/tests/values/double-include.tql);", None)?;
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
@@ -532,7 +532,7 @@ mod tests {
     fn test_union_command() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None)?;
+        let stmt = ParsedSqlComposition::parse(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);", None)?;
 
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
@@ -578,7 +578,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -626,7 +626,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -687,7 +687,7 @@ mod tests {
     fn test_mock_db_object() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedItemSql::parse("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));", None)?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -748,7 +748,7 @@ mod tests {
     fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedItemSql = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
 
         let bind_values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],

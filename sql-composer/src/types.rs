@@ -78,12 +78,24 @@ pub struct GeneratedSpan {
     pub command: Option<String>,
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Default, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct ParsedSpan {
     pub alias:    Option<SqlCompositionAlias>,
     pub line:     u32,
     pub offset:   usize,
     pub fragment: String,
+}
+
+/// line number should default to 1
+impl Default for ParsedSpan {
+    fn default() -> Self {
+        Self {
+            line:     1,
+            alias:    None,
+            offset:   0,
+            fragment: "".to_string(),
+        }
+    }
 }
 
 impl ParsedSpan {
@@ -229,6 +241,18 @@ where
 {
     pub item:     T,
     pub position: Position,
+}
+
+impl<T> Default for ParsedItem<T>
+where
+    T: Debug + Default + PartialEq + Clone,
+{
+    fn default() -> Self {
+        Self {
+            item:     T::default(),
+            position: Position::Parsed(Default::default()),
+        }
+    }
 }
 
 impl<T> ParsedItem<T>

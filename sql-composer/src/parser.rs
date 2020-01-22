@@ -37,12 +37,12 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
 }
 
 pub fn template(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlComposition> {
-    let comp = SqlComposition::default();
 
     let mut iter = iterator(span, sql_sets);
+    let initial: Result<ParsedSqlComposition> = Ok(ParsedItem::default());
 
     let mut comp = iter.fold(
-        ParsedItem::from_span(comp, Span::new("")),
+        initial,
         |acc_res, items| match acc_res {
             Ok(mut acc) => {
                 for item in items {

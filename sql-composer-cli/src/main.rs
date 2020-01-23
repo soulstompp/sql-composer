@@ -27,6 +27,13 @@ use std::collections::{BTreeMap, HashMap};
     feature = "dbd-postgres",
     feature = "dbd-rusqlite"
 ))]
+use std::path::PathBuf;
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use std::convert::TryFrom;
 
 #[cfg(any(
@@ -136,7 +143,10 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let comp = ParsedSqlComposition::try_from(args.path).unwrap().item;
+    let comp = {
+        let path = PathBuf::from(args.path);
+        ParsedSqlComposition::try_from(path).unwrap().item
+    };
 
     let uri = args.uri;
 

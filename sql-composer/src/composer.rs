@@ -87,6 +87,7 @@ macro_rules! mock_db_object_values(
                     )+
 
                 mocks.insert(SqlCompositionAlias::DbObject(SqlDbObject {
+                    id: None,
                     object_name:  "main".into(),
                     object_alias: None,
                 }), mv);

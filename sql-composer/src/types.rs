@@ -50,6 +50,28 @@ pub enum Position {
     Parsed(ParsedSpan),
 }
 
+impl<P> From<P> for Position
+where
+    P: Into<ParsedSpan> + std::fmt::Debug,
+{
+    fn from(p: P) -> Self {
+        Self::Parsed(p.into())
+    }
+}
+
+impl From<GeneratedSpan> for Position {
+    fn from(gs: GeneratedSpan) -> Self {
+        Self::Generated(gs)
+    }
+}
+
+// Shortcut from Option<String> -> GeneratedSpan -> Position
+impl From<Option<String>> for Position {
+    fn from(command: Option<String>) -> Self {
+        Self::Generated(command.into())
+    }
+}
+
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
@@ -76,6 +98,12 @@ impl fmt::Display for Position {
 #[derive(Debug, Hash, Eq, PartialEq, Default, Clone)]
 pub struct GeneratedSpan {
     pub command: Option<String>,
+}
+
+impl From<Option<String>> for GeneratedSpan {
+    fn from(os: Option<String>) -> Self {
+        Self { command: os }
+    }
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]

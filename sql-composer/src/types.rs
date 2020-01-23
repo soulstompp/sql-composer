@@ -108,6 +108,15 @@ impl ParsedSpan {
         }
     }
 
+    pub fn with_alias(span: Span, alias: SqlCompositionAlias) -> Self {
+        Self {
+            alias:    Some(alias),
+            line:     span.line,
+            offset:   span.offset,
+            fragment: span.fragment.to_string(),
+        }
+    }
+
     pub fn from_span(span: Span) -> Self {
         Self {
             line: span.line,

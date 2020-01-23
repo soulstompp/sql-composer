@@ -198,16 +198,14 @@ impl SqlCompositionAlias {
             acc
         });
 
-        Ok(SqlCompositionAlias::Path(PathBuf::from(&s)))
+        Ok(s.into())
     }
 
     pub fn from_path<P>(path: P) -> Self
     where
         P: Into<PathBuf> + std::fmt::Debug,
     {
-        // TODO: include path in error.
-        // TODO: check if path is absolute or relative?
-        SqlCompositionAlias::Path(path.into())
+        path.into().into()
     }
 
     /// Return an owned copy of the PathBuf for SqlCompositionAlias::Path types.
@@ -340,16 +338,17 @@ where
     T: Debug + Default + PartialEq + Clone,
 {
     pub fn from_span(item: T, span: Span) -> Result<Self> {
+        let ps: ParsedSpan = span.into();
         Ok(Self {
             item:     item,
-            position: Position::Parsed(ParsedSpan::new(span, None)),
+            position: ps.into(),
         })
     }
 
     pub fn generated(item: T, command: Option<String>) -> Result<Self> {
         Ok(Self {
             item:     item,
-            position: Position::Generated(GeneratedSpan { command }),
+            position: command.into(),
         })
     }
 

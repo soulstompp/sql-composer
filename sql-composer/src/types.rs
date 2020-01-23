@@ -89,11 +89,10 @@ pub struct ParsedSpan {
 impl ParsedSpan {
     pub fn new(span: Span, alias: Option<SqlCompositionAlias>) -> Self {
         Self {
-            line: span.line,
-            offset: span.offset,
+            alias:    alias,
+            line:     span.line,
+            offset:   span.offset,
             fragment: span.fragment.to_string(),
-            alias: alias,
-            ..Default::default()
         }
     }
 

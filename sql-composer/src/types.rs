@@ -176,7 +176,7 @@ impl SqlCompositionAlias {
     pub fn path(&self) -> Option<PathBuf> {
         match self {
             // PathBuf doesn't impl Copy, so use to_path_buf for a new one
-            SqlCompositionAlias::Path(p) => Some(p.to_path_buf()),
+            Self::Path(p) => Some(p.to_path_buf()),
             _ => None,
         }
     }
@@ -189,7 +189,7 @@ where
     P: Into<PathBuf> + std::fmt::Debug,
 {
     fn from(path: P) -> Self {
-        SqlCompositionAlias::Path(path.into())
+        Self::Path(path.into())
     }
 }
 
@@ -197,7 +197,7 @@ where
 impl Into<Option<PathBuf>> for SqlCompositionAlias {
     fn into(self) -> Option<PathBuf> {
         match self {
-            SqlCompositionAlias::Path(p) => Some(p),
+            Self::Path(p) => Some(p),
             _ => None,
         }
     }
@@ -206,7 +206,7 @@ impl Into<Option<PathBuf>> for SqlCompositionAlias {
 impl Default for SqlCompositionAlias {
     fn default() -> Self {
         //TODO: better default
-        SqlCompositionAlias::DbObject(SqlDbObject {
+        Self::DbObject(SqlDbObject {
             object_name:  "DUAL".to_string(),
             object_alias: None,
         })
@@ -216,8 +216,8 @@ impl Default for SqlCompositionAlias {
 impl fmt::Display for SqlCompositionAlias {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SqlCompositionAlias::Path(p) => write!(f, ", {}", p.to_string_lossy()),
-            SqlCompositionAlias::DbObject(dbo) => write!(f, ", {}", dbo),
+            Self::Path(p) => write!(f, ", {}", p.to_string_lossy()),
+            Self::DbObject(dbo) => write!(f, ", {}", dbo),
         }
     }
 }
@@ -254,7 +254,10 @@ where
     }
 }
 
-impl<T: fmt::Display + Debug + Default + PartialEq + Clone> fmt::Display for ParsedItem<T> {
+impl<T> fmt::Display for ParsedItem<T>
+where
+    T: fmt::Display + Debug + Default + PartialEq + Clone,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.item)
     }
@@ -345,7 +348,7 @@ impl SqlComposition {
             if let Some(path) = &alias.path() {
                 self.aliases
                     .entry(alias.clone())
-                    .or_insert(SqlComposition::from_path(path)?);
+                    .or_insert(Self::from_path(path)?);
             }
         }
 
@@ -355,27 +358,26 @@ impl SqlComposition {
     pub fn insert_alias(&mut self, p: &Path) -> Result<()> {
         self.aliases
             .entry(SqlCompositionAlias::from_path(p))
-            .or_insert(SqlComposition::from_path(p)?);
+            .or_insert(Self::from_path(p)?);
 
         Ok(())
     }
 
-    //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
-        match &self.position {
-            Some(_existing) => Err(ErrorKind::CompositionAliasConflict("bad posisition".into()).into()),
-            None => {
-                self.position = Some(new);
-                Ok(())
-            }
+        if self.position.is_some() {
+            bail!(ErrorKind::CompositionAliasConflict(
+                "bad posisition".to_string()
+            ))
         }
+        self.position = Some(new);
+        Ok(())
     }
 
-    pub fn push_sub_comp(&mut self, value: ParsedItem<SqlComposition>) -> Result<()> {
+    pub fn push_sub_comp(&mut self, value: ParsedItem<Self>) -> Result<()> {
         self.push_sql(Sql::Composition((value, vec![])))
     }
 
-    pub fn push_generated_sub_comp(&mut self, value: SqlComposition) -> Result<()> {
+    pub fn push_generated_sub_comp(&mut self, value: Self) -> Result<()> {
         self.push_sql(Sql::Composition((
             ParsedItem::generated(value, None)?,
             vec![],

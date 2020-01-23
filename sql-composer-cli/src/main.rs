@@ -21,6 +21,7 @@ use sql_composer::types::{ParsedSqlComposition, Span, SqlComposition};
     feature = "dbd-rusqlite"
 ))]
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 #[cfg(any(
     feature = "dbd-mysql",
@@ -136,7 +137,8 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let comp = ParsedSqlComposition::try_from(args.path).unwrap().item;
+    let path = PathBuf::from(args.path);
+    let comp = ParsedSqlComposition::try_from(path).unwrap().item;
 
     let uri = args.uri;
 

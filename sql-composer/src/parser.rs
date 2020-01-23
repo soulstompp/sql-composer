@@ -4,6 +4,10 @@ use crate::types::{ParsedItem, ParsedSqlComposition, ParsedSpan, Position, Span,
 
 use crate::error::Result;
 
+use std::convert::TryInto;
+
+use std::path::PathBuf;
+
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take, take_until, take_while1},
           character::complete::multispace0,
@@ -37,7 +41,7 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
 
 pub fn template(
     span: Span,
-    alias: Option<SqlCompositionAlias>,
+    alias: SqlCompositionAlias,
 ) -> Result<ParsedSqlComposition> {
     let comp = SqlComposition::default();
 
@@ -75,10 +79,8 @@ pub fn template(
 
     let (_remaining, _) = iter.finish().expect("iterator should always finish");
 
-    if let Some(a) = alias {
-        comp.item
-            .set_position(Position::Parsed(ParsedSpan::new(span, Some(a))))?;
-    }
+    comp.item
+        .set_position(Position::Parsed(ParsedSpan::new(span, Some(alias))))?;
 
 
     Ok(comp)
@@ -312,6 +314,7 @@ pub fn db_object_item(span: Span) -> IResult<Span, (ParsedItem<SqlKeyword>, Pars
     let object_alias = alias.and_then(|a| Some(a.fragment.to_string()));
 
     let object = SqlDbObject {
+        id: None,
         object_name: table.fragment.to_string(),
         object_alias,
     };
@@ -537,7 +540,8 @@ mod tests {
                        SqlDbObject, SqlEnding, SqlLiteral};
 
     use std::collections::HashMap;
-    use std::convert::TryFrom;
+    use std::convert::{TryFrom, TryInto};
+    use std::path::PathBuf;
 
     type EmptyResult = Result<()>;
 
@@ -579,9 +583,11 @@ mod tests {
     fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = HashMap::new();
 
-        let p = "src/tests/simple-template.tql";
+        let p = PathBuf::from("src/tests/simple-template.tql");
+        
+        let a = SqlCompositionAlias::from(&p);
 
-        acc.entry(SqlCompositionAlias::from(p)).or_insert(
+        acc.entry(SqlCompositionAlias::from(&p)).or_insert(
             ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
@@ -591,9 +597,9 @@ mod tests {
     fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = simple_alias_hash();
 
-        let p = "src/tests/include-template.tql";
-
-        acc.entry(SqlCompositionAlias::from(p)).or_insert(
+        let p = PathBuf::from("src/tests/include-template.tql");
+        
+        acc.entry(SqlCompositionAlias::from(&p)).or_insert(
             ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
@@ -603,9 +609,9 @@ mod tests {
     fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
         let mut acc = HashMap::new();
 
-        let p = "src/tests/include-template.tql";
+        let p = PathBuf::from("src/tests/include-template.tql");
 
-        acc.entry(SqlCompositionAlias::from(p)).or_insert(
+        acc.entry(SqlCompositionAlias::from(&p)).or_insert(
             ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
 
@@ -841,7 +847,7 @@ mod tests {
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let item =
-            template(Span::new(input.into()), None).expect("expected Ok from template");
+            template(Span::new(input.into()), input.into()).expect("expected Ok from template");
 
         let expected_item = SqlComposition {
             sql: vec![
@@ -874,7 +880,7 @@ mod tests {
     fn test_parse_include_template() -> EmptyResult {
         let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = template(Span::new(input), None)?;
+        let out = template(Span::new(input.into()), input.into())?;
 
         let expected_comp = SqlComposition {
             sql: vec![
@@ -906,7 +912,7 @@ mod tests {
 
     #[test]
     fn test_parse_file_template() {
-        let stmt = ParsedSqlComposition::try_from("src/tests/simple-template.tql")
+        let stmt = ParsedSqlComposition::try_from(PathBuf::from("src/tests/simple-template.tql"))
             .expect("expected Ok from ParsedSqlComposition try_from");
 
         let expected = simple_template_comp(None, None);
@@ -916,7 +922,7 @@ mod tests {
 
     #[test]
     fn test_parse_file_inclusive_template() {
-        let stmt = ParsedSqlComposition::try_from("src/tests/include-template.tql")
+        let stmt = ParsedSqlComposition::try_from(PathBuf::from("src/tests/include-template.tql"))
             .expect("expected Ok from ParsedSqlComposition try_from");
         let expected = include_template_comp();
 
@@ -947,7 +953,7 @@ mod tests {
                     ]),
                     of: vec![
                         build_parsed_item(
-                            SqlCompositionAlias::from("src/tests/simple-template.tql"),
+                            SqlCompositionAlias::from(PathBuf::from("src/tests/simple-template.tql")),
                             None,
                             Some(30),
                             "src/tests/simple-template.tql",
@@ -973,7 +979,7 @@ mod tests {
     fn test_simple_composed_composer() -> EmptyResult {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
-        let comp = ParsedSqlComposition::parse(sql_str, None)?;
+        let comp = ParsedSqlComposition::parse(sql_str)?;
 
         let expected = build_parsed_item(
             SqlComposition {
@@ -1137,6 +1143,7 @@ mod tests {
         let expected_span = build_span(Some(1), Some(8), "WHERE 1");
 
         let expected_dbo = SqlDbObject {
+            id: None,
             object_name:  "t1".into(),
             object_alias: None,
         };
@@ -1157,6 +1164,7 @@ mod tests {
         let expected_span = build_span(Some(1), Some(11), "WHERE 1");
 
         let expected_dbo = SqlDbObject {
+            id: None,
             object_name:  "t1".into(),
             object_alias: Some("tt".into()),
         };
@@ -1177,6 +1185,7 @@ mod tests {
         let expected_span = build_span(Some(1), Some(11), "WHERE 1");
 
         let expected_dbo = SqlDbObject {
+            id: None,
             object_name:  "t1".into(),
             object_alias: Some("tt".into()),
         };

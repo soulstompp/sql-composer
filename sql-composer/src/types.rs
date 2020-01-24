@@ -157,6 +157,20 @@ impl SqlCompositionAlias {
             _ => None,
         }
     }
+
+    pub fn read_raw_sql(&self) -> Result<String> {
+        match self {
+            SqlCompositionAlias::DbObject(dbo) => {
+                Ok(dbo.to_string())
+            },
+            SqlCompositionAlias::Path(path) => {
+                Ok(fs::read_to_string(&path)?)
+            },
+            SqlCompositionAlias::SqlLiteral(s) => {
+                Ok(s.to_string())
+            }
+        }
+    }
 }
 
 // str and Span will need to be moved to TryFrom
@@ -303,7 +317,7 @@ pub struct SqlComposition {
 impl SqlComposition {
     //TODO: properly check remaining along with a few other traits
     pub fn parse(alias: SqlCompositionAlias) -> Result<ParsedItem<Self>> {
-        let stmt = template(Span::new(&alias.to_string()), alias)?;
+        let stmt = template(Span::new(&alias.read_raw_sql()?), alias)?;
 
         //if remaining.fragment.len() > 0 {
             //panic!("found extra information: {}", remaining.to_string());
@@ -461,7 +475,7 @@ impl ParsedSqlComposition {
     {
         //TODO: make this a ?, doesn't work for some reason, so unwrapping for now
         let alias:SqlCompositionAlias = a.into();
-        let stmt = template(Span::new(&alias.to_string()), alias);
+        let stmt = template(Span::new(&alias.read_raw_sql()?), alias);
 
         stmt
     }
@@ -600,8 +614,8 @@ impl TryFrom<PathBuf> for ParsedSqlComposition {
 /// ```
 impl TryFrom<&str> for ParsedSqlComposition {
     type Error = Error;
-    fn try_from(path: &str) -> Result<Self> {
-        SqlComposition::from_path(path)
+    fn try_from(raw_sql: &str) -> Result<Self> {
+        ParsedSqlComposition::from_str(raw_sql)
     }
 }
 
@@ -617,7 +631,7 @@ impl TryFrom<&str> for ParsedSqlComposition {
 /// use sql_composer::{types::ParsedSqlComposition,
 ///                    error::Result};
 /// fn main() -> Result<()> {
-///   let path = String::from("src/tests/simple-template.tql");
+///   let raw_sql = String::from("SELECT 1");
 ///   let stmt: ParsedSqlComposition = path.try_into()?;
 ///   Ok(())
 /// }
@@ -630,7 +644,7 @@ impl TryFrom<&str> for ParsedSqlComposition {
 /// use sql_composer::{types::ParsedSqlComposition,
 ///                    error::Result};
 /// fn main() -> Result<()> {
-///   let path = "src/tests/simple-template.tql".to_string();
+///   let raw_sql = "SELECT 1".to_string();
 ///   let stmt = ParsedSqlComposition::try_from(path)?;
 ///   Ok(())
 /// }
@@ -644,8 +658,9 @@ impl TryFrom<SqlCompositionAlias> for ParsedSqlComposition {
 
 impl FromStr for ParsedSqlComposition {
     type Err = Error;
-    fn from_str(path: &str) -> Result<Self> {
-        SqlComposition::from_path(path)
+    fn from_str(s: &str) -> Result<Self> {
+        let alias = SqlCompositionAlias::from_str(s)?;
+        Ok(ParsedSqlComposition::try_from(alias)?)
     }
 }
 

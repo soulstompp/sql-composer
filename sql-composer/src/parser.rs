@@ -339,9 +339,10 @@ pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
         }
     })(span)?;
 
-
-    let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
-    let pi = ParsedItem::from_span(alias, of_name, None).expect("Unable to create parsed item in of_list parser");
+    //TODO: if we are going to disinguish between path and raw sql we should do it here in the
+    //parser not in the real types
+    let alias = SqlCompositionAlias::from(PathBuf::from(of_name.fragment));
+    let pi = ParsedItem::from_span(alias, of_name, None).expect("unable to build parsed item for alias");
 
     Ok((span, pi))
 }
@@ -559,7 +560,7 @@ mod tests {
         let shift_line = shift_line.unwrap_or(0);
         let shift_offset = shift_offset.unwrap_or(0);
 
-        let item: SqlCompositionAlias = "src/tests/simple-template.tql".into();
+        let item: SqlCompositionAlias = PathBuf::from("src/tests/simple-template.tql").into();
 
         vec![build_parsed_item(
             item,
@@ -570,7 +571,7 @@ mod tests {
     }
 
     fn include_aliases() -> Vec<ParsedItem<SqlCompositionAlias>> {
-        let item: SqlCompositionAlias = "src/tests/include-template.tql".into();
+        let item: SqlCompositionAlias = PathBuf::from("src/tests/include-template.tql").into();
 
         vec![build_parsed_item(
             item,
@@ -585,8 +586,6 @@ mod tests {
 
         let p = PathBuf::from("src/tests/simple-template.tql");
         
-        let a = SqlCompositionAlias::from(&p);
-
         acc.entry(SqlCompositionAlias::from(&p)).or_insert(
             ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
         );
@@ -627,7 +626,7 @@ mod tests {
 
         let item = SqlComposition {
             position: Some(build_parsed_path_position(
-                "src/tests/simple-template.tql".into(),
+                PathBuf::from("src/tests/simple-template.tql").into(),
                 1,
                 0,
                 "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n",
@@ -651,7 +650,7 @@ mod tests {
     fn include_template_comp() -> ParsedSqlComposition {
         let item = SqlComposition {
             position: Some(build_parsed_path_position(
-                "src/tests/include-template.tql".into(),
+                PathBuf::from("src/tests/include-template.tql").into(),
                 1,
                 0,
                 "SELECT COUNT(foo_id)\nFROM (\n  :compose(src/tests/simple-template.tql)\n);\n",
@@ -871,6 +870,7 @@ mod tests {
             ..Default::default()
         };
 
+        //panic!("expected_item: {:?}", expected_item);
         let expected_item = build_parsed_item(expected_item, None, None, "");
 
         assert_eq!(item, expected_item, "items match");

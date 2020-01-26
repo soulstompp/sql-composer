@@ -538,7 +538,7 @@ mod tests {
                        SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlLiteral};
 
     use std::collections::HashMap;
-    use std::convert::{TryFrom, TryInto};
+    use std::convert::TryFrom;
     use std::path::PathBuf;
 
     type EmptyResult = Result<()>;

@@ -5,7 +5,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::parser::template;
 
 use std::collections::HashMap;
-use std::convert::{From, Into, TryFrom, TryInto};
+use std::convert::{From, Into, TryFrom};
 use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
@@ -331,7 +331,6 @@ impl SqlComposition {
         P: AsRef<Path> + Debug,
     {
         let path = path.as_ref();
-        let s = fs::read_to_string(path)?;
 
         Self::parse(SqlCompositionAlias::from(path.to_path_buf()))
     }
@@ -628,11 +627,12 @@ impl TryFrom<&str> for ParsedSqlComposition {
 /// TryInto:
 /// ```
 /// use std::convert::TryInto;
-/// use sql_composer::{types::ParsedSqlComposition,
+/// use sql_composer::{types::{ParsedSqlComposition,
+///                            SqlCompositionAlias},
 ///                    error::Result};
 /// fn main() -> Result<()> {
-///   let raw_sql = String::from("SELECT 1");
-///   let stmt: ParsedSqlComposition = path.try_into()?;
+///   let alias: SqlCompositionAlias = "SELECT 1".into();
+///   let stmt: ParsedSqlComposition = alias.try_into()?;
 ///   Ok(())
 /// }
 /// ```
@@ -641,11 +641,13 @@ impl TryFrom<&str> for ParsedSqlComposition {
 /// TryFrom:
 /// ```
 /// use std::convert::TryFrom;
-/// use sql_composer::{types::ParsedSqlComposition,
+/// use sql_composer::{types::{ParsedSqlComposition,
+///                            SqlCompositionAlias},
 ///                    error::Result};
 /// fn main() -> Result<()> {
-///   let raw_sql = "SELECT 1".to_string();
-///   let stmt = ParsedSqlComposition::try_from(path)?;
+///   let raw_sql = "SELECT 1";
+///   let alias = SqlCompositionAlias::from(raw_sql);
+///   let stmt = ParsedSqlComposition::try_from(alias)?;
 ///   Ok(())
 /// }
 /// ```

@@ -208,6 +208,18 @@ impl From<&str> for SqlCompositionAlias
         })
     }
 }
+
+impl From<String> for SqlCompositionAlias
+{
+    fn from(s: String) -> Self {
+        SqlCompositionAlias::SqlLiteral(SqlLiteral{
+            id: None,
+            value: s,
+            generated: false
+        })
+    }
+}
+
 /// Destructively convert a SqlCompositionAlias into a PathBuf
 impl Into<Option<PathBuf>> for SqlCompositionAlias {
     fn into(self) -> Option<PathBuf> {
@@ -645,7 +657,7 @@ impl TryFrom<&str> for ParsedSqlComposition {
 ///                            SqlCompositionAlias},
 ///                    error::Result};
 /// fn main() -> Result<()> {
-///   let raw_sql = "SELECT 1";
+///   let raw_sql = "SELECT 1".to_string();
 ///   let alias = SqlCompositionAlias::from(raw_sql);
 ///   let stmt = ParsedSqlComposition::try_from(alias)?;
 ///   Ok(())

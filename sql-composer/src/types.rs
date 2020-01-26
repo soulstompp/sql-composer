@@ -248,7 +248,7 @@ impl fmt::Display for SqlCompositionAlias {
         match self {
             SqlCompositionAlias::Path(p) => write!(f, ", {}", p.to_string_lossy()),
             SqlCompositionAlias::DbObject(dbo) => write!(f, ", {}", dbo),
-            SqlCompositionAlias::SqlLiteral(l) => write!(f, ", {}", l),
+            SqlCompositionAlias::SqlLiteral(l) => write!(f, "{}", l),
         }
     }
 }

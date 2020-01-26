@@ -28,7 +28,8 @@ use crate::error::{Error, ErrorKind, Result};
 
 use crate::parser::template;
 
-use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::collections::{HashMap};
 use std::convert::{From, Into, TryFrom};
 use std::fmt;
 use std::fmt::Debug;
@@ -323,12 +324,13 @@ impl<T: fmt::Display + Debug + Default + PartialEq + Clone> fmt::Display for Par
 //            :intercept([distinct] [column1, column2 of] t1.sql, t2.tql)
 //            :union([all|distinct] [column1, column2 of] t1.sql, t2.tql)
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct SqlComposition {
     pub command:  Option<ParsedItem<String>>,
     pub distinct: Option<ParsedItem<bool>>,
     pub all:      Option<ParsedItem<bool>>,
     pub columns:  Option<Vec<ParsedItem<String>>>,
+    pub source_alias: SqlCompositionAlias,
     pub of:       Vec<ParsedItem<SqlCompositionAlias>>,
     pub aliases:  HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>>,
     pub sql:      Vec<Sql>,
@@ -466,6 +468,12 @@ impl SqlComposition {
             )),
             None => Err(ErrorKind::CompositionIncomplete("".into()).into()),
         }
+    }
+}
+
+impl Hash for SqlComposition {
+    fn hash<H: Hasher>(&self, alias: &mut H) {
+        self.source_alias.hash(alias);
     }
 }
 
@@ -663,7 +671,7 @@ impl FromStr for ParsedSqlComposition {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Sql {
     Literal(ParsedItem<SqlLiteral>),
     Binding(ParsedItem<SqlBinding>),
@@ -688,7 +696,7 @@ impl fmt::Display for Sql {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct SqlEnding {
     pub value: String,
 }
@@ -735,7 +743,7 @@ impl fmt::Display for SqlDbObject {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct SqlKeyword {
     pub value: String,
 }
@@ -774,7 +782,7 @@ impl fmt::Display for SqlLiteral {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct SqlBinding {
     pub name:       String,
     pub quoted:     bool,

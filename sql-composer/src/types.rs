@@ -817,3 +817,71 @@ impl fmt::Display for SqlBinding {
         write!(f, "{}", self.name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ParsedSpan, Span, SqlCompositionAlias};
+    use std::path::PathBuf;
+
+    /// Test conversion: Span -> ParsedSpan
+    #[test]
+    fn parsed_span_from() {
+        let span = Span::new("");
+        // Into and From are allowed to consume the input.
+        // ParsedSpan does not consume the input.
+        let span_into_parsedspan: ParsedSpan = span.into();
+        let parsedspan_from_span = ParsedSpan::from(span);
+        assert_eq!(parsedspan_from_span, span_into_parsedspan);
+    }
+
+    #[test]
+    /// Test conversions to SqlCompositionAlias
+    fn sql_composition_alias_from() {
+        // PathBuf
+        {
+            let pathbuf = PathBuf::from("src/tests/single-template.tql");
+            // consumes the owned pathbuf
+            let sca_from_pathbuf = SqlCompositionAlias::from(pathbuf);
+
+            let pathbuf = PathBuf::from("src/tests/single-template.tql");
+            let pathbuf_into_sca: SqlCompositionAlias = (pathbuf).into();
+
+            assert_eq!(sca_from_pathbuf, pathbuf_into_sca);
+        }
+
+        // &PathBuf
+        {
+            let pathbuf = PathBuf::from("src/tests/single-template.tql");
+            let sca_from_pathbuf_alias = SqlCompositionAlias::from(&pathbuf);
+            let pathbuf_alias_into_sca: SqlCompositionAlias = (&pathbuf).into();
+
+            assert_eq!(sca_from_pathbuf_alias, pathbuf_alias_into_sca);
+        }
+
+        // &PathBuf
+        {
+            let pathbuf = PathBuf::from("src/tests/single-template.tql");
+            let sca_from_pathbuf_alias = SqlCompositionAlias::from(&pathbuf);
+            let pathbuf_alias_into_sca: SqlCompositionAlias = (&pathbuf).into();
+
+            assert_eq!(sca_from_pathbuf_alias, pathbuf_alias_into_sca);
+        }
+
+        //let sca_from_aliaspathbuf = SqlCompositionAlias::from(&pathbuf);
+        // PathBuf
+        // &PathBuf <-- should be &Path?
+        // &str
+        // String
+        // FromStr
+    }
+
+    #[test]
+    fn parsed_sql_composition_try_from() {
+        // &Path
+        // PathBuf
+        // &str
+        // missing: String
+        // SqlCompositionAlias
+        // FromStr
+    }
+}

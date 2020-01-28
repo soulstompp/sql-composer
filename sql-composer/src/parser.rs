@@ -845,8 +845,6 @@ mod tests {
         let item =
             template(Span::new(input.into()), input.into()).expect("expected Ok from template");
 
-        let alias = SqlCompositionAlias::from(input);
-
         let expected_item = SqlComposition {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", None, None, "SELECT"),

@@ -1,20 +1,46 @@
+//! Useful Types for parsing sql and tql.
+//!
+//!## Notes
+//!### TryFrom trait implementation
+//!
+//! We have implemented several concrete implementations of `TryFrom`.
+//! We would have preferred to implement `TryFrom` with a generic type constraint of `Into<PathBuf>`,
+//! but this is blocked by [Bug 50133].
+//!
+//! The underlying method, `SqlComposition::from_path()` provides a
+//! work around for any missing concrete implementations.
+//!
+//! [Bug 50133]: <https://github.com/rust-lang/rust/issues/50133>
+//!
+//! ``` ignore
+//! // Will not compile due to rust-lang/rust#50133
+//! impl ParsedItem<SqlComposition> {
+//!     pub fn try_from<P>(path: P) -> Result<Self>
+//!         where P: Into<PathBuf> + Debug {
+//!             let path = path.into();
+//!             let s = fs::read_to_string(&path)?;
+//!             SqlComposition::parse(&s, Some(SqlCompositionAlias::from_path(path)))
+//!         }
+//! }
+//! ```
 pub mod value;
 
-use crate::error::{ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
 
 use crate::parser::template;
 
 use std::collections::HashMap;
+use std::convert::{From, Into, TryFrom};
 use std::fmt;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 pub use nom_locate::LocatedSpan;
 
 pub type Span<'a> = LocatedSpan<& 'a str>;
 
-use std::fs::File;
-use std::io::prelude::*;
+use std::fs;
 
 pub struct Null();
 
@@ -81,6 +107,19 @@ impl ParsedSpan {
     }
 }
 
+// explicit lifetime for Span is required: Span<'a>
+// because "implicit elided lifetime is not allowed here"
+impl<'a> From<Span<'a>> for ParsedSpan {
+    fn from(span: Span) -> Self {
+        Self {
+            line: span.line,
+            offset: span.offset,
+            fragment: span.fragment.to_string(),
+            ..Default::default()
+        }
+    }
+}
+
 impl fmt::Display for ParsedSpan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "character {}, line {}", self.line, self.offset)?;
@@ -123,17 +162,44 @@ impl SqlCompositionAlias {
         Ok(SqlCompositionAlias::Path(PathBuf::from(&s)))
     }
 
-    pub fn from_path(p: &Path) -> Self {
-        SqlCompositionAlias::Path(p.into())
+    // TODO: Use Path/Pathbuf Into and From traits
+
+    pub fn from_path<P>(path: P) -> Self
+    where
+        P: Into<PathBuf> + std::fmt::Debug,
+    {
+        // TODO: include path in error.
+        // TODO: check if path is absolute or relative?
+        SqlCompositionAlias::Path(path.into())
     }
 
+    /// Return an owned copy of the PathBuf for SqlCompositionAlias::Path types.
     pub fn path(&self) -> Option<PathBuf> {
-        //! Returns the path as a PathBuf
-        if let SqlCompositionAlias::Path(p) = self {
-            Some(p.to_path_buf())
+        match self {
+            // PathBuf doesn't impl Copy, so use to_path_buf for a new one
+            SqlCompositionAlias::Path(p) => Some(p.to_path_buf()),
+            _ => None,
         }
-        else {
-            None
+    }
+}
+
+// str and Span will need to be moved to TryFrom
+// if the from_str match gets implemented
+impl<P> From<P> for SqlCompositionAlias
+where
+    P: Into<PathBuf> + std::fmt::Debug,
+{
+    fn from(path: P) -> Self {
+        SqlCompositionAlias::Path(path.into())
+    }
+}
+
+/// Destructively convert a SqlCompositionAlias into a PathBuf
+impl Into<Option<PathBuf>> for SqlCompositionAlias {
+    fn into(self) -> Option<PathBuf> {
+        match self {
+            SqlCompositionAlias::Path(p) => Some(p),
+            _ => None,
         }
     }
 }
@@ -158,12 +224,18 @@ impl fmt::Display for SqlCompositionAlias {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct ParsedItem<T: Debug + Default + PartialEq + Clone> {
+pub struct ParsedItem<T>
+where
+    T: Debug + Default + PartialEq + Clone,
+{
     pub item:     T,
     pub position: Position,
 }
 
-impl<T: Debug + Default + PartialEq + Clone> ParsedItem<T> {
+impl<T> ParsedItem<T>
+where
+    T: Debug + Default + PartialEq + Clone,
+{
     pub fn from_span(item: T, span: Span, alias: Option<SqlCompositionAlias>) -> Result<Self> {
         Ok(Self {
             item:     item,
@@ -224,20 +296,19 @@ impl SqlComposition {
         Ok(stmt)
     }
 
-    pub fn from_path(path: &Path) -> Result<ParsedItem<Self>> {
-        // TODO: include path in error.
-        let mut f = File::open(path)?;
-        let mut s = String::new();
+    /// Reads the file at path and parses with `Self::parse()`
+    ///
+    /// Relative paths are resolved from the directory where the code is executed.
+    ///
+    /// Can fail reading the contents of path or while parsing the contents.
+    pub fn from_path<P>(path: P) -> Result<ParsedItem<Self>>
+    where
+        P: AsRef<Path> + Debug,
+    {
+        let path = path.as_ref();
+        let s = fs::read_to_string(path)?;
 
-        let _res = f.read_to_string(&mut s);
-
-        Self::parse(s.as_str(), Some(SqlCompositionAlias::from_path(path.into())))
-    }
-
-    pub fn from_path_name(s: &str) -> Result<ParsedItem<SqlComposition>> {
-        let p = Path::new(s);
-
-        Self::from_path(p)
+        Self::parse(&s, Some(SqlCompositionAlias::from(path)))
     }
 
     pub fn column_list(&self) -> Result<Option<String>> {
@@ -366,6 +437,168 @@ impl fmt::Display for SqlComposition {
         }
 
         write!(f, ")")
+    }
+}
+
+/// Convenience type for consumers.
+pub type ParsedItemSql = ParsedItem<SqlComposition>;
+
+impl ParsedItemSql {
+    pub fn parse(q: &str, alias: Option<SqlCompositionAlias>) -> Result<Self> {
+        let stmt = template(Span::new(q.into()), alias)?;
+
+        Ok(stmt)
+    }
+}
+
+/// Equivalent to `SqlComposition::from_path(path)`.
+///
+/// # Examples
+///
+/// TryInto:
+/// ```
+/// use std::convert::TryInto;
+/// use std::path::Path;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = Path::new("src/tests/simple-template.tql");
+///   let stmt: ParsedItemSql = path.try_into()?;
+///   Ok(())
+/// }
+/// ```
+///
+///
+/// TryFrom:
+/// ```
+/// use std::convert::TryFrom;
+/// use std::path::Path;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = Path::new("src/tests/simple-template.tql");
+///   let stmt = ParsedItemSql::try_from(path)?;
+///   Ok(())
+/// }
+/// ```
+impl TryFrom<&Path> for ParsedItemSql {
+    type Error = Error;
+    fn try_from(path: &Path) -> Result<Self> {
+        SqlComposition::from_path(path)
+    }
+}
+
+/// Equivalent to `SqlComposition::from_path(path)`.
+///
+/// # Examples
+///
+/// TryInto:
+/// ```
+/// use std::convert::TryInto;
+/// use std::path::PathBuf;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = PathBuf::from("src/tests/simple-template.tql");
+///   let stmt: ParsedItemSql = path.try_into()?;
+///   Ok(())
+/// }
+/// ```
+///
+///
+/// TryFrom:
+/// ```
+/// use std::convert::TryFrom;
+/// use std::path::PathBuf;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = PathBuf::from("src/tests/simple-template.tql");
+///   let stmt = ParsedItemSql::try_from(path)?;
+///   Ok(())
+/// }
+/// ```
+impl TryFrom<PathBuf> for ParsedItemSql {
+    type Error = Error;
+    fn try_from(path: PathBuf) -> Result<Self> {
+        SqlComposition::from_path(path)
+    }
+}
+
+/// Equivalent to `SqlComposition::from_path(path)`.
+///
+/// # Examples
+///
+/// TryInto:
+/// ```
+/// use std::convert::TryInto;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = "src/tests/simple-template.tql";
+///   let stmt: ParsedItemSql = path.try_into()?;
+///   Ok(())
+/// }
+/// ```
+///
+///
+/// TryFrom:
+/// ```
+/// use std::convert::TryFrom;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = "src/tests/simple-template.tql";
+///   let stmt = ParsedItemSql::try_from(path)?;
+///   Ok(())
+/// }
+/// ```
+impl TryFrom<&str> for ParsedItemSql {
+    type Error = Error;
+    fn try_from(path: &str) -> Result<Self> {
+        SqlComposition::from_path(path)
+    }
+}
+
+/// Equivalent to `SqlComposition::from_path(path)`.
+///
+/// # Examples
+///
+/// TryInto:
+/// ```
+/// use std::convert::TryInto;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = String::from("src/tests/simple-template.tql");
+///   let stmt: ParsedItemSql = path.try_into()?;
+///   Ok(())
+/// }
+/// ```
+///
+///
+/// TryFrom:
+/// ```
+/// use std::convert::TryFrom;
+/// use sql_composer::{types::ParsedItemSql,
+///                    error::Result};
+/// fn main() -> Result<()> {
+///   let path = "src/tests/simple-template.tql".to_string();
+///   let stmt = ParsedItemSql::try_from(path)?;
+///   Ok(())
+/// }
+/// ```
+impl TryFrom<String> for ParsedItemSql {
+    type Error = Error;
+    fn try_from(path: String) -> Result<Self> {
+        SqlComposition::from_path(path)
+    }
+}
+
+impl FromStr for ParsedItemSql {
+    type Err = Error;
+    fn from_str(path: &str) -> Result<Self> {
+        SqlComposition::from_path(path)
     }
 }
 

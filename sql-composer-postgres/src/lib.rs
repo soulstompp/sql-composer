@@ -293,7 +293,7 @@ mod tests {
     fn test_bind_simple_template() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -754,7 +754,7 @@ mod tests {
     fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let bind_values = bind_values!(&dyn ToSql:
                                        "a" => [&"a_value"],

@@ -164,6 +164,7 @@ mod tests {
     use sql_composer::types::{ParsedSqlComposition, SqlCompositionAlias, SqlDbObject};
 
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use dotenv::dotenv;
     use std::env;
@@ -277,7 +278,7 @@ mod tests {
     fn test_mock_bind_simple_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -324,7 +325,7 @@ mod tests {
     fn test_bind_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/include.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/include.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -378,7 +379,7 @@ mod tests {
     fn test_bind_double_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/double-include.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/double-include.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -747,7 +748,7 @@ mod tests {
     fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let bind_values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],

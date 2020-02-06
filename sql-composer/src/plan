@@ -1,0 +1,61 @@
+# merge into #17 from #18 #20
+# 
+# 17: composer-driver-crates
+# 18: composer-driver-crates-with-into-and-from
+# 20: play/composers-try-from-aliases
+# 
+# eventually: #19 -- will have conflicts and some is no longer relevant
+# 19: play/parser-type-changes-no-option
+
+
+
+# delete old branches
+git branch -D merge/{17,18,19,20}
+
+# create testing branches
+git checkout -b merge/17 composer-driver-crates && \
+git checkout -b merge/18 composer-driver-crates-with-into-and-from && \
+git checkout -b merge/20 play/composers-try-from-aliases && \
+git checkout -b merge/19 play/parser-type-changes-no-option
+
+
+Check all the branches
+tig merge/{17,18,19,20} composer-driver-crates composer-driver-crates-with-into-and-from play/composers-try-from-aliases play/parser-type-changes-no-option
+
+# make sure merge/20 is rebased to 18 before starting. origin/driver-crates
+git checkout merge/20
+git rebase merge/18
+# fix conflicts from the extra !fixup commit at head of merge/18
+
+
+
+# check status
+tig merge/{17,18,19,20}
+
+# NOP
+git checkout merge/18 && \
+git rebase merge/17
+
+# check status
+git show merge/18 composer-driver-crates-with-into-and-from
+
+# rebase 20 onto 18
+git checkout merge/20 && \
+git rebase merge/18
+
+# check status (HEAD commits are different
+git show merge/20 play/composers-try-from-aliases
+
+# prepends the !fixup commit (195836f0)
+tig merge/20 play/composers-try-from-aliases
+
+# shows the only diff is from the fixup commit.
+git diff  merge/20 play/composers-try-from-aliases
+
+# now for the mess
+git checkout merge/19 && \
+git rebase merge/20
+
+# check status
+git show merge/19 play/parser-type-changes-no-option
+

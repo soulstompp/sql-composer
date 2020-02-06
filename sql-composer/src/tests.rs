@@ -20,7 +20,7 @@ pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
         extra: ()
     };
 
-    ParsedItem::from_span(item, span, None)
+    ParsedItem::from_span(item, span)
         .expect("expected Ok from ParsedItem::from_span in build_parsed_time()")
 }
 

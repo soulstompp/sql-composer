@@ -167,6 +167,7 @@ mod tests {
     use rusqlite::types::ToSql;
 
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use std::convert::TryInto;
 
@@ -287,8 +288,8 @@ mod tests {
         // can use try_into or try_from on to get a ParsedSqlComposition.  try_into needs explicit
         // type when we are only using it for &stmt.item
         // let stmt = ParsedSqlComposition::try_from("../sql-composer/src/tests/values/simple.tql")?;
-        // let stmt : ParsedSqlComposition = "../sql-composer/src/tests/values/simple.tql".try_into()?;
-        let stmt: ParsedSqlComposition = "../sql-composer/src/tests/values/simple.tql".try_into()?;
+        // let stmt : ParsedSqlComposition = PathBuf::from("../sql-composer/src/tests/values/simple.tql").try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("../sql-composer/src/tests/values/simple.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -359,7 +360,7 @@ mod tests {
     fn test_bind_include_template() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = "../sql-composer/src/tests/values/include.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("../sql-composer/src/tests/values/include.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -439,7 +440,7 @@ mod tests {
         let conn = setup_db();
 
         let stmt: ParsedSqlComposition =
-            "../sql-composer/src/tests/values/double-include.tql".try_into()?;
+            PathBuf::from("../sql-composer/src/tests/values/double-include.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -889,7 +890,7 @@ mod tests {
     fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = "src/tests/values/simple.tql".try_into()?;
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let bind_values = bind_values!(&dyn ToSql:
                                        "a" => [&"a_value"],

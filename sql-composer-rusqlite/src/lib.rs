@@ -287,7 +287,7 @@ mod tests {
 
         // can use try_into or try_from on to get a ParsedSqlComposition.  try_into needs explicit
         // type when we are only using it for &stmt.item
-        // let stmt = ParsedSqlComposition::try_from("../sql-composer/src/tests/values/simple.tql")?;
+        // let stmt = ParsedSqlComposition::try_from(PathBuf::from("../sql-composer/src/tests/values/simple.tql"))?;
         // let stmt : ParsedSqlComposition = PathBuf::from("../sql-composer/src/tests/values/simple.tql").try_into()?;
         let stmt: ParsedSqlComposition =
             PathBuf::from("../sql-composer/src/tests/values/simple.tql").try_into()?;

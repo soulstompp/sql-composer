@@ -32,13 +32,13 @@ use std::collections::HashMap;
 use std::convert::{From, Into, TryFrom};
 use std::fmt;
 use std::fmt::Debug;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::fs;
 
 pub use nom_locate::LocatedSpan;
 
-pub type Span<'a> = LocatedSpan<& 'a str>;
+pub type Span<'a> = LocatedSpan<&'a str>;
 
 pub struct Null();
 
@@ -135,7 +135,7 @@ impl fmt::Display for ParsedSpan {
 pub enum SqlCompositionAlias {
     Path(PathBuf),
     DbObject(SqlDbObject),
-    SqlLiteral(SqlLiteral)
+    SqlLiteral(SqlLiteral),
 }
 
 impl SqlCompositionAlias {
@@ -161,8 +161,6 @@ impl SqlCompositionAlias {
         Ok(SqlCompositionAlias::Path(PathBuf::from(&s)))
     }
 
-    // TODO: Use Path/Pathbuf Into and From traits
-
     pub fn from_path<P>(path: P) -> Self
     where
         P: Into<PathBuf> + std::fmt::Debug,
@@ -183,15 +181,9 @@ impl SqlCompositionAlias {
 
     pub fn read_raw_sql(&self) -> Result<String> {
         match self {
-            SqlCompositionAlias::DbObject(dbo) => {
-                Ok(dbo.to_string())
-            },
-            SqlCompositionAlias::Path(path) => {
-                Ok(fs::read_to_string(&path)?)
-            },
-            SqlCompositionAlias::SqlLiteral(s) => {
-                Ok(s.to_string())
-            }
+            SqlCompositionAlias::DbObject(dbo) => Ok(dbo.to_string()),
+            SqlCompositionAlias::Path(path) => Ok(fs::read_to_string(&path)?),
+            SqlCompositionAlias::SqlLiteral(s) => Ok(s.to_string()),
         }
     }
 }
@@ -207,38 +199,34 @@ impl SqlCompositionAlias {
 //    }
 //}
 
-impl From<PathBuf> for SqlCompositionAlias
-{
+impl From<PathBuf> for SqlCompositionAlias {
     fn from(path: PathBuf) -> Self {
         SqlCompositionAlias::Path(path.into())
     }
 }
 
-impl From<&PathBuf> for SqlCompositionAlias
-{
+impl From<&PathBuf> for SqlCompositionAlias {
     fn from(path: &PathBuf) -> Self {
         SqlCompositionAlias::Path(path.into())
     }
 }
 
-impl From<&str> for SqlCompositionAlias
-{
+impl From<&str> for SqlCompositionAlias {
     fn from(s: &str) -> Self {
-        SqlCompositionAlias::SqlLiteral(SqlLiteral{
-            id: None,
-            value: s.to_string(),
-            generated: false
+        SqlCompositionAlias::SqlLiteral(SqlLiteral {
+            id:        None,
+            value:     s.to_string(),
+            generated: false,
         })
     }
 }
 
-impl From<String> for SqlCompositionAlias
-{
+impl From<String> for SqlCompositionAlias {
     fn from(s: String) -> Self {
-        SqlCompositionAlias::SqlLiteral(SqlLiteral{
-            id: None,
-            value: s,
-            generated: false
+        SqlCompositionAlias::SqlLiteral(SqlLiteral {
+            id:        None,
+            value:     s,
+            generated: false,
         })
     }
 }
@@ -257,7 +245,7 @@ impl Default for SqlCompositionAlias {
     fn default() -> Self {
         //TODO: better default
         SqlCompositionAlias::DbObject(SqlDbObject {
-            id: None,
+            id:           None,
             object_name:  "DUAL".to_string(),
             object_alias: None,
         })
@@ -268,13 +256,11 @@ impl FromStr for SqlCompositionAlias {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        Ok(
-            SqlCompositionAlias::SqlLiteral(SqlLiteral {
-                id: None,
-                value: s.to_string(),
-                generated: false,
-            })
-        )
+        Ok(SqlCompositionAlias::SqlLiteral(SqlLiteral {
+            id:        None,
+            value:     s.to_string(),
+            generated: false,
+        }))
     }
 }
 
@@ -427,7 +413,9 @@ impl SqlComposition {
     //TODO: error if path already set to Some(_)
     pub fn set_position(&mut self, new: Position) -> Result<()> {
         match &self.position {
-            Some(_existing) => Err(ErrorKind::CompositionAliasConflict("bad posisition".into()).into()),
+            Some(_existing) => {
+                Err(ErrorKind::CompositionAliasConflict("bad posisition".into()).into())
+            }
             None => {
                 self.position = Some(new);
                 Ok(())
@@ -457,9 +445,10 @@ impl SqlComposition {
     }
 
     pub fn push_generated_end(&mut self, command: Option<String>) -> Result<()> {
-        self.push_sql(Sql::Ending(
-            ParsedItem::generated(SqlEnding { value: ";".into() }, command)?,
-        ))
+        self.push_sql(Sql::Ending(ParsedItem::generated(
+            SqlEnding { value: ";".into() },
+            command,
+        )?))
     }
 
     pub fn end(&mut self, value: &str, span: Span) -> Result<()> {
@@ -512,7 +501,7 @@ impl ParsedSqlComposition {
         T: Into<SqlCompositionAlias> + std::fmt::Debug,
     {
         //TODO: make this a ?, doesn't work for some reason, so unwrapping for now
-        let alias:SqlCompositionAlias = a.into();
+        let alias: SqlCompositionAlias = a.into();
         let stmt = template(Span::new(&alias.read_raw_sql()?), alias);
 
         stmt
@@ -718,7 +707,7 @@ impl fmt::Display for SqlEnding {
 
 #[derive(Debug, Default, Hash, Eq, PartialEq, Clone)]
 pub struct SqlDbObject {
-    pub id: Option<String>,
+    pub id:           Option<String>,
     pub object_name:  String,
     pub object_alias: Option<String>,
 }
@@ -726,7 +715,7 @@ pub struct SqlDbObject {
 impl SqlDbObject {
     pub fn new(name: String, alias: Option<String>) -> Result<Self> {
         Ok(Self {
-            id: None,
+            id:           None,
             object_name:  name,
             object_alias: alias,
         })
@@ -765,7 +754,7 @@ impl fmt::Display for SqlKeyword {
 
 #[derive(Debug, Hash, Eq, PartialEq, Default, Clone)]
 pub struct SqlLiteral {
-    pub id: Option<String>,
+    pub id:        Option<String>,
     pub value:     String,
     pub generated: bool,
 }

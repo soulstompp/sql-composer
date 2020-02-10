@@ -13,7 +13,7 @@ use sql_composer_serde::bind_value_named_set;
     feature = "dbd-postgres",
     feature = "dbd-rusqlite"
 ))]
-use sql_composer::types::{ParsedItemSql, Span, SqlComposition};
+use sql_composer::types::{ParsedSqlComposition, Span, SqlComposition};
 
 #[cfg(any(
     feature = "dbd-mysql",
@@ -21,6 +21,13 @@ use sql_composer::types::{ParsedItemSql, Span, SqlComposition};
     feature = "dbd-rusqlite"
 ))]
 use std::collections::{BTreeMap, HashMap};
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use std::path::PathBuf;
 
 #[cfg(any(
     feature = "dbd-mysql",
@@ -136,7 +143,10 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let comp = ParsedItemSql::try_from(args.path).unwrap().item;
+    let comp = {
+        let path = PathBuf::from(args.path);
+        ParsedSqlComposition::try_from(path).unwrap().item
+    };
 
     let uri = args.uri;
 

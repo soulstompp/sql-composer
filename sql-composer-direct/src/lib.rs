@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 use sql_composer::error::Result;
 use sql_composer::types::value::ToValue;
-use sql_composer::types::{ParsedItemSql, SqlBinding, SqlCompositionAlias};
+use sql_composer::types::{ParsedSqlComposition, SqlBinding, SqlCompositionAlias};
 
 pub struct Connection();
 
@@ -72,7 +72,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -81,7 +81,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_union_command(
         &self,
-        composition: &ParsedItemSql,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -103,7 +103,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Composer, ComposerTrait, ParsedItemSql, Result, ToValue};
+    use super::{Composer, ComposerTrait, ParsedSqlComposition, Result, ToValue};
 
     type EmptyResult = Result<()>;
 
@@ -128,7 +128,7 @@ mod tests {
             data:         None,
         };
 
-        let insert_stmt = ParsedItemSql::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));", None)?;
+        let insert_stmt = ParsedSqlComposition::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));")?;
 
         let mut composer = Composer::new();
 
@@ -149,7 +149,7 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let select_stmt = ParsedItemSql::parse("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';", None)?;
+        let select_stmt = ParsedSqlComposition::parse("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';")?;
 
         let (bound_sql, _bindings) = composer.compose(&select_stmt.item)?;
 

@@ -25,15 +25,15 @@ use crate::types::{ParsedItem, ParsedSqlComposition, Position, Span, Sql, SqlCom
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct SqlComposition {
-    pub command:      Option<ParsedItem<String>>,
-    pub distinct:     Option<ParsedItem<bool>>,
-    pub all:          Option<ParsedItem<bool>>,
-    pub columns:      Option<Vec<ParsedItem<String>>>,
+    pub command:  Option<ParsedItem<String>>,
+    pub distinct: Option<ParsedItem<bool>>,
+    pub all:      Option<ParsedItem<bool>>,
+    pub columns:  Option<Vec<ParsedItem<String>>>,
     pub source_alias: SqlCompositionAlias,
-    pub of:           Vec<ParsedItem<SqlCompositionAlias>>,
-    pub aliases:      HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>>,
-    pub sql:          Vec<Sql>,
-    pub position:     Option<Position>,
+    pub of:       Vec<ParsedItem<SqlCompositionAlias>>,
+    pub aliases:  HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>>,
+    pub sql:      Vec<Sql>,
+    pub position: Option<Position>,
 }
 
 impl SqlComposition {

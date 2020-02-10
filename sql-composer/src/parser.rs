@@ -37,42 +37,38 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
 }
 
 pub fn template(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlComposition> {
-
     let mut iter = iterator(span, sql_sets);
     let initial: Result<ParsedSqlComposition> = Ok(ParsedItem::default());
 
-    let mut comp = iter.fold(
-        initial,
-        |acc_res, items| match acc_res {
-            Ok(mut acc) => {
-                for item in items {
-                    match item {
-                        Sql::Composition((mut sc, aliases)) => {
-                            for alias in &aliases {
-                                let stmt_path = alias.path().expect("expected alias path");
+    let mut comp = iter.fold(initial, |acc_res, items| match acc_res {
+        Ok(mut acc) => {
+            for item in items {
+                match item {
+                    Sql::Composition((mut sc, aliases)) => {
+                        for alias in &aliases {
+                            let stmt_path = alias.path().expect("expected alias path");
 
-                                sc.item
-                                    .insert_alias(&stmt_path)
-                                    .expect("expected insert_alias");
-                            }
-
-                            if acc.item.sql.len() == 0 {
-                                return Ok(sc);
-                            }
-
-                            acc.item.push_sql(Sql::Composition((sc, aliases)))?;
+                            sc.item
+                                .insert_alias(&stmt_path)
+                                .expect("expected insert_alias");
                         }
-                        _ => {
-                            acc.item.push_sql(item)?;
+
+                        if acc.item.sql.len() == 0 {
+                            return Ok(sc);
                         }
+
+                        acc.item.push_sql(Sql::Composition((sc, aliases)))?;
+                    }
+                    _ => {
+                        acc.item.push_sql(item)?;
                     }
                 }
-
-                Ok(acc)
             }
-            Err(e) => Err(e),
-        },
-    )?;
+
+            Ok(acc)
+        }
+        Err(e) => Err(e),
+    })?;
 
     let (_remaining, _) = iter.finish().expect("iterator should always finish");
 
@@ -163,8 +159,7 @@ pub fn command_all_arg(span: Span) -> IResult<Span, Option<ParsedItem<bool>>> {
 
     let all = match all_tag {
         Some(d) => Some(
-            ParsedItem::from_span(true, d)
-                .expect("Unable to parse bool flag from command_all_arg"),
+            ParsedItem::from_span(true, d).expect("Unable to parse bool flag from command_all_arg"),
         ),
         None => None,
     };

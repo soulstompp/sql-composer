@@ -325,8 +325,7 @@ pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
     // TODO: fix SqlCompositionAlias::from_span
     // let alias = SqlCompositionAlias::from_span(of_name).expect("expected alias from_span in of_list");
     let alias = SqlCompositionAlias::from(PathBuf::from(of_name.fragment));
-    let pi =
-        ParsedItem::from_span(alias, of_name).expect("unable to build parsed item for alias");
+    let pi = ParsedItem::from_span(alias, of_name).expect("unable to build parsed item for alias");
 
     Ok((span, pi))
 }

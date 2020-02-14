@@ -50,5 +50,8 @@ error_chain! {
         Utf8(std::str::Utf8Error);
         StringUtf8(std::string::FromUtf8Error);
         Io(std::io::Error);
+        Mysql(mysql::error::Error) #[cfg(feature = "mysql")];
+        Postgres(postgres::error::Error) #[cfg(feature = "postgres")];
+        Sqlite(rusqlite::Error) #[cfg(feature = "rusqlite")];
     }
 }

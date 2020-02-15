@@ -1,15 +1,19 @@
+// this is used during tests, must be at root
+#[allow(unused_imports)]
+#[macro_use]
+extern crate sql_composer;
+
 use std::collections::{BTreeMap, HashMap};
 
-use super::{Composer, ComposerConfig};
-
-use crate::types::{ParsedItem, SqlBinding, SqlComposition, SqlCompositionAlias};
-
-use crate::types::value::ToValue;
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
+use sql_composer::error::Result;
+use sql_composer::types::value::ToValue;
+use sql_composer::types::{ParsedSqlComposition, SqlBinding, SqlCompositionAlias};
 
 pub struct Connection();
 
 #[derive(Default)]
-pub struct DirectComposer<'a> {
+pub struct Composer<'a> {
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
@@ -17,7 +21,7 @@ pub struct DirectComposer<'a> {
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a str>>>,
 }
 
-impl<'a> DirectComposer<'a> {
+impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
             config: Self::config(),
@@ -27,15 +31,14 @@ impl<'a> DirectComposer<'a> {
     }
 }
 
-impl<'a> Composer for DirectComposer<'a> {
+impl<'a> ComposerTrait for Composer<'a> {
     type Value = &'a str;
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
     }
 
-    //TODO: error handling
-    fn binding_tag(&self, _u: usize, name: String) -> String {
+    fn binding_tag(&self, _u: usize, name: String) -> Result<String> {
         let mut s = String::new();
 
         if let Some(values) = self.values.get(&name) {
@@ -44,22 +47,23 @@ impl<'a> Composer for DirectComposer<'a> {
                     s.push(',');
                 }
 
-                s.push_str(&value.to_sql_text().unwrap().to_string());
+                let v = &value.to_sql_text()?;
+                s.push_str(&v.to_string());
             }
         }
         else {
-            panic!("don't have proper error handling yet!");
+            unimplemented!("unexpected binding_tag error!");
         }
 
-        s
+        Ok(s)
     }
 
     fn compose_binding(
         &self,
         binding: SqlBinding,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
-        Ok((self.binding_tag(offset, binding.name), vec![]))
+    ) -> Result<(String, Vec<Self::Value>)> {
+        Ok((self.binding_tag(offset, binding.name)?, vec![]))
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {
@@ -68,19 +72,19 @@ impl<'a> Composer for DirectComposer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedItem<SqlComposition>,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_count_default_command(composition, offset, child)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedItem<SqlComposition>,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_union_default_command(composition, offset, child)
     }
 
@@ -99,12 +103,9 @@ impl<'a> Composer for DirectComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::bind_values;
+    use super::{Composer, ComposerTrait, ParsedSqlComposition, Result, ToValue};
 
-    use super::{Composer, DirectComposer, ToValue};
-    use crate::parser::parse_template;
-
-    use crate::types::Span;
+    type EmptyResult = Result<()>;
 
     use chrono::prelude::*;
 
@@ -117,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binding() {
+    fn test_db_binding() -> EmptyResult {
         let now = Local::now();
 
         let person = Person {
@@ -127,21 +128,17 @@ mod tests {
             data:         None,
         };
 
-        let (remaining, insert_stmt) = parse_template(Span::new("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));".into()), None).unwrap();
+        let insert_stmt = ParsedSqlComposition::parse("INSERT INTO person (name, time_created, data) VALUES (:bind(name), :bind(time_created), :bind(data));")?;
 
-        assert_eq!(remaining.fragment, "", "nothing remaining");
-
-        let mut composer = DirectComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "name" => [&person.name],
-        "time_created" => [&person.time_created],
-        "data" => [&person.data]
+                                       "name"         => [&person.name],
+                                       "time_created" => [&person.time_created],
+                                       "data"         => [&person.data]
         );
 
-        let (bound_sql, _bindings) = composer
-            .compose(&insert_stmt.item)
-            .expect("compose should work");
+        let (bound_sql, _bindings) = composer.compose(&insert_stmt.item)?;
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -152,17 +149,14 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';".into()), None).unwrap();
+        let select_stmt = ParsedSqlComposition::parse("SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';")?;
 
-        assert_eq!(remaining.fragment, "", "nothing remaining");
-
-        let (bound_sql, _bindings) = composer
-            .compose(&select_stmt.item)
-            .expect("compose should work");
+        let (bound_sql, _bindings) = composer.compose(&select_stmt.item)?;
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
+        Ok(())
     }
 
     #[test]

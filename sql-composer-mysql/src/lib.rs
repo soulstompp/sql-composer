@@ -1,21 +1,37 @@
+// this is used during tests, must be at root
+#[allow(unused_imports)]
+#[macro_use]
+extern crate sql_composer;
+
 use std::collections::{BTreeMap, HashMap};
 
-use mysql::{prelude::ToValue, Stmt};
+use mysql::prelude::ToValue;
+use mysql::Stmt;
 
 #[cfg(feature = "composer-serde")]
-use mysql::Value;
+pub use mysql::Value;
 
-use super::{Composer, ComposerConfig, ComposerConnection};
+use mysql::Pool;
 
-use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
+use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
-#[cfg(feature = "composer-serde")]
-use crate::types::SerdeValue;
+use sql_composer::types::{ParsedSqlComposition, SqlComposition, SqlCompositionAlias};
+
+use sql_composer::error::Result;
 
 #[cfg(feature = "composer-serde")]
 use serde_value::Value as SerdeValueEnum;
 
-use mysql::Pool;
+#[cfg(feature = "composer-serde")]
+#[derive(Clone, Debug)]
+pub struct SerdeValue(pub SerdeValueEnum);
+
+#[cfg(feature = "composer-serde")]
+impl PartialEq for SerdeValue {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
 
 #[cfg(feature = "composer-serde")]
 impl Into<Value> for SerdeValue {
@@ -28,8 +44,24 @@ impl Into<Value> for SerdeValue {
         }
     }
 }
+
+pub trait ComposerConnection<'a> {
+    type Composer;
+    //TODO: this should be Composer::Value but can't be specified as Self::Value::Connection
+    type Value;
+    type Statement;
+
+    fn compose(
+        &'a self,
+        s: &SqlComposition,
+        values: BTreeMap<String, Vec<Self::Value>>,
+        root_mock_values: Vec<BTreeMap<String, Self::Value>>,
+        mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
+    ) -> Result<(Self::Statement, Vec<Self::Value>)>;
+}
+
 impl<'a> ComposerConnection<'a> for Pool {
-    type Composer = MysqlComposer<'a>;
+    type Composer = Composer<'a>;
     type Value = &'a (dyn ToValue + 'a);
     type Statement = Stmt<'a>;
 
@@ -39,9 +71,9 @@ impl<'a> ComposerConnection<'a> for Pool {
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
-    ) -> Result<(Self::Statement, Vec<Self::Value>), ()> {
-        let c = MysqlComposer {
-            config: MysqlComposer::config(),
+    ) -> Result<(Self::Statement, Vec<Self::Value>)> {
+        let c = Composer {
+            config: Composer::config(),
             values,
             root_mock_values,
             mock_values,
@@ -49,14 +81,15 @@ impl<'a> ComposerConnection<'a> for Pool {
 
         let (sql, bind_vars) = c.compose(s)?;
 
-        //TODO: support a DriverError type to handle this better
-        let stmt = self.prepare(&sql).or_else(|_| Err(()))?;
+        let stmt = self.prepare(&sql)?;
 
         Ok((stmt, bind_vars))
     }
 }
 
-pub struct MysqlComposer<'a> {
+#[derive(Default)]
+pub struct Composer<'a> {
+    // TODO: why is config never used?
     #[allow(dead_code)]
     config:           ComposerConfig,
     values:           BTreeMap<String, Vec<&'a dyn ToValue>>,
@@ -64,43 +97,42 @@ pub struct MysqlComposer<'a> {
     mock_values:      HashMap<SqlCompositionAlias, Vec<BTreeMap<String, &'a dyn ToValue>>>,
 }
 
-impl<'a> MysqlComposer<'a> {
+impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
             config:           Self::config(),
             values:           BTreeMap::new(),
-            root_mock_values: vec![],
-            mock_values:      HashMap::new(),
+            ..Default::default()
         }
     }
 }
 
-impl<'a> Composer for MysqlComposer<'a> {
+impl<'a> ComposerTrait for Composer<'a> {
     type Value = &'a (dyn ToValue + 'a);
 
     fn config() -> ComposerConfig {
         ComposerConfig { start: 0 }
     }
 
-    fn binding_tag(&self, _u: usize, _name: String) -> String {
-        format!("?")
+    fn binding_tag(&self, _u: usize, _name: String) -> Result<String> {
+        Ok(format!("?"))
     }
 
     fn compose_count_command(
         &self,
-        composition: &ParsedItem<SqlComposition>,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_count_default_command(composition, offset, child)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedItem<SqlComposition>,
+        composition: &ParsedSqlComposition,
         offset: usize,
         child: bool,
-    ) -> Result<(String, Vec<Self::Value>), ()> {
+    ) -> Result<(String, Vec<Self::Value>)> {
         self.compose_union_default_command(composition, offset, child)
     }
 
@@ -123,22 +155,26 @@ impl<'a> Composer for MysqlComposer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{bind_values, mock_db_object_values, mock_path_values, mock_values};
+    use super::{Composer, ComposerConnection, ComposerTrait};
 
-    use super::{Composer, ComposerConnection, MysqlComposer};
-
-    use crate::parser::parse_template;
-    use crate::types::{ParsedItem, Span, SqlComposition, SqlCompositionAlias, SqlDbObject};
     use mysql::prelude::ToValue;
     use mysql::{from_row, Pool, Row};
 
+    use sql_composer::error::Result;
+    use sql_composer::types::{ParsedSqlComposition, SqlCompositionAlias, SqlDbObject};
+
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use dotenv::dotenv;
     use std::env;
 
+    use std::convert::TryInto;
 
-    #[derive(Debug, PartialEq)]
+    // Return empty result to allow use of ? in tests
+    type EmptyResult = Result<()>;
+
+    #[derive(Debug, Default, PartialEq)]
     struct Person {
         id:   i32,
         name: String,
@@ -163,53 +199,43 @@ mod tests {
                         )",
             (),
         )
-        .unwrap();
+        .expect("Expected to create person table");
 
         pool
     }
 
     #[test]
-    fn test_binding() {
+    fn test_db_binding() -> EmptyResult {
         let pool = setup_db();
 
         let person = Person {
             id:   0,
             name: "Steven".to_string(),
-            data: None,
+            ..Default::default()
         };
 
-        let mut composer = MysqlComposer::new();
+        let insert_stmt = ParsedSqlComposition::parse(
+            "INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
+        )?;
 
-        let (remaining, insert_stmt) = parse_template(
-            Span::new("INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));".into()),
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(remaining.fragment, "", "insert stmt nothing remaining");
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "name" => [&person.name],
-        "data" => [&person.data]
+                                       "name" => [&person.name],
+                                       "data" => [&person.data]
         );
 
-        let (bound_sql, bindings) = composer
-            .compose(&insert_stmt.item)
-            .expect("compose should work");
+        let (bound_sql, bindings) = composer.compose(&insert_stmt.item)?;
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ( ?, ? );";
 
         assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
 
-        let _res = &pool.prep_exec(&bound_sql, &bindings.as_slice());
+        &pool.prep_exec(&bound_sql, &bindings.as_slice())?;
 
-        let (remaining, select_stmt) = parse_template(Span::new("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';".into()), None).unwrap();
+        let select_stmt = ParsedSqlComposition::parse("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';")?;
 
-        assert_eq!(remaining.fragment, "", "select stmt nothing remaining");
-
-        let (bound_sql, bindings) = composer
-            .compose(&select_stmt.item)
-            .expect("compose should work");
+        let (bound_sql, bindings) = composer.compose(&select_stmt.item)?;
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = ? AND name = ?;";
 
@@ -226,21 +252,14 @@ mod tests {
                         data: row.get(2).unwrap(),
                     })
                     .collect()
-            })
-            .unwrap();
+            })?;
 
         assert_eq!(people.len(), 1, "found 1 person");
         let found = &people[0];
 
         assert_eq!(found.name, person.name, "person's name");
         assert_eq!(found.data, person.data, "person's data");
-    }
-
-    #[allow(dead_code)]
-    fn parse(input: &str) -> ParsedItem<SqlComposition> {
-        let (_remaining, stmt) = parse_template(Span::new(input.into()), None).unwrap();
-
-        stmt
+        Ok(())
     }
 
     fn get_row_values(row: Row) -> Vec<String> {
@@ -256,12 +275,12 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_bind_simple_template() {
+    fn test_mock_bind_simple_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -270,38 +289,46 @@ mod tests {
                                        "d" => [&"d_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        composer.root_mock_values = mock_values!(&dyn ToValue: {"col_1" => &"a_value", "col_2" => &"b_value", "col_3" => &"c_value", "col_4" => &"d_value"});
+        let mock_values = mock_values!(&dyn ToValue: {
+            "col_1" => &"a_value",
+            "col_2" => &"b_value",
+            "col_3" => &"c_value",
+            "col_4" => &"d_value"
+        });
 
-        let (mock_bound_sql, mock_bindings) =
-            composer.compose(&stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0)?;
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        mock_bound_sql.push(';');
+
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
-        let _mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let _mock_prep_stmt = pool.prepare(&bound_sql)?;
 
-        for row in prep_stmt.execute(mock_bindings.as_slice()).unwrap() {
-            mock_values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(mock_bindings.as_slice())? {
+            mock_values.push(get_row_values(row?));
         }
 
         assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_bind_include_template() {
+    fn test_bind_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/include.tql".into()).unwrap();
+        let stmt: ParsedSqlComposition =
+            PathBuf::from("src/tests/values/include.tql").try_into()?;
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -323,92 +350,92 @@ mod tests {
             "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0);
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0)?;
 
         mock_bound_sql.push(';');
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(&bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
-        let mut mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut mock_prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in mock_prep_stmt.execute(&mock_bindings.as_slice()).unwrap() {
-            mock_values.push(get_row_values(row.unwrap()));
+        for row in mock_prep_stmt.execute(&mock_bindings.as_slice())? {
+            mock_values.push(get_row_values(row?));
         }
 
         assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_bind_double_include_template() {
+    fn test_bind_double_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt =
-            SqlComposition::from_path_name("src/tests/values/double-include.tql".into()).unwrap();
+        let stmt: ParsedSqlComposition =
+            PathBuf::from("src/tests/values/double-include.tql").try_into()?;
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"]
         );
 
         let mock_values = mock_values!(&dyn ToValue: {
-        "col_1" => &"d_value",
-        "col_2" => &"f_value",
-        "col_3" => &"b_value",
-        "col_4" => &"a_value"
+            "col_1" => &"d_value",
+            "col_2" => &"f_value",
+            "col_3" => &"b_value",
+            "col_4" => &"a_value"
         },
         {
-        "col_1" => &"e_value",
-        "col_2" => &"d_value",
-        "col_3" => &"b_value",
-        "col_4" => &"a_value"
+            "col_1" => &"e_value",
+            "col_2" => &"d_value",
+            "col_3" => &"b_value",
+            "col_4" => &"a_value"
         },
         {
-        "col_1" => &"a_value",
-        "col_2" => &"b_value",
-        "col_3" => &"c_value",
-        "col_4" => &"d_value"
+            "col_1" => &"a_value",
+            "col_2" => &"b_value",
+            "col_3" => &"c_value",
+            "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1);
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 1)?;
 
         mock_bound_sql.push(';');
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(&bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
         assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
 
-        let mut mock_prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut mock_prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in mock_prep_stmt.execute(&mock_bindings.as_slice()).unwrap() {
+        for row in mock_prep_stmt.execute(&mock_bindings.as_slice())? {
             let mut c: Vec<String> = vec![];
 
-            let (col_1, col_2, col_3, col_4) =
-                from_row::<(String, String, String, String)>(row.unwrap());
+            let (col_1, col_2, col_3, col_4) = from_row::<(String, String, String, String)>(row?);
             c.push(col_1);
             c.push(col_2);
             c.push(col_3);
@@ -418,13 +445,14 @@ mod tests {
         }
 
         assert_eq!(values, mock_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_multi_value_bind() {
+    fn test_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(Span::new("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));".into()), None).unwrap();
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -433,88 +461,7 @@ mod tests {
             vec!["a_value", "b_value", "c_value", "d_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
-
-        composer.values = bind_values!(&dyn ToValue:
-                                       "a" => [&"a_value"],
-                                       "b" => [&"b_value"],
-                                       "c" => [&"c_value"],
-                                       "d" => [&"d_value"],
-                                       "e" => [&"e_value"],
-                                       "f" => [&"f_value"],
-                                       "col_1_values" => [&"d_value",
-                                       &"a_value"],
-                                       "col_3_values" => [&"b_value",
-                                       &"c_value"]
-        );
-
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
-
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
-
-        let mut values: Vec<Vec<String>> = vec![];
-
-        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
-        }
-
-        assert_eq!(values, expected_values, "exected values");
-    }
-
-    #[test]
-    fn test_count_command() {
-        let pool = setup_db();
-
-        let (_remaining, stmt) = parse_template(
-            Span::new(":count(src/tests/values/double-include.tql);".into()),
-            None,
-        )
-        .unwrap();
-
-        let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
-
-        let mut composer = MysqlComposer::new();
-
-        composer.values = bind_values!(&dyn ToValue:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"d_value", &"a_value"],
-        "col_3_values" => [&"b_value", &"c_value"]
-        );
-
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
-
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
-
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
-
-        let mut values: Vec<Vec<usize>> = vec![];
-
-        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
-            let count = from_row::<(usize)>(row.unwrap());
-            values.push(vec![count]);
-        }
-
-        let expected_values: Vec<Vec<usize>> = vec![vec![3]];
-
-        assert_eq!(values, expected_values, "exected values");
-    }
-
-    #[test]
-    fn test_union_command() {
-        let pool = setup_db();
-
-        let (_remaining, stmt) = parse_template(Span::new(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);".into()), None).unwrap();
-
-        let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
-
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -527,18 +474,96 @@ mod tests {
                                        "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(&stmt.item).expect("compose should work");
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
 
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
+        assert_eq!(values, expected_values, "exected values");
+        Ok(())
+    }
+
+    #[test]
+    fn test_count_command() -> EmptyResult {
+        let pool = setup_db();
+
+        let stmt = ParsedSqlComposition::parse(":count(src/tests/values/double-include.tql);")?;
+
+        let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
+
+        let mut composer = Composer::new();
+
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
+        );
+
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
+
+        let mut values: Vec<Vec<usize>> = vec![];
+
+        for row in prep_stmt.execute(bindings.as_slice())? {
+            let count = from_row::<(usize)>(row?);
+            values.push(vec![count]);
+        }
+
+        let expected_values: Vec<Vec<usize>> = vec![vec![3]];
+
+        assert_eq!(values, expected_values, "exected values");
+        Ok(())
+    }
+
+    #[test]
+    fn test_union_command() -> EmptyResult {
+        let pool = setup_db();
+
+        let stmt = ParsedSqlComposition::parse(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);")?;
+
+        let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
+
+        let mut composer = Composer::new();
+
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
+        );
+
+        let (bound_sql, bindings) = composer.compose(&stmt.item)?;
+
+        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
+
+        let mut values: Vec<Vec<String>> = vec![];
+
+        for row in prep_stmt.execute(bindings.as_slice())? {
+            values.push(get_row_values(row?));
+        }
+
+        // TODO: why are values 0 and 1 swapped vs postgres?
         let expected_values = vec![
             vec!["d_value", "f_value", "b_value", "a_value"],
             vec!["e_value", "d_value", "b_value", "a_value"],
@@ -548,13 +573,14 @@ mod tests {
         ];
 
         assert_eq!(values, expected_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_include_mock_multi_value_bind() {
+    fn test_include_mock_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(Span::new("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));".into()), None).unwrap();
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -563,7 +589,7 @@ mod tests {
             vec!["ee_value", "dd_value", "bb_value", "aa_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -576,36 +602,33 @@ mod tests {
                                        "col_3_values" => [&"bb_value", &"b_value"]
         );
 
-        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/include.tql" => [
-        {
-        "col_1" => &"ee_value",
-        "col_2" => &"dd_value",
-        "col_3" => &"bb_value",
-        "col_4" => &"aa_value"
+        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/include.tql" => [{
+            "col_1" => &"ee_value",
+            "col_2" => &"dd_value",
+            "col_3" => &"bb_value",
+            "col_4" => &"aa_value"
         }]);
 
-        let (bound_sql, bindings) = composer
-            .compose_statement(&stmt, 0, false)
-            .expect("compose_statement should work");
-
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false)?;
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(&bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
         assert_eq!(values, expected_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_mock_double_include_multi_value_bind() {
+    fn test_mock_double_include_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(Span::new("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));".into()), None).unwrap();
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -615,21 +638,20 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
-        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/double-include.tql" => [
-        {
+        composer.mock_values = mock_path_values!(&dyn ToValue: "src/tests/values/double-include.tql" => [{
             "col_1" => &"dd_value",
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
@@ -648,28 +670,26 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer
-            .compose_statement(&stmt, 0, false)
-            .expect("compose_statement should work");
-
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false)?;
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(&bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
         assert_eq!(values, expected_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn test_mock_db_object() {
+    fn test_mock_db_object() -> EmptyResult {
         let pool = setup_db();
 
-        let (_remaining, stmt) = parse_template(Span::new("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));".into()), None).unwrap();
+        let stmt = ParsedSqlComposition::parse("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -679,17 +699,17 @@ mod tests {
             vec!["aa_value", "bb_value", "cc_value", "dd_value"],
         ];
 
-        let mut composer = MysqlComposer::new();
+        let mut composer = Composer::new();
 
         composer.values = bind_values!(&dyn ToValue:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"],
-        "e" => [&"e_value"],
-        "f" => [&"f_value"],
-        "col_1_values" => [&"dd_value", &"aa_value"],
-        "col_3_values" => [&"bb_value", &"cc_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"dd_value", &"aa_value"],
+                                       "col_3_values" => [&"bb_value", &"cc_value"]
         );
 
         composer.mock_values = mock_db_object_values!(&dyn ToValue: "main" => [{
@@ -697,58 +717,55 @@ mod tests {
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
-                },
-                {
+        },
+        {
             "col_1" => &"dd_value",
             "col_2" => &"ff_value",
             "col_3" => &"bb_value",
             "col_4" => &"aa_value"
-                },
-                {
+        },
+        {
             "col_1" => &"aa_value",
             "col_2" => &"bb_value",
             "col_3" => &"cc_value",
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer
-            .compose_statement(&stmt, 0, false)
-            .expect("compose_statement should work");
-
+        let (bound_sql, bindings) = composer.compose_statement(&stmt, 0, false)?;
         assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
 
-        let mut prep_stmt = pool.prepare(&bound_sql).unwrap();
+        let mut prep_stmt = pool.prepare(&bound_sql)?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(&bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(&bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
         assert_eq!(values, expected_values, "exected values");
+        Ok(())
     }
 
     #[test]
-    fn it_composes_from_connection() {
+    fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt = SqlComposition::from_path_name("src/tests/values/simple.tql".into()).unwrap();
+        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let bind_values = bind_values!(&dyn ToValue:
-        "a" => [&"a_value"],
-        "b" => [&"b_value"],
-        "c" => [&"c_value"],
-        "d" => [&"d_value"]
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"]
         );
 
-        let (mut prep_stmt, bindings) = conn
-            .compose(&stmt.item, bind_values, vec![], HashMap::new())
-            .unwrap();
+        let (mut prep_stmt, bindings) =
+            conn.compose(&stmt.item, bind_values, vec![], HashMap::new())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in prep_stmt.execute(bindings.as_slice()).unwrap() {
-            values.push(get_row_values(row.unwrap()));
+        for row in prep_stmt.execute(bindings.as_slice())? {
+            values.push(get_row_values(row?));
         }
 
         let expected: Vec<Vec<String>> = vec![vec![
@@ -759,5 +776,6 @@ mod tests {
         ]];
 
         assert_eq!(values, expected, "exected values");
+        Ok(())
     }
 }

@@ -1,37 +1,77 @@
-use quicli::prelude::*;
+use quicli::prelude::{CliResult, Verbosity};
 use structopt::StructOpt;
 
-use sql_composer::types::{SerdeValue, SqlComposition};
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use sql_composer_serde::bind_value_named_set;
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use sql_composer::types::{ParsedSqlComposition, Span, SqlComposition};
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use std::collections::{BTreeMap, HashMap};
 
-use sql_composer::composer::ComposerConnection;
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use std::path::PathBuf;
 
-use sql_composer::parser::bind_value_named_set;
-use sql_composer::types::{CompleteStr, Span};
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
+use std::convert::TryFrom;
 
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use serde_value::Value;
 
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use std::io;
-use std::path::Path;
 
 #[cfg(feature = "dbd-mysql")]
-use mysql::prelude::ToValue as MySqlToSql;
+use mysql::{prelude::ToValue as MySqlToSql, Pool};
 #[cfg(feature = "dbd-mysql")]
-use mysql::Pool;
-#[cfg(feature = "dbd-mysql")]
-use mysql::Value as MySqlValue;
+use sql_composer_mysql::{ComposerConnection as MysqlComposerConnection,
+                         SerdeValue as MySqlSerdeValue, Value as MySqlValue};
 
 #[cfg(feature = "dbd-postgres")]
 use postgres::types as pg_types;
 #[cfg(feature = "dbd-postgres")]
 use postgres::types::ToSql as PgToSql;
 #[cfg(feature = "dbd-postgres")]
-use postgres::{Connection as PgConnection, TlsMode as PgTlsMode};
+use sql_composer_postgres::{ComposerConnection as PgComposerConnection,
+                            Connection as PgConnection, SerdeValue as PgSerdeValue,
+                            TlsMode as PgTlsMode};
 
 #[cfg(feature = "dbd-rusqlite")]
 pub use rusqlite::types::{Null, ToSql as RusqliteToSql, ValueRef as RusqliteValueRef};
 #[cfg(feature = "dbd-rusqlite")]
-use rusqlite::Connection as RusqliteConnection;
+use sql_composer_rusqlite::{ComposerConnection as RusqliteComposerConnection,
+                            Connection as RusqliteConnection, SerdeValue as RusqliteSerdeValue};
+#[cfg(feature = "dbd-rusqlite")]
+use std::path::Path;
 
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
@@ -98,18 +138,17 @@ fn setup(verbosity: Verbosity) -> CliResult {
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
 
-    let parsed_comp = SqlComposition::from_path_name(&args.path).unwrap();
-    let comp = parsed_comp.item;
+    #[cfg(any(
+        feature = "dbd-mysql",
+        feature = "dbd-postgres",
+        feature = "dbd-rusqlite"
+    ))]
+    let comp = {
+        let path = PathBuf::from(args.path);
+        ParsedSqlComposition::try_from(path).unwrap().item
+    };
 
     let uri = args.uri;
-
-    let mut parsed_values: BTreeMap<String, Vec<SerdeValue>> = BTreeMap::new();
-
-    if let Some(b) = args.bind {
-        let (_remaining, bvns) = bind_value_named_set(Span::new(CompleteStr(&b))).unwrap();
-
-        parsed_values = bvns;
-    }
 
     if uri.starts_with("mysql://") {
         if cfg!(feature = "dbd-mysql") == false {
@@ -117,7 +156,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-mysql")]
-        query_mysql(uri, comp, parsed_values)?;
+        query_mysql(uri, comp, args.bind)?;
     }
     else if uri.starts_with("postgres://") {
         if cfg!(feature = "dbd-postgres") == false {
@@ -125,7 +164,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-postgres")]
-        query_postgres(uri, comp, parsed_values)?;
+        query_postgres(uri, comp, args.bind)?;
     }
     else if uri.starts_with("sqlite://") {
         if cfg!(feature = "dbd-rusqlite") == false {
@@ -133,7 +172,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-rusqlite")]
-        query_rusqlite(uri, comp, parsed_values)?;
+        query_rusqlite(uri, comp, args.bind)?;
     }
     else {
         panic!("unknown uri type: {}", uri);
@@ -143,24 +182,37 @@ fn query(args: QueryArgs) -> CliResult {
 }
 
 #[cfg(feature = "dbd-mysql")]
-fn query_mysql(
-    uri: String,
-    comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
-) -> CliResult {
-    let pool = Pool::new(uri).unwrap();
+fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
+    let pool = Pool::new(uri)?;
 
-    let values: BTreeMap<String, Vec<&dyn MySqlToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+    let mut parsed_values: BTreeMap<String, Vec<MySqlSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
+
+            *entry = v.iter().map(|x| MySqlSerdeValue(x.clone())).collect();
 
             acc
         });
+    }
+
+    let values: BTreeMap<String, Vec<&dyn MySqlToSql>> =
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+
+                *entry = v.iter().map(|x| x as &dyn MySqlToSql).collect();
+
+                acc
+            });
 
     let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
-    let driver_rows = prep_stmt.execute(bindings.as_slice()).unwrap();
+    let driver_rows = prep_stmt.execute(bindings.as_slice())?;
 
     let vv = driver_rows
         .into_iter()
@@ -231,24 +283,36 @@ fn query_mysql(
 }
 
 #[cfg(feature = "dbd-postgres")]
-fn query_postgres(
-    uri: String,
-    comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
-) -> CliResult {
-    let conn = PgConnection::connect(uri, PgTlsMode::None).unwrap();
+fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
+    let conn = PgConnection::connect(uri, PgTlsMode::None)?;
 
-    let values: BTreeMap<String, Vec<&dyn PgToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+    let mut parsed_values: BTreeMap<String, Vec<PgSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
+
+            *entry = v.iter().map(|x| PgSerdeValue(x.clone())).collect();
 
             acc
         });
+    }
+
+    let values: BTreeMap<String, Vec<&dyn PgToSql>> =
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+                *entry = v.iter().map(|x| x as &dyn PgToSql).collect();
+
+                acc
+            });
 
     let (prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
-    let driver_rows = &prep_stmt.query(&bindings).unwrap();
+    let driver_rows = &prep_stmt.query(&bindings)?;
 
     let vv = driver_rows
         .iter()
@@ -289,19 +353,15 @@ fn query_postgres(
 }
 
 #[cfg(feature = "dbd-rusqlite")]
-fn query_rusqlite(
-    uri: String,
-    comp: SqlComposition,
-    params: BTreeMap<String, Vec<SerdeValue>>,
-) -> CliResult {
+fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
-        "sqlite://:memory:" => RusqliteConnection::open_in_memory().unwrap(),
+        "sqlite://:memory:" => RusqliteConnection::open_in_memory()?,
         u @ _ => {
             if u.starts_with("sqlite://") {
                 let (_, path_str) = u.split_at(9);
 
-                RusqliteConnection::open(Path::new(path_str)).unwrap()
+                RusqliteConnection::open(Path::new(path_str))?
             }
             else {
                 unreachable!("query_rusqlite called with the wrong type of uri");
@@ -309,13 +369,29 @@ fn query_rusqlite(
         }
     };
 
-    let values: BTreeMap<String, Vec<&dyn RusqliteToSql>> =
-        params.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
+    let mut parsed_values: BTreeMap<String, Vec<RusqliteSerdeValue>> = BTreeMap::new();
+
+    if let Some(b) = bindings {
+        let (_remaining, bvns) = bind_value_named_set(Span::new(&b)).unwrap();
+
+        parsed_values = bvns.iter().fold(BTreeMap::new(), |mut acc, (k, v)| {
             let entry = acc.entry(k.to_string()).or_insert(vec![]);
-            *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
+
+            *entry = v.iter().map(|x| RusqliteSerdeValue(x.clone())).collect();
 
             acc
         });
+    }
+
+    let values: BTreeMap<String, Vec<&dyn RusqliteToSql>> =
+        parsed_values
+            .iter()
+            .fold(BTreeMap::new(), |mut acc, (k, v)| {
+                let entry = acc.entry(k.to_string()).or_insert(vec![]);
+                *entry = v.iter().map(|x| x as &dyn RusqliteToSql).collect();
+
+                acc
+            });
 
     let (mut prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
 
@@ -325,11 +401,12 @@ fn query_rusqlite(
         .map(String::from)
         .collect();
 
-    let driver_rows = prep_stmt
-        .query_map(&bindings, |driver_row| {
-            let map = column_names.iter().enumerate().fold(
-                BTreeMap::new(),
-                |mut acc, (i, column_name)| {
+    let driver_rows = prep_stmt.query_map(&bindings, |driver_row| {
+        let map =
+            column_names
+                .iter()
+                .enumerate()
+                .fold(BTreeMap::new(), |mut acc, (i, column_name)| {
                     let _ = acc.entry(Value::String(column_name.to_string())).or_insert(
                         match driver_row.get_raw(i) {
                             RusqliteValueRef::Null => Value::Unit,
@@ -345,17 +422,15 @@ fn query_rusqlite(
                     );
 
                     acc
-                },
-            );
+                });
 
-            Ok(map)
-        })
-        .unwrap();
+        Ok(map)
+    })?;
 
     let mut seq = vec![];
 
     for driver_row in driver_rows {
-        seq.push(Value::Map(driver_row.unwrap()));
+        seq.push(Value::Map(driver_row?));
     }
 
     output(Value::Seq(seq));
@@ -363,6 +438,11 @@ fn query_rusqlite(
     Ok(())
 }
 
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 fn output(v: Value) {
     let mut serializer = serde_json::Serializer::new(io::stdout());
     serde_transcode::transcode(v, &mut serializer).unwrap();

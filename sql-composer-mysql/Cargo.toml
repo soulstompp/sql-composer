@@ -1,0 +1,15 @@
+[package]
+name = "sql-composer-mysql"
+version = "0.1.0"
+authors = ["Kenny Flegal <soulstompp@gmail.com>"]
+edition = '2018'
+
+[features]
+default = ["sql-composer/mysql"]
+composer-serde = ["serde-value"]
+
+[dependencies]
+dotenv = "0.15.0"
+mysql  = "16.0.2"
+sql-composer={ path="../sql-composer" }
+serde-value = { version = "0.6.0", optional = true }

@@ -1,0 +1,11 @@
+[package]
+name = "sql-composer-serde"
+version = "0.1.0"
+authors = ["Kenny Flegal <soulstompp@gmail.com>"]
+edition = '2018'
+
+[dependencies]
+nom = "5.0.1"
+nom_locate = "1.0.0"
+sql-composer = { path="../sql-composer" }
+serde-value = { version = "0.6.0"}

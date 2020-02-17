@@ -1,0 +1,24 @@
+.src { width: 1100px; }
+.example { width: 1100px; }
+/* #content h1 {color: #a66709; } */
+
+*, ::after, ::before  {
+    box-sizing: inhert;
+/*    width: fit-content; */
+
+}
+
+pre.src {
+    width: fit-content;
+}
+
+
+/*
+pre {font-family: 'Segoe Print';}
+
+.collection-avatar, tag, code, pre {
+    background-color: #796e6e;
+}
+
+
+*/

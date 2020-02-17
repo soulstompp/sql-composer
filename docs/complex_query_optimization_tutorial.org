@@ -1,0 +1,178 @@
+#+SETUPFILE: themes/org-minimal-theme.setup
+#+TITLE:  SQL-Composer Tutorial
+#+SUBTITLE:  Critical Concepts, Common Use Case of SQL <-> Application Code Translation of a complex optimized query
+#+AUTHOR: Matthew Burns
+#+EMAIL:
+#+DATE:
+#+LANGUAGE: en
+#+OPTIONS: num:nil
+#+TODO: TODO IN-DEV REVIEW VERIFICATION | CLOSED DONE
+
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="org.css"/>
+
+* Motivating Example
+
+This tutorial goes through the workflow of updating a complicated generated query.
+The challenge is only the final result given.
+
+
+* Overview
+Sql-composer is a pre-processor, leaving SQL alone until encountering a macro.
+
+When SQL templates are composed together:
+ - Macros expand adding complete SQL statements.
+ - Macros expand adding complete query binding placeholders.
+ - Bind placeholders are replaced with provided parameters.
+
+A DBA has the following complex query - the goal of the tutorial is take this and do "X" <--- I need to figure out what X is
+
+#+BEGIN_SRC sql
+SELECT DISTINCT musicbrainz_collate(name) name_collate, s.*
+FROM (
+	SELECT artist.id, artist.gid, artist.name, artist.sort_name,
+	artist.type, artist.area, artist.begin_area, artist.end_area,
+	gender, artist.edits_pending, artist.comment, artist.last_updated,
+	artist.begin_date_year, artist.begin_date_month, artist.begin_date_day,
+	artist.end_date_year, artist.end_date_month, artist.end_date_day,
+	artist.ended
+	FROM artists
+	JOIN artist_credit_name acn ON acn.artist = artist.id
+	JOIN recording ON recording.artist_credit = acn.artist_credit
+	JOIN l_recording_work lrw ON lrw.entity0 = recording.id
+	WHERE lrw.entity1 = @ENTITY_ID
+	UNION ALL
+	SELECT artist.id, artist.gid, artist.name, artist.sort_name,
+	artist.type, artist.area, artist.begin_area, artist.end_area,
+	gender, artist.edits_pending, artist.comment, artist.last_updated,
+	artist.begin_date_year, artist.begin_date_month, artist.begin_date_day,
+	artist.end_date_year, artist.end_date_month, artist.end_date_day,
+	artist.ended
+	FROM artists
+	JOIN l_artist_work law ON law.entity0 = artist.id
+	WHERE law.entity1 = @ENTITY_ID
+) s
+ORDER BY musicbrainz_collate(name), id";
+#+END_SRC
+
+* Nomenclature
+* Macros:
+Macros are preceded by a single colon ":" (i.e. :macro_name(arg)).
+** Bind Parameters:
+** Templates
+** Composition
+
+* Workflow
+1. Put query in a file (sorted-artist-by-work.cql),
+ - Not always necessary, simplifies templates resolution.
+2. Make into a Template
+ - Replace the @ENTITY_ID value in SQL with variables that work for composer.
+*** :bind - query binding placeholder
+The :bind() macro takes a binding placeholder name as it's argument.
+Replace the @ENTITY_ID variables with the  :bind(entity_id) macro
+
+#+BEGIN_SRC sql
+-- sorted-artist-by-work.cql
+SELECT DISTINCT musicbrainz_collate(name) name_collate, s.*
+FROM (
+	SELECT artist.id, artist.gid, artist.name, artist.sort_name,
+	artist.type, artist.area, artist.begin_area, artist.end_area,
+	gender, artist.edits_pending, artist.comment, artist.last_updated,
+	artist.begin_date_year, artist.begin_date_month, artist.begin_date_day,
+	artist.end_date_year, artist.end_date_month, artist.end_date_day,
+	artist.ended
+	FROM artists
+	JOIN artist_credit_name acn ON acn.artist = artist.id
+	JOIN recording ON recording.artist_credit = acn.artist_credit
+	JOIN l_recording_work lrw ON lrw.entity0 = recording.id
+	WHERE lrw.entity1 = :bind(entity_id)
+	UNION ALL
+	SELECT artist.id, artist.gid, artist.name, artist.sort_name,
+	artist.type, artist.area, artist.begin_area, artist.end_area,
+	gender, artist.edits_pending, artist.comment, artist.last_updated,
+	artist.begin_date_year, artist.begin_date_month, artist.begin_date_day,
+	artist.end_date_year, artist.end_date_month, artist.end_date_day,
+	artist.ended
+	FROM artists
+	JOIN l_artist_work law ON law.entity0 = artist.id
+	WHERE law.entity1 = :bind(entity_id)
+) s
+ORDER BY musicbrainz_collate(name), id";
+
+#+END_SRC
+
+
+
+
+* Rational
+ - Translating between complex optimized queries with the code to generate them is error proned and often not possible. (Bottom Line Up Front)
+SQL Composer helps mangage and manipulate existing SQL and the data.
+
+How does the methodology, framework and system sql-composer provides a coherent set of tools and workflow to both
+get a handle on it cognitivily and systematically transform it into a reusable composible piece?
+
+
+* *
+Our example queries will all come from Musicbrainz, who has a big, well-designed database that you can download
+and a code base full of exactly the kinds of queries that would come from the real world.
+If you appreciate their database, SQL, or service please say thank you with a donation at https://metabrainz.org/donate.
+
+* Criticisms
+** I had real trouble reading this.
+*** Needs to be written in a technical writing style.
+**** Fewer long paragraphs.
+**** More white space
+**** Simpler example to start with work up to more complex queries.
+Getting dropped in the deep end of the SQL pool right at the start while I'm trying figure out what your software does is too much to handle right at the start
+** I don't know what your software does after reading this.
+- I do after going through the process of rewriting, I think
+
+** Use less words
+** Eliminate the personal style of you and yours
+- rewrite and add back in the personality after the essential information has been logically and gramatically laid out to best communicate
+*** what sql-composer does
+*** how to uses
+*** Where it would commonly be used
+
+** Put the Bottom Line Up Front.
+- Don't build up to the important stuff say it up front and then support it and repeat it
+
+* Slogan
+SQL Composer makes SQL code reusable - and wicked fast.  (Or some such nonsense)
+** Some quick bullet points of the highlevel features
+ - Mechanism for composing snippets of sql together similar to how other languages have functions.
+ - Binding mechanism to provided a simplified standard way for passing data into and out of the compose queries.
+** Lead in Questions
+ - Have you ever done x and then later as things got complicated need to do y but were limited because of choice x.
+ - Have you ever had to clean up the mess ignorant software developers caused by using ORMs?
+* Empowerment Promise
+ - If I use this thing what do I get out of it?
+ - Why should I change from my current approach?
+* Who would use this?
+
+* This looks like another language is it? Why not?
+ - I'm a lazy developer why do I need to learn this new language?
+ - Okay its not a new language but what are the things I need to know so I can use it?
+ - What do I pass in and what do I get out?
+ - What work should I do in the database and what is best left to the application layer when using sql-composer
+
+* What is it?
+** Is it a command line program, How do I call it?
+** Is it a Library, how do I use it my program?
+** Driver, how I install it?
+** Server, how do I configure and start it?
+** Framework? around what activities - how does it provide the proper context to ease common domain tasks?
+** Methodology? For doing what activity more efficacously and with what technique
+a bit of all of these some of these?
+* Build a Fence Around Your Work
+** i.e. What makes it different than say hugsql, pugsql or whatever ORMS.  Maybe its similar but written in Rust
+** What makes it special?
+*** Fast
+*** Safe
+*** Language matches the Domain - SQL is made for data, Queries in a form DBA can understand and help in the dev process.
+*** Addresses code reuse deficientcies in SQL
+** What makes it Different?
+*** Diagram - What is the current state of affairs on solving this problem?
+*** Diagram - Show how sql-composer does it
+
+
+ My Attempt at a rewrite

@@ -42,6 +42,15 @@ where
     pub position: Position,
 }
 
+impl <T: Debug + Default + PartialEq + Clone> ParsedItem<T> {
+    pub fn new(item: T, p: Option<Position>) -> Self {
+        Self {
+            item,
+            position: p.unwrap_or(Position::Parsed(Default::default())),
+        }
+    }
+}
+
 impl<T> Default for ParsedItem<T>
 where
     T: Debug + Default + PartialEq + Clone,

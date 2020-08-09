@@ -1,4 +1,4 @@
-use crate::types::{ParsedItem, ParsedSpan, ParsedSqlComposition, Position, Span, Sql, SqlBinding,
+use crate::types::{ParsedItem, ParsedSpan, ParsedSqlComposition, ParsedSqlStatement, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
@@ -34,6 +34,49 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
         0 => Ok((span, span)),
         _ => Err(nom::Err::Error((span, NomErrorKind::Eof))),
     }
+}
+
+pub fn statement(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlStatement> {
+    let mut iter = iterator(span, sql_sets);
+    let initial: Result<ParsedSqlStatement> = Ok(ParsedItem::default());
+
+    let mut stmt = iter.fold(initial, |acc_res, items| match acc_res {
+        Ok(mut acc) => {
+            for item in items {
+                match item {
+                    Sql::Composition((mut sc, aliases)) => {
+                        for alias in &aliases {
+                            let stmt_path = alias.path().expect("expected alias path");
+
+                            sc.item
+                                .insert_alias(&stmt_path)
+                                .expect("expected insert_alias");
+                        }
+
+                        if acc.item.sql.len() == 0 {
+                            let mut ss = ParsedSqlStatement::default();
+
+                            ss.item.push_sql(Sql::Composition((sc, Vec::new())));
+
+                            return Ok(ss);
+                        }
+
+                        acc.item.push_sql(Sql::Composition((sc, aliases)))?;
+                    }
+                    _ => {
+                        acc.item.push_sql(item)?;
+                    }
+                }
+            }
+
+            Ok(acc)
+        }
+        Err(e) => Err(e),
+    })?;
+
+    let (_remaining, _) = iter.finish().expect("iterator should always finish");
+
+    Ok(stmt)
 }
 
 pub fn template(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlComposition> {

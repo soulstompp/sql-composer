@@ -30,6 +30,12 @@ impl fmt::Display for Sql {
     }
 }
 
+impl Default for Sql {
+    fn default() -> Self {
+        Sql::Literal(ParsedItem::default())
+    }
+}
+
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct SqlEnding {
     pub value: String,
@@ -146,5 +152,58 @@ impl SqlBinding {
 impl fmt::Display for SqlBinding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name)
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
+pub struct SqlMacro {
+    pub command:      Option<ParsedItem<String>>,
+    pub distinct:     Option<ParsedItem<bool>>,
+    pub all:          Option<ParsedItem<bool>>,
+    pub columns:      Option<Vec<ParsedItem<String>>>,
+    pub source_alias: SqlCompositionAlias,
+    pub of:           Vec<ParsedItem<SqlCompositionAlias>>,
+}
+
+impl SqlMacro {
+    pub fn new(
+        command:      Option<ParsedItem<String>>,
+        distinct:     Option<ParsedItem<bool>>,
+        all:          Option<ParsedItem<bool>>,
+        columns:      Option<Vec<ParsedItem<String>>>,
+        source_alias: SqlCompositionAlias,
+        of:           Vec<ParsedItem<SqlCompositionAlias>>,
+    ) -> Result<Self> {
+        Ok(Self {
+            command,
+            distinct,
+            all,
+            columns,
+            source_alias,
+            of,
+        })
+    }
+}
+
+impl fmt::Display for SqlMacro {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.command {
+            Some(n) => write!(f, ":{}(", n)?,
+            None => write!(f, ":expand(")?,
+        }
+
+        let mut c = 0;
+
+        for col in &self.columns {
+            if c > 0 {
+                write!(f, ",")?;
+            }
+
+            write!(f, "{:?}", col)?;
+
+            c += 1;
+        }
+
+        write!(f, ")")
     }
 }

@@ -15,7 +15,7 @@ use mysql::Pool;
 
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
-use sql_composer::types::{ParsedSqlComposition, SqlComposition, SqlCompositionAlias};
+use sql_composer::types::{ParsedSqlStatement, SqlCompositionAlias};
 
 use sql_composer::error::Result;
 
@@ -53,7 +53,7 @@ pub trait ComposerConnection<'a> {
 
     fn compose(
         &'a self,
-        s: &SqlComposition,
+        s: &ParsedSqlStatement,
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
@@ -67,7 +67,7 @@ impl<'a> ComposerConnection<'a> for Pool {
 
     fn compose(
         &'a self,
-        s: &SqlComposition,
+        s: &ParsedSqlStatement,
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
@@ -79,7 +79,7 @@ impl<'a> ComposerConnection<'a> for Pool {
             mock_values,
         };
 
-        let (sql, bind_vars) = c.compose(s)?;
+        let (sql, bind_vars) = c.compose_statement(s, 0, false)?;
 
         let stmt = self.prepare(&sql)?;
 
@@ -100,8 +100,8 @@ pub struct Composer<'a> {
 impl<'a> Composer<'a> {
     pub fn new() -> Self {
         Self {
-            config:           Self::config(),
-            values:           BTreeMap::new(),
+            config: Self::config(),
+            values: BTreeMap::new(),
             ..Default::default()
         }
     }
@@ -120,7 +120,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -129,7 +129,7 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_union_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -161,7 +161,7 @@ mod tests {
     use mysql::{from_row, Pool, Row};
 
     use sql_composer::error::Result;
-    use sql_composer::types::{ParsedSqlComposition, SqlCompositionAlias, SqlDbObject};
+    use sql_composer::types::{ParsedSqlStatement, SqlCompositionAlias, SqlDbObject};
 
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -182,11 +182,10 @@ mod tests {
     }
 
     fn setup_db() -> Pool {
-
         dotenv().ok();
-        let pool = Pool::new(
-            env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL")
-        ).unwrap();
+        let pool =
+            Pool::new(env::var("MYSQL_DATABASE_URL").expect("Missing variable MYSQL_DATABASE_URL"))
+                .unwrap();
 
         pool.prep_exec("DROP TABLE IF EXISTS person;", ()).unwrap();
 
@@ -209,12 +208,12 @@ mod tests {
         let pool = setup_db();
 
         let person = Person {
-            id:   0,
+            id: 0,
             name: "Steven".to_string(),
             ..Default::default()
         };
 
-        let insert_stmt = ParsedSqlComposition::parse(
+        let insert_stmt = ParsedSqlStatement::parse(
             "INSERT INTO person (name, data) VALUES (:bind(name), :bind(data));",
         )?;
 
@@ -233,7 +232,7 @@ mod tests {
 
         &pool.prep_exec(&bound_sql, &bindings.as_slice())?;
 
-        let select_stmt = ParsedSqlComposition::parse("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';")?;
+        let select_stmt = ParsedSqlStatement::parse("SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';")?;
 
         let (bound_sql, bindings) = composer.compose(&select_stmt.item)?;
 
@@ -241,18 +240,18 @@ mod tests {
 
         assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
 
-        let people: Vec<Person> = pool
-            .prep_exec(&bound_sql, &bindings.as_slice())
-            .map(|result| {
-                result
-                    .map(|x| x.unwrap())
-                    .map(|row| Person {
-                        id:   row.get(0).unwrap(),
-                        name: row.get(1).unwrap(),
-                        data: row.get(2).unwrap(),
-                    })
-                    .collect()
-            })?;
+        let people: Vec<Person> =
+            pool.prep_exec(&bound_sql, &bindings.as_slice())
+                .map(|result| {
+                    result
+                        .map(|x| x.unwrap())
+                        .map(|row| Person {
+                            id:   row.get(0).unwrap(),
+                            name: row.get(1).unwrap(),
+                            data: row.get(2).unwrap(),
+                        })
+                        .collect()
+                })?;
 
         assert_eq!(people.len(), 1, "found 1 person");
         let found = &people[0];
@@ -278,7 +277,7 @@ mod tests {
     fn test_mock_bind_simple_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
+        let stmt: ParsedSqlStatement = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -325,8 +324,7 @@ mod tests {
     fn test_bind_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition =
-            PathBuf::from("src/tests/values/include.tql").try_into()?;
+        let stmt: ParsedSqlStatement = PathBuf::from("src/tests/values/include.tql").try_into()?;
 
         let mut composer = Composer::new();
 
@@ -380,7 +378,7 @@ mod tests {
     fn test_bind_double_include_template() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt: ParsedSqlComposition =
+        let stmt: ParsedSqlStatement =
             PathBuf::from("src/tests/values/double-include.tql").try_into()?;
 
         let mut composer = Composer::new();
@@ -452,7 +450,7 @@ mod tests {
     fn test_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt = ParsedSqlStatement::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -494,7 +492,7 @@ mod tests {
     fn test_count_command() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse(":count(src/tests/values/double-include.tql);")?;
+        let stmt = ParsedSqlStatement::parse(":count(src/tests/values/double-include.tql);")?;
 
         let expected_bound_sql = "SELECT COUNT(1) FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS count_main";
 
@@ -520,7 +518,7 @@ mod tests {
         let mut values: Vec<Vec<usize>> = vec![];
 
         for row in prep_stmt.execute(bindings.as_slice())? {
-            let count = from_row::<(usize)>(row?);
+            let count = from_row::<usize>(row?);
             values.push(vec![count]);
         }
 
@@ -534,7 +532,7 @@ mod tests {
     fn test_union_command() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);")?;
+        let stmt = ParsedSqlStatement::parse(":union(src/tests/values/double-include.tql, src/tests/values/include.tql, src/tests/values/double-include.tql);")?;
 
         let expected_bound_sql = "SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4";
 
@@ -580,7 +578,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt = ParsedSqlStatement::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -628,7 +626,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt = ParsedSqlStatement::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -689,7 +687,7 @@ mod tests {
     fn test_mock_db_object() -> EmptyResult {
         let pool = setup_db();
 
-        let stmt = ParsedSqlComposition::parse("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt = ParsedSqlStatement::parse("SELECT * FROM main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
 
         let expected_bound_sql = "SELECT * FROM ( SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 ) AS main WHERE col_1 in ( ?, ? ) AND col_3 IN ( ?, ? );";
 
@@ -750,7 +748,7 @@ mod tests {
     fn it_composes_from_connection() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt: ParsedSqlComposition = PathBuf::from("src/tests/values/simple.tql").try_into()?;
+        let stmt: ParsedSqlStatement = PathBuf::from("src/tests/values/simple.tql").try_into()?;
 
         let bind_values = bind_values!(&dyn ToValue:
                                        "a" => [&"a_value"],
@@ -759,8 +757,7 @@ mod tests {
                                        "d" => [&"d_value"]
         );
 
-        let (mut prep_stmt, bindings) =
-            conn.compose(&stmt.item, bind_values, vec![], HashMap::new())?;
+        let (mut prep_stmt, bindings) = conn.compose(&stmt, bind_values, vec![], HashMap::new())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 

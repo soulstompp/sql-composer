@@ -76,19 +76,19 @@ use std::path::Path;
 #[derive(Debug, StructOpt)]
 struct QueryArgs {
     #[structopt(flatten)]
-    verbosity: Verbosity,
+    verbosity:  Verbosity,
     /// Uri to the database
     #[structopt(long = "uri", short = "u")]
-    uri: String,
+    uri:        String,
     /// Path to the template
     #[structopt(long = "path", short = "p")]
-    path: String,
+    path:       String,
     /// a comma seperated list of key:value pairs
     #[structopt(long = "bind", short = "b")]
-    bind: Option<String>,
+    bind:       Option<String>,
     /// values to use in place of a path, made up of a comma seperated list of [] containing key:value pairs
     #[structopt(long = "mock-path")]
-    mock_path: Vec<String>,
+    mock_path:  Vec<String>,
     /// values to use in place of a table, made up of a comma seperated list of [] containing key:value pairs
     #[structopt(long = "mock-table")]
     mock_table: Vec<String>,
@@ -100,10 +100,10 @@ struct ParseArgs {
     verbosity: Verbosity,
     /// Uri to the database
     #[structopt(long = "uri", short = "u")]
-    uri: String,
+    uri:       String,
     /// Path to the template
     #[structopt(long = "path", short = "p")]
-    path: String,
+    path:      String,
 }
 
 #[derive(Debug, StructOpt)]

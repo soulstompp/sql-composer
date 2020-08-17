@@ -1,8 +1,11 @@
-use crate::types::{ParsedItem, ParsedSqlComposition, Sql, SqlBinding, SqlComposition,
-                   SqlCompositionAlias, SqlDbObject};
+use crate::types::{ParsedItem, ParsedSqlComposition, ParsedSqlStatement, Sql, SqlBinding,
+                   SqlComposition, SqlCompositionAlias, SqlDbObject, SqlStatement};
+
 use std::collections::{BTreeMap, HashMap};
 
 use crate::error::{ErrorKind, Result};
+
+use std::convert::{From, TryFrom};
 
 pub trait ComposerConnection<'a> {
     type Composer;
@@ -128,7 +131,7 @@ pub struct ComposerConfig {
 pub trait ComposerTrait: Sized {
     type Value: Copy;
 
-    fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>)> {
+    fn compose(&self, s: &SqlStatement) -> Result<(String, Vec<Self::Value>)> {
         let item = ParsedItem::generated(s.clone(), None)?;
 
         self.compose_statement(&item, 1usize, false)
@@ -136,7 +139,7 @@ pub trait ComposerTrait: Sized {
 
     fn compose_statement(
         &self,
-        sc: &ParsedSqlComposition,
+        stmt_item: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
@@ -146,21 +149,31 @@ pub trait ComposerTrait: Sized {
 
         let mut values: Vec<Self::Value> = vec![];
 
-        if sc.item.command.is_some() {
-            return self.compose_command(&sc, i, true);
-        }
-
         let mut pad;
         let mut skip_padding;
 
-        for c in &sc.item.sql {
+        for c in &stmt_item.item.sql {
             pad = true;
             skip_padding = false;
 
-            let (sub_sql, sub_values) = match c {
+            let (sub_sql, sub_values) = match &c.item {
                 Sql::Literal(t) => (t.to_string(), vec![]),
                 Sql::Binding(b) => self.compose_binding(b.item.clone(), i)?,
-                Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true)?,
+                Sql::Composition((ss, _aliases)) => {
+                    let out = ParsedItem::new(
+                        SqlStatement {
+                            sql:      vec![ParsedItem::new(
+                                Sql::Composition((ss.clone(), vec![])),
+                                Some(c.position.clone()),
+                            )],
+                            complete: true,
+                        },
+                        Some(c.position.clone()),
+                    );
+
+                    //could this just take a position?
+                    self.compose_statement(&out, i, true)?
+                }
                 Sql::Ending(e) => {
                     pad = false;
 
@@ -219,10 +232,12 @@ pub trait ComposerTrait: Sized {
 
     fn compose_command<'c>(
         &self,
-        composition: &ParsedSqlComposition,
+        stmt_item: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
+        let composition = ParsedSqlComposition::try_from(stmt_item.clone())?;
+
         match &composition.item.command {
             Some(s) => match s.item().to_lowercase().as_str() {
                 "compose" => {
@@ -240,7 +255,9 @@ pub trait ComposerTrait: Sized {
                                 &out.item
                                     .aliases
                                     .get(&out.item.of[0].item())
-                                    .expect("get called but none found at that position"),
+                                    .expect("get called but none found at that position")
+                                    .clone()
+                                    .into(),
                                 offset,
                                 child,
                             ),
@@ -249,34 +266,38 @@ pub trait ComposerTrait: Sized {
                             &out.item
                                 .aliases
                                 .get(&out.item.of[0].item())
-                                .expect("get called but none found at that position"),
+                                .expect("get called but none found at that position")
+                                .clone()
+                                .into(),
                             offset,
                             child,
                         ),
                     }
                 }
-                "count" => self.compose_count_command(composition, offset, child),
-                "union" => self.compose_union_command(composition, offset, child),
+                "count" => self.compose_count_command(&composition.into(), offset, child),
+                "union" => self.compose_union_command(&composition.into(), offset, child),
                 c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into())),
             },
-            None => self.compose_statement(&composition, offset, child),
+            None => self.compose_statement(&composition.into(), offset, child),
         }
     }
 
     fn compose_count_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_count_default_command(
         &self,
-        composition: &ParsedSqlComposition,
+        stmt_item: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
-        let mut out = SqlComposition::default();
+        let mut out = SqlStatement::default();
+
+        let composition = ParsedSqlComposition::try_from(stmt_item.clone())?;
 
         let mut select = String::from("SELECT COUNT(");
 
@@ -298,7 +319,7 @@ pub trait ComposerTrait: Sized {
 
             match composition.item.aliases.get(&alias.item()) {
                 Some(sc) => {
-                    out.push_sub_comp(sc.clone())?;
+                    out.push_sub_comp(sc.item.clone())?;
                 }
                 None => {
                     bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
@@ -310,25 +331,27 @@ pub trait ComposerTrait: Sized {
 
         out.push_generated_end(Some("COUNT".into()))?;
 
-        let item = ParsedItem::generated(out, Some("COUNT".into()))?;
+        let item = ParsedItem::generated(out.into(), Some("COUNT".into()))?;
 
         self.compose_statement(&item, offset, child)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)>;
 
     fn compose_union_default_command(
         &self,
-        composition: &ParsedSqlComposition,
+        stmt_item: &ParsedSqlStatement,
         offset: usize,
         child: bool,
     ) -> Result<(String, Vec<Self::Value>)> {
-        let mut out = SqlComposition::default();
+        let mut out = SqlStatement::default();
+
+        let composition = ParsedSqlComposition::try_from(stmt_item.clone())?;
 
         // columns in this case would mean an compose on each side of the union literal
         let _columns = composition.item.column_list()?;
@@ -348,9 +371,7 @@ pub trait ComposerTrait: Sized {
             }
 
             match composition.item.aliases.get(&alias.item()) {
-                Some(sc) => {
-                    out.push_sub_comp(sc.clone())?;
-                }
+                Some(sc) => out.sql.push(sc.clone().into()),
                 None => {
                     bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
                 }

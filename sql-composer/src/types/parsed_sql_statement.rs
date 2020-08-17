@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::parser::statement as parse_statement;
-use crate::types::{ParsedItem, Span, SqlStatement, SqlCompositionAlias};
+use crate::types::{ParsedItem, Span, SqlCompositionAlias, SqlStatement};
 
 use std::convert::{Into, TryFrom};
 use std::path::{Path, PathBuf};

@@ -1,21 +1,20 @@
 use crate::error::{ErrorKind, Result};
 
 use std::convert::{From, Into};
+use std::default::Default;
 use std::fmt;
 use std::fmt::Debug;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::path::Path;
 
-use crate::error::Error;
-use crate::types::{ParsedItem, ParsedSqlComposition, ParsedSqlStatement, Position, Span, Sql, SqlEnding, SqlLiteral, SqlComposition, SqlCompositionAlias};
+use crate::types::{ParsedItem, Span, Sql, SqlComposition, SqlCompositionAlias, SqlEnding,
+                   SqlLiteral};
 
 use crate::parser::statement as parse_sql_statement;
 
 #[derive(Default, Debug, Eq, PartialEq, Clone)]
 pub struct SqlStatement {
-    pub sql: Vec<ParsedItem<Sql>>,
-    pub complete: bool
+    pub sql:      Vec<ParsedItem<Sql>>,
+    pub complete: bool,
 }
 
 impl SqlStatement {
@@ -50,8 +49,8 @@ impl SqlStatement {
         Ok(())
     }
 
-    pub fn push_sub_comp(&mut self, value: ParsedSqlComposition) -> Result<()> {
-        self.push_sql(Sql::Composition((value, vec![])))
+    pub fn push_sub_comp(&mut self, value: SqlComposition) -> Result<()> {
+        self.push_sql(Sql::Composition((ParsedItem::new(value, None), vec![])))
     }
 
     pub fn push_generated_sub_comp(&mut self, value: SqlComposition) -> Result<()> {
@@ -93,12 +92,23 @@ impl SqlStatement {
             None => Err(ErrorKind::CompositionIncomplete("".into()).into()),
         }
     }
+
+    pub fn is_composition(&self) -> bool {
+        if self.sql.len() != 1 {
+            return false;
+        }
+
+        match self.sql.get(0).unwrap().item {
+            Sql::Composition(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for SqlStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for sql in &self.sql {
-            write!(f, "{} ", sql);
+            write!(f, "{} ", sql)?;
         }
 
         Ok(())

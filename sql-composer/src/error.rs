@@ -44,6 +44,14 @@ error_chain! {
             description("unexpected number of columns for a row of mocked values")
                 display("Row {} of provided mock values has {} columns but {} were expected", r, c, ec)
         }
+        ParsedSqlStatementIntoParsedSqlCompositionInvalidSqlLength(e: String) {
+            description("the length of SqlStatment.sql must be exactly 1")
+                display("the length of SqlStatment.sql must be exactly 1")
+        }
+        ParsedSqlStatementIntoParsedSqlCompositionInvalidVariant(e: String) {
+            description("first item of SqlStatment.sql must be a Sql::Composition variant of the Sql type")
+                display("first item of SqlStatment.sql must be a Sql::Composition variant of the Sql type")
+        }
     }
 
     foreign_links {

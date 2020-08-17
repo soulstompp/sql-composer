@@ -2,6 +2,7 @@
 //!
 
 mod parsed_item;
+mod parsed_sql;
 mod parsed_sql_composition;
 mod parsed_sql_statement;
 mod position;
@@ -16,6 +17,7 @@ pub struct Null();
 
 pub use parsed_item::ParsedItem;
 
+pub use parsed_sql::ParsedSql;
 pub use parsed_sql_composition::ParsedSqlComposition;
 pub use parsed_sql_statement::ParsedSqlStatement;
 

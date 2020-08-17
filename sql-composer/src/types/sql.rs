@@ -167,12 +167,12 @@ pub struct SqlMacro {
 
 impl SqlMacro {
     pub fn new(
-        command:      Option<ParsedItem<String>>,
-        distinct:     Option<ParsedItem<bool>>,
-        all:          Option<ParsedItem<bool>>,
-        columns:      Option<Vec<ParsedItem<String>>>,
+        command: Option<ParsedItem<String>>,
+        distinct: Option<ParsedItem<bool>>,
+        all: Option<ParsedItem<bool>>,
+        columns: Option<Vec<ParsedItem<String>>>,
         source_alias: SqlCompositionAlias,
-        of:           Vec<ParsedItem<SqlCompositionAlias>>,
+        of: Vec<ParsedItem<SqlCompositionAlias>>,
     ) -> Result<Self> {
         Ok(Self {
             command,

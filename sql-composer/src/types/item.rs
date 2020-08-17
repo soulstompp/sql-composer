@@ -20,7 +20,9 @@
 //!     pub fn try_from<P>(path: P) -> Result<Self>
 //!         where P: Into<PathBuf> + Debug {
 //!             let path = path.into();
-//!             SqlComposition::parse(SqlCompositionAlias::from(path.to_path_buf()))
+//!        let path = path.into();
+//!              let path = path.into();
+//!                   SqlComposition::parse(SqlCompositionAlias::from(path.to_path_buf()))
 //!         }
 //! }
 //! ```
@@ -29,9 +31,20 @@ use crate::error::Result;
 
 use std::convert::Into;
 use std::fmt;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
-use crate::types::{ParsedSpan, Position, Span};
+use crate::types::{Offset, ParsedSpan, Position, Span};
+
+pub enum Item<T: Debug + Default + Display + PartialEq + Eq + Clone> {
+    Generated(GeneratedItem<T>),
+    Parsed(ParsedItem<T>),
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct GeneratedItem<T> {
+    item: T,
+    offset: Offset,
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ParsedItem<T>
@@ -42,14 +55,36 @@ where
     pub position: Position,
 }
 
-impl<T: Debug + Default + PartialEq + Clone> ParsedItem<T> {
-    pub fn new(item: T, p: Option<Position>) -> Self {
-        Self {
-            item,
-            position: p.unwrap_or(Position::Parsed(Default::default())),
+impl<T> Item<T>
+where
+    T: Debug + Default + Display + PartialEq + Eq + Clone
+{
+    pub fn from_span(item: T, span: Span) -> Result<Self> {
+        let ps: ParsedSpan = span.into();
+        Ok(Self::Parsed (
+            ParsedItem {
+                item:     item,
+                position: ps.into(),
+            }
+        ))
+    }
+    pub fn generated(item: T, command: Option<String>) -> Result<Self> {
+        Ok(Self::Generated (
+            GeneratedItem {
+                item:     item,
+                offset: Offset::default(),
+            }
+        ))
+    }
+
+    pub fn item(&self) -> T {
+        match self {
+            Self::Generated(i) => i.clone(),
+            Self::Parsed(i) => i.clone(),
         }
     }
 }
+
 
 impl<T> Default for ParsedItem<T>
 where
@@ -58,32 +93,8 @@ where
     fn default() -> Self {
         Self {
             item:     T::default(),
-            position: Position::Parsed(Default::default()),
+            position: Position::default(),
         }
-    }
-}
-
-impl<T> ParsedItem<T>
-where
-    T: Debug + Default + PartialEq + Clone,
-{
-    pub fn from_span(item: T, span: Span) -> Result<Self> {
-        let ps: ParsedSpan = span.into();
-        Ok(Self {
-            item:     item,
-            position: ps.into(),
-        })
-    }
-
-    pub fn generated(item: T, command: Option<String>) -> Result<Self> {
-        Ok(Self {
-            item:     item,
-            position: command.into(),
-        })
-    }
-
-    pub fn item(&self) -> T {
-        self.item.clone()
     }
 }
 
@@ -95,5 +106,3 @@ where
         write!(f, "{}", self.item)
     }
 }
-
-//TODO: this should be a macro for all of the different types

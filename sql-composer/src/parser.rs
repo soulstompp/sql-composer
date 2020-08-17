@@ -1,4 +1,4 @@
-use crate::types::{ParsedItem, ParsedSpan, ParsedSqlComposition, ParsedSqlStatement, Position, Span, Sql, SqlBinding,
+use crate::types::{ParsedItem, ParsedSpan, ParsedSqlStatement, Position, Span, Sql, SqlBinding,
                    SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
                    SqlLiteral};
 
@@ -36,27 +36,19 @@ pub fn ending(span: Span) -> IResult<Span, Span> {
     }
 }
 
-pub fn statement(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlStatement> {
+pub fn statement(span: Span, _: SqlCompositionAlias) -> Result<ParsedSqlStatement> {
     let mut iter = iterator(span, sql_sets);
     let initial: Result<ParsedSqlStatement> = Ok(ParsedItem::default());
 
-    let mut stmt = iter.fold(initial, |acc_res, items| match acc_res {
+    let stmt = iter.fold(initial, |acc_res, items| match acc_res {
         Ok(mut acc) => {
             for item in items {
                 match item {
-                    Sql::Composition((mut sc, aliases)) => {
-                        for alias in &aliases {
-                            let stmt_path = alias.path().expect("expected alias path");
-
-                            sc.item
-                                .insert_alias(&stmt_path)
-                                .expect("expected insert_alias");
-                        }
-
+                    Sql::Composition((sc, aliases)) => {
                         if acc.item.sql.len() == 0 {
                             let mut ss = ParsedSqlStatement::default();
 
-                            ss.item.push_sql(Sql::Composition((sc, Vec::new())));
+                            ss.item.push_sql(Sql::Composition((sc, Vec::new())))?;
 
                             return Ok(ss);
                         }
@@ -77,48 +69,6 @@ pub fn statement(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlStat
     let (_remaining, _) = iter.finish().expect("iterator should always finish");
 
     Ok(stmt)
-}
-
-pub fn template(span: Span, alias: SqlCompositionAlias) -> Result<ParsedSqlComposition> {
-    let mut iter = iterator(span, sql_sets);
-    let initial: Result<ParsedSqlComposition> = Ok(ParsedItem::default());
-
-    let mut comp = iter.fold(initial, |acc_res, items| match acc_res {
-        Ok(mut acc) => {
-            for item in items {
-                match item {
-                    Sql::Composition((mut sc, aliases)) => {
-                        for alias in &aliases {
-                            let stmt_path = alias.path().expect("expected alias path");
-
-                            sc.item
-                                .insert_alias(&stmt_path)
-                                .expect("expected insert_alias");
-                        }
-
-                        if acc.item.sql.len() == 0 {
-                            return Ok(sc);
-                        }
-
-                        acc.item.push_sql(Sql::Composition((sc, aliases)))?;
-                    }
-                    _ => {
-                        acc.item.push_sql(item)?;
-                    }
-                }
-            }
-
-            Ok(acc)
-        }
-        Err(e) => Err(e),
-    })?;
-
-    let (_remaining, _) = iter.finish().expect("iterator should always finish");
-
-    comp.item
-        .set_position(Position::Parsed(ParsedSpan::new(span, Some(alias))))?;
-
-    Ok(comp)
 }
 
 pub fn sql_sets(span: Span) -> IResult<Span, Vec<Sql>> {
@@ -169,7 +119,7 @@ pub fn composer_macro_item(
     let (span, of) = of_list(span)?;
     let (span, _) = tag(")")(span)?;
 
-    let mut sc = SqlComposition {
+    let sc = SqlComposition {
         command: Some(command),
         distinct,
         all,
@@ -177,8 +127,6 @@ pub fn composer_macro_item(
         of,
         ..Default::default()
     };
-
-    sc.update_aliases().expect("expected to update aliases");
 
     Ok((span, (sc, vec![])))
 }
@@ -567,11 +515,12 @@ pub fn sql_ending_item(span: Span) -> IResult<Span, ParsedItem<SqlEnding>> {
 mod tests {
     use super::{bindvar_expecting, bindvar_item, column_item, column_list, composer_macro_item,
                 db_object_alias_sql, db_object_item, db_object_sql_set, ending, of_padded,
-                sql_ending_item, sql_literal_item, template};
+                sql_ending_item, sql_literal_item, statement};
 
     use crate::error::Result;
-    use crate::types::{ParsedItem, ParsedSpan, ParsedSqlComposition, Position::Parsed, Span, Sql,
-                       SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlLiteral};
+    use crate::types::{ParsedItem, ParsedSpan, ParsedSqlStatement, Position::Parsed, Span, Sql,
+                       SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlLiteral,
+                       SqlStatement};
 
     use std::collections::HashMap;
     use std::convert::TryFrom;
@@ -614,56 +563,57 @@ mod tests {
         )]
     }
 
-    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
+    fn simple_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlStatement> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/simple-template.tql");
 
         acc.entry(SqlCompositionAlias::from(&p)).or_insert(
-            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
+            ParsedSqlStatement::try_from(p).expect("expected to parse into ParsedSqlStatement"),
         );
 
         acc
     }
 
-    fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
+    fn include_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlStatement> {
         let mut acc = simple_alias_hash();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
         acc.entry(SqlCompositionAlias::from(&p)).or_insert(
-            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
+            ParsedSqlStatement::try_from(p).expect("expected to parse into ParsedSqlStatement"),
         );
 
         acc
     }
 
-    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlComposition> {
+    fn include_shallow_alias_hash() -> HashMap<SqlCompositionAlias, ParsedSqlStatement> {
         let mut acc = HashMap::new();
 
         let p = PathBuf::from("src/tests/include-template.tql");
 
         acc.entry(SqlCompositionAlias::from(&p)).or_insert(
-            ParsedSqlComposition::try_from(p).expect("expected to parse into ParsedSqlComposition"),
+            ParsedSqlStatement::try_from(p).expect("expected to parse into ParsedSqlStatement"),
         );
 
         acc
     }
 
-    fn simple_template_comp(
+    fn simple_statement_comp(
         shift_line: Option<u32>,
         shift_offset: Option<usize>,
-    ) -> ParsedSqlComposition {
+    ) -> ParsedSqlStatement {
         let _shift_line = shift_line.unwrap_or(0);
         let _shift_offset = shift_offset.unwrap_or(0);
 
-        let item = SqlComposition {
-            position: Some(build_parsed_path_position(
-                PathBuf::from("src/tests/simple-template.tql").into(),
-                1,
-                0,
-                "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n",
-            )),
+        let position = Some(build_parsed_path_position(
+            PathBuf::from("src/tests/simple-template.tql").into(),
+            1,
+            0,
+            "SELECT foo_id, bar FROM foo WHERE foo.bar = :bind(varname);\n",
+        ));
+
+        let item = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
                 build_parsed_sql_literal("foo_id, bar", None, Some(7), "foo_id, bar "),
@@ -680,20 +630,26 @@ mod tests {
         build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_comp() -> ParsedSqlComposition {
-        let item = SqlComposition {
-            position: Some(build_parsed_path_position(
-                PathBuf::from("src/tests/include-template.tql").into(),
-                1,
-                0,
-                "SELECT COUNT(foo_id)\nFROM (\n  :compose(src/tests/simple-template.tql)\n);\n",
-            )),
+    fn include_statement_comp() -> ParsedSqlStatement {
+        let position = Some(build_parsed_path_position(
+            PathBuf::from("src/tests/include-template.tql").into(),
+            1,
+            0,
+            "SELECT COUNT(foo_id)\nFROM (\n  :compose(src/tests/simple-template.tql)\n);\n",
+        ));
+
+        let item = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
                 build_parsed_sql_literal("COUNT(foo_id)", None, Some(7), "COUNT(foo_id)\n"),
                 build_parsed_sql_keyword("FROM", Some(2), Some(21), "FROM"),
                 build_parsed_sql_literal("(", Some(2), Some(26), "(\n  "),
-                Sql::Composition((simple_template_compose_comp(Some(2), Some(15)), vec![])),
+                build_parsed_item(
+                    Sql::Composition((simple_statement_compose_comp(Some(2), Some(15)), vec![])),
+                    Some(2),
+                    Some(27),
+                    ":",
+                ),
                 build_parsed_sql_literal(")", Some(3), Some(69), "\n)"),
                 build_parsed_sql_ending(";", Some(4), Some(71), ";"),
             ],
@@ -703,10 +659,10 @@ mod tests {
         build_parsed_item(item, None, None, "")
     }
 
-    fn simple_template_compose_comp(
+    fn simple_statement_compose_comp(
         shift_line: Option<u32>,
         shift_offset: Option<usize>,
-    ) -> ParsedSqlComposition {
+    ) -> ParsedItem<SqlComposition> {
         let shift_line = shift_line.unwrap_or(0);
         let shift_offset = shift_offset.unwrap_or(0);
 
@@ -718,18 +674,18 @@ mod tests {
                 "compose",
             )),
             of: simple_aliases(Some(0 + shift_line), Some(0 + shift_offset)),
-            aliases: simple_alias_hash(),
+            aliases: HashMap::new(),
             ..Default::default()
         };
 
         build_parsed_item(item, None, None, "")
     }
 
-    fn include_template_compose_comp() -> ParsedSqlComposition {
+    fn include_statement_compose_comp() -> ParsedItem<SqlComposition> {
         let item = SqlComposition {
             command: Some(build_parsed_string("compose", None, Some(16), "compose")),
             of: include_aliases(),
-            aliases: include_shallow_alias_hash(),
+            aliases: HashMap::new(),
             ..Default::default()
         };
 
@@ -874,33 +830,14 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_simple_template() {
+    fn test_parse_simple_statement() {
         let input =
             "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = ':bind(bindvar)';";
 
         let item =
-            template(Span::new(input.into()), input.into()).expect("expected Ok from template");
+            statement(Span::new(input.into()), input.into()).expect("expected Ok from statement");
 
-        let expected_item = SqlComposition {
-            sql: vec![
-                build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
-                build_parsed_sql_literal("*", None, Some(7), "* "),
-                build_parsed_sql_keyword("FROM", None, Some(9), "FROM"),
-                build_parsed_sql_literal("(", None, Some(14), "("),
-                Sql::Composition((simple_template_compose_comp(None, None), vec![])),
-                build_parsed_sql_literal(") WHERE name =", None, Some(54), ") WHERE name = "),
-                build_parsed_sql_quoted_binding(
-                    "bindvar",
-                    None,
-                    None,
-                    false,
-                    None,
-                    Some(76),
-                    "bindvar",
-                ),
-                build_parsed_sql_ending(";", None, Some(85), ";"),
-            ],
-            position: Some(
+        let position = Some(
                 Parsed(ParsedSpan {
                     alias: Some(
                                SqlCompositionAlias::SqlLiteral(SqlLiteral {
@@ -913,8 +850,33 @@ mod tests {
                                offset: 0,
                                fragment: "SELECT * FROM (:compose(src/tests/simple-template.tql)) WHERE name = \':bind(bindvar)\';".to_string(),
                 })
-            ),
-            ..Default::default()
+            );
+
+        let expected_item = SqlStatement {
+            sql:      vec![
+                build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
+                build_parsed_sql_literal("*", None, Some(7), "* "),
+                build_parsed_sql_keyword("FROM", None, Some(9), "FROM"),
+                build_parsed_sql_literal("(", None, Some(14), "("),
+                build_parsed_item(
+                    Sql::Composition((simple_statement_compose_comp(None, None), vec![])),
+                    None,
+                    Some(15),
+                    "(",
+                ),
+                build_parsed_sql_literal(") WHERE name =", None, Some(54), ") WHERE name = "),
+                build_parsed_sql_quoted_binding(
+                    "bindvar",
+                    None,
+                    None,
+                    false,
+                    None,
+                    Some(76),
+                    "bindvar",
+                ),
+                build_parsed_sql_ending(";", None, Some(85), ";"),
+            ],
+            complete: true,
         };
 
         let expected_item = build_parsed_item(expected_item, None, None, "");
@@ -923,18 +885,42 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_include_template() -> EmptyResult {
+    fn test_parse_include_statement() -> EmptyResult {
         let input = "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = ':bind(bindvar)';";
 
-        let out = template(Span::new(input.into()), input.into())?;
+        let out = statement(Span::new(input.into()), input.into())?;
 
-        let expected_comp = SqlComposition {
+        let position = Some(
+            Parsed(
+                ParsedSpan {
+                    alias: Some(
+                        SqlCompositionAlias::SqlLiteral(
+                            SqlLiteral {
+                                id: None,
+                                value: "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = \':bind(bindvar)\';".into(), 
+                                generated: false
+                            }
+                        )
+                    ),
+                    line: 1,
+                    offset: 0,
+                    fragment: "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = \':bind(bindvar)\';".into(),
+                }
+            )
+        );
+
+        let expected_comp = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", None, None, "SELECT"),
                 build_parsed_sql_literal("*", None, Some(7), "* "),
                 build_parsed_sql_keyword("FROM", None, Some(9), "FROM"),
                 build_parsed_sql_literal("(", None, Some(14), "("),
-                Sql::Composition((include_template_compose_comp(), vec![])),
+                build_parsed_item(
+                    Sql::Composition((include_statement_compose_comp(), vec![])),
+                    None,
+                    Some(15),
+                    ":",
+                ),
                 build_parsed_sql_literal(") WHERE name =", None, Some(55), ") WHERE name = "),
                 build_parsed_sql_quoted_binding(
                     "bindvar",
@@ -947,22 +933,6 @@ mod tests {
                 ),
                 build_parsed_sql_ending(";".into(), None, Some(86), ";"),
             ],
-            position: Some(
-                Parsed(
-                    ParsedSpan {
-                        alias: Some(SqlCompositionAlias::SqlLiteral(SqlLiteral {
-                            id: None,
-                            value: "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = \':bind(bindvar)\';".into(), 
-                            generated: false
-                        }
-                        )
-                                   ),
-                                   line: 1,
-                                   offset: 0,
-                                   fragment: "SELECT * FROM (:compose(src/tests/include-template.tql)) WHERE name = \':bind(bindvar)\';".into(),
-                    }
-                    )
-                ),
             ..Default::default()
         };
 
@@ -973,20 +943,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_file_template() {
-        let stmt = ParsedSqlComposition::try_from(PathBuf::from("src/tests/simple-template.tql"))
+    fn test_parse_file_statement() {
+        let stmt = ParsedSqlStatement::try_from(PathBuf::from("src/tests/simple-template.tql"))
             .expect("expected Ok from ParsedSqlComposition try_from");
 
-        let expected = simple_template_comp(None, None);
+        let expected = simple_statement_comp(None, None);
 
         assert_eq!(stmt, expected);
     }
 
     #[test]
-    fn test_parse_file_inclusive_template() {
-        let stmt = ParsedSqlComposition::try_from(PathBuf::from("src/tests/include-template.tql"))
+    fn test_parse_file_inclusive_statement() {
+        let stmt = ParsedSqlStatement::try_from(PathBuf::from("src/tests/include-template.tql"))
             .expect("expected Ok from ParsedSqlComposition try_from");
-        let expected = include_template_comp();
+        let expected = include_statement_comp();
 
         assert_eq!(stmt, expected);
     }
@@ -1029,7 +999,7 @@ mod tests {
                             "src/tests/include-template.tql",
                         ),
                     ],
-                    aliases: include_alias_hash(),
+                    aliases: HashMap::new(),
                     ..Default::default()
                 },
                 vec![],
@@ -1043,9 +1013,9 @@ mod tests {
     fn test_simple_composed_composer() -> EmptyResult {
         let sql_str = ":count(src/tests/simple-template.tql);";
 
-        let comp = ParsedSqlComposition::parse(sql_str)?;
+        let stmt_item = ParsedSqlStatement::parse(sql_str)?;
 
-        let expected = build_parsed_item(
+        let comp = build_parsed_item(
             SqlComposition {
                 command: Some(build_parsed_string("count", None, Some(1), "count")),
                 position: Some(Parsed(ParsedSpan {
@@ -1064,13 +1034,7 @@ mod tests {
                     Some(7),
                     "src/tests/simple-template.tql",
                 )],
-                aliases: simple_alias_hash(),
-                sql: vec![Sql::Ending(build_parsed_item(
-                    SqlEnding { value: ";".into() },
-                    None,
-                    Some(37),
-                    ";",
-                ))],
+                aliases: HashMap::new(),
                 ..Default::default()
             },
             None,
@@ -1078,7 +1042,31 @@ mod tests {
             "",
         );
 
-        assert_eq!(comp, expected);
+        let comp = build_parsed_item(Sql::Composition((comp, vec![])), None, None, "");
+
+        let ending = build_parsed_item(
+            Sql::Ending(build_parsed_item(
+                SqlEnding { value: ";".into() },
+                None,
+                Some(37),
+                ";",
+            )),
+            None,
+            Some(37),
+            ";",
+        );
+
+        let expected = build_parsed_item(
+            SqlStatement {
+                sql:      vec![comp, ending],
+                complete: true,
+            },
+            None,
+            None,
+            "",
+        );
+
+        assert_eq!(stmt_item, expected);
         Ok(())
     }
 

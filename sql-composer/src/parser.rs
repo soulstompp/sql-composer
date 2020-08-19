@@ -1,6 +1,6 @@
-use crate::types::{ParsedItem, ParsedSpan, ParsedSqlStatement, Position, Span, Sql, SqlBinding,
-                   SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword,
-                   SqlLiteral};
+use crate::types::{ParsedItem, ParsedSpan, ParsedSql, ParsedSqlStatement, Position, Span, Sql,
+                   SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding,
+                   SqlKeyword, SqlLiteral};
 
 use crate::error::Result;
 
@@ -42,21 +42,31 @@ pub fn statement(span: Span, _: SqlCompositionAlias) -> Result<ParsedSqlStatemen
 
     let stmt = iter.fold(initial, |acc_res, items| match acc_res {
         Ok(mut acc) => {
-            for item in items {
-                match item {
+            for pi in items {
+                match pi.item {
                     Sql::Composition((sc, aliases)) => {
                         if acc.item.sql.len() == 0 {
                             let mut ss = ParsedSqlStatement::default();
 
-                            ss.item.push_sql(Sql::Composition((sc, Vec::new())))?;
+                            ss.item.push_sql(ParsedItem {
+                                item:     Sql::Composition((sc, Vec::new())),
+                                position: pi.position,
+                            })?;
 
                             return Ok(ss);
                         }
 
-                        acc.item.push_sql(Sql::Composition((sc, aliases)))?;
+                        acc.item.push_sql(ParsedItem {
+                            item:     Sql::Composition((sc, aliases)),
+                            position: pi.position,
+                        })?;
                     }
                     _ => {
-                        acc.item.push_sql(item)?;
+                        //acc.item.push_sql(item)?;
+                        acc.item.push_sql(ParsedItem {
+                            item:     pi.item,
+                            position: pi.position,
+                        })?;
                     }
                 }
             }
@@ -71,7 +81,7 @@ pub fn statement(span: Span, _: SqlCompositionAlias) -> Result<ParsedSqlStatemen
     Ok(stmt)
 }
 
-pub fn sql_sets(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn sql_sets(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, set) = alt((
         sql_ending_sql_set,
         bindvar_sql_set,
@@ -94,16 +104,16 @@ pub fn parse_macro_name(span: Span) -> IResult<Span, ParsedItem<String>> {
     ))
 }
 
-pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn composer_macro_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, sc) = composer_macro_item(span)?;
 
-    let c = Sql::Composition((
-        ParsedItem::from_span(sc.0, Span::new(""))
-            .expect("invalid parsed item from parser composer_macro_sql_set(span: Span)"),
-        sc.1,
-    ));
+    let c = Sql::Composition((sc.0, sc.1));
 
-    Ok((span, vec![c]))
+    Ok((
+        span,
+        vec![ParsedItem::from_span(c, Span::new(""))
+            .expect("invalid parsed item from parser composer_macro_sql_set(span: Span)")],
+    ))
 }
 
 pub fn composer_macro_item(
@@ -200,10 +210,16 @@ pub fn take_while_name_char(span: Span) -> IResult<Span, Span> {
     Ok((span, name))
 }
 
-pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, k) = keyword_item(span)?;
 
-    Ok((span, vec![Sql::Keyword(k)]))
+    Ok((
+        span,
+        vec![ParsedItem {
+            item:     Sql::Keyword(k.item),
+            position: k.position,
+        }],
+    ))
 }
 
 pub fn keyword_item(span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
@@ -260,10 +276,22 @@ pub fn db_object_alias_sql(span: Span) -> IResult<Span, Span> {
     Ok((span, alias))
 }
 
-pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, dbo) = db_object_item(span)?;
 
-    Ok((span, vec![Sql::Keyword(dbo.0), Sql::DbObject(dbo.1)]))
+    Ok((
+        span,
+        vec![
+            ParsedItem {
+                item:     Sql::Keyword(dbo.0.item),
+                position: dbo.0.position,
+            },
+            ParsedItem {
+                item:     Sql::DbObject(dbo.1.item),
+                position: dbo.1.position,
+            },
+        ],
+    ))
 }
 
 pub fn db_object_item(
@@ -399,10 +427,16 @@ pub fn bindvar_expecting(span: Span) -> IResult<Span, (Option<u32>, Option<u32>)
     Ok((span, expecting))
 }
 
-pub fn bindvar_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn bindvar_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, b) = bindvar_item(span)?;
 
-    Ok((span, vec![Sql::Binding(b)]))
+    Ok((
+        span,
+        vec![ParsedItem {
+            item:     Sql::Binding(b.item),
+            position: b.position,
+        }],
+    ))
 }
 
 // name EXPECTING (i|MIN i|MAX i|MIN i MAX i)
@@ -446,10 +480,16 @@ pub fn bindvar_item(span: Span) -> IResult<Span, ParsedItem<SqlBinding>> {
     Ok((span, item))
 }
 
-pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, l) = sql_literal_item(span)?;
 
-    Ok((span, vec![Sql::Literal(l)]))
+    Ok((
+        span,
+        vec![ParsedItem {
+            item:     Sql::Literal(l.item),
+            position: l.position,
+        }],
+    ))
 }
 
 pub fn sql_literal(span: Span) -> IResult<Span, Span> {
@@ -491,10 +531,16 @@ named!(
     ))
 );
 
-pub fn sql_ending_sql_set(span: Span) -> IResult<Span, Vec<Sql>> {
+pub fn sql_ending_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (span, e) = sql_ending_item(span)?;
 
-    Ok((span, vec![Sql::Ending(e)]))
+    Ok((
+        span,
+        vec![ParsedItem {
+            item:     Sql::Ending(e.item),
+            position: e.position,
+        }],
+    ))
 }
 
 pub fn sql_ending_item(span: Span) -> IResult<Span, ParsedItem<SqlEnding>> {
@@ -645,7 +691,10 @@ mod tests {
                 build_parsed_sql_keyword("FROM", Some(2), Some(21), "FROM"),
                 build_parsed_sql_literal("(", Some(2), Some(26), "(\n  "),
                 build_parsed_item(
-                    Sql::Composition((simple_statement_compose_comp(Some(2), Some(15)), vec![])),
+                    Sql::Composition((
+                        simple_statement_compose_comp(Some(2), Some(15)).item,
+                        vec![],
+                    )),
                     Some(2),
                     Some(27),
                     ":",
@@ -859,7 +908,7 @@ mod tests {
                 build_parsed_sql_keyword("FROM", None, Some(9), "FROM"),
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 build_parsed_item(
-                    Sql::Composition((simple_statement_compose_comp(None, None), vec![])),
+                    Sql::Composition((simple_statement_compose_comp(None, None).item, vec![])),
                     None,
                     Some(15),
                     "(",
@@ -916,7 +965,7 @@ mod tests {
                 build_parsed_sql_keyword("FROM", None, Some(9), "FROM"),
                 build_parsed_sql_literal("(", None, Some(14), "("),
                 build_parsed_item(
-                    Sql::Composition((include_statement_compose_comp(), vec![])),
+                    Sql::Composition((include_statement_compose_comp().item, vec![])),
                     None,
                     Some(15),
                     ":",
@@ -1042,19 +1091,9 @@ mod tests {
             "",
         );
 
-        let comp = build_parsed_item(Sql::Composition((comp, vec![])), None, None, "");
+        let comp = build_parsed_item(Sql::Composition((comp.item, vec![])), None, None, "");
 
-        let ending = build_parsed_item(
-            Sql::Ending(build_parsed_item(
-                SqlEnding { value: ";".into() },
-                None,
-                Some(37),
-                ";",
-            )),
-            None,
-            Some(37),
-            ";",
-        );
+        let ending = build_parsed_item(SqlEnding::new(";".into())?.into(), None, Some(37), ";");
 
         let expected = build_parsed_item(
             SqlStatement {

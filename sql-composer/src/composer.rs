@@ -1,5 +1,6 @@
-use crate::types::{ParsedItem, ParsedSqlComposition, ParsedSqlStatement, Sql, SqlBinding,
-                   SqlComposition, SqlCompositionAlias, SqlDbObject, SqlStatement};
+use crate::types::{ParsedItem, ParsedSql, ParsedSqlComposition, ParsedSqlStatement, Sql,
+                   SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject, SqlEnding,
+                   SqlLiteral, SqlStatement};
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -158,7 +159,7 @@ pub trait ComposerTrait: Sized {
 
             let (sub_sql, sub_values) = match &c.item {
                 Sql::Literal(t) => (t.to_string(), vec![]),
-                Sql::Binding(b) => self.compose_binding(b.item.clone(), i)?,
+                Sql::Binding(b) => self.compose_binding(b.clone(), i)?,
                 Sql::Composition((ss, _aliases)) => {
                     let out = ParsedItem::new(
                         SqlStatement {
@@ -186,7 +187,7 @@ pub trait ComposerTrait: Sized {
                 }
                 Sql::DbObject(dbo) => {
                     let dbo_alias = SqlCompositionAlias::DbObject(SqlDbObject::new(
-                        dbo.item.object_name.to_string(),
+                        dbo.object_name.to_string(),
                         None,
                     )?);
 
@@ -195,7 +196,7 @@ pub trait ComposerTrait: Sized {
 
                         //TODO: this should call the alias function on dbo_alias, which uses
                         //object_alias but falls back to object_name
-                        let mock_sql = format!("( {} ) AS {}", mock_sql, dbo.item.object_name);
+                        let mock_sql = format!("( {} ) AS {}", mock_sql, dbo.object_name);
 
                         (mock_sql, mock_values)
                     }
@@ -312,24 +313,36 @@ pub trait ComposerTrait: Sized {
 
         select.push_str(") FROM ");
 
-        out.push_generated_literal(&select, Some("COUNT".into()))?;
+        out.push_sql(ParsedItem::generated(
+            SqlLiteral::new(select)?.into(),
+            Some("COUNT".into()),
+        )?)?;
 
         for alias in composition.item.of.iter() {
-            out.push_generated_literal("(", Some("COUNT".into()))?;
+            out.push_sql(ParsedItem::generated(
+                SqlLiteral::new("(".into())?.into(),
+                Some("COUNT".into()),
+            )?)?;
 
             match composition.item.aliases.get(&alias.item()) {
                 Some(sc) => {
-                    out.push_sub_comp(sc.item.clone())?;
+                    out.push_sql(ParsedSql::from(sc.clone()))?;
                 }
                 None => {
                     bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
                 }
             }
 
-            out.push_generated_literal(") AS count_main", Some("COUNT".into()))?;
+            out.push_sql(ParsedItem::generated(
+                SqlLiteral::new(") AS count_main".into())?.into(),
+                Some("COUNT".into()),
+            )?)?;
         }
 
-        out.push_generated_end(Some("COUNT".into()))?;
+        out.push_sql(ParsedItem::generated(
+            SqlEnding::new(";".into())?.into(),
+            Some("COUNT".into()),
+        )?)?;
 
         let item = ParsedItem::generated(out.into(), Some("COUNT".into()))?;
 
@@ -367,7 +380,11 @@ pub trait ComposerTrait: Sized {
 
         for alias in composition.item.of.iter() {
             if i > 0 {
-                out.push_generated_literal("UNION ", Some("UNION".into()))?;
+                //out.push_generated_literal("UNION ", Some("UNION".into()))?;
+                out.push_sql(ParsedItem::generated(
+                    SqlLiteral::new("UNION ".into())?.into(),
+                    Some("UNION".into()),
+                )?)?;
             }
 
             match composition.item.aliases.get(&alias.item()) {
@@ -380,7 +397,10 @@ pub trait ComposerTrait: Sized {
             i += 1;
         }
 
-        out.push_generated_end(Some("UNION".into()))?;
+        out.push_sql(ParsedItem::generated(
+            SqlEnding::new(";".into())?.into(),
+            Some("UNION".into()),
+        )?)?;
 
         let item = ParsedItem::generated(out, Some("UNION".into()))?;
 

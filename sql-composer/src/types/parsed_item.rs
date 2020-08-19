@@ -95,5 +95,3 @@ where
         write!(f, "{}", self.item)
     }
 }
-
-//TODO: this should be a macro for all of the different types

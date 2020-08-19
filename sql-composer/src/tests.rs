@@ -60,9 +60,14 @@ pub fn build_parsed_sql_binding(
     fragment: &str,
 ) -> ParsedItem<Sql> {
     build_parsed_item(
-        Sql::Binding(build_parsed_binding_item(
-            name, min, max, nullable, line, offset, fragment,
-        )),
+        SqlBinding {
+            name: name.to_string(),
+            min_values: min,
+            max_values: max,
+            nullable,
+            quoted: false,
+        }
+        .into(),
         line,
         offset,
         fragment,
@@ -95,9 +100,14 @@ pub fn build_parsed_sql_quoted_binding(
     fragment: &str,
 ) -> ParsedItem<Sql> {
     build_parsed_item(
-        Sql::Binding(build_parsed_quoted_binding_item(
-            name, min, max, nullable, line, offset, fragment,
-        )),
+        SqlBinding {
+            name: name.to_string(),
+            min_values: min,
+            max_values: max,
+            nullable,
+            quoted: true,
+        }
+        .into(),
         line,
         offset,
         fragment,
@@ -123,12 +133,9 @@ pub fn build_parsed_sql_literal(
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<Sql> {
-    build_parsed_item(
-        Sql::Literal(build_parsed_literal_item(item, line, offset, fragment)),
-        line,
-        offset,
-        fragment,
-    )
+    let literal = SqlLiteral::new(item.to_string()).unwrap();
+
+    build_parsed_item(literal.into(), line, offset, fragment)
 }
 
 #[allow(dead_code)]
@@ -153,9 +160,7 @@ pub fn build_parsed_db_object(
     fragment: &str,
 ) -> ParsedItem<Sql> {
     build_parsed_item(
-        Sql::DbObject(build_parsed_db_object_item(
-            item, alias, line, offset, fragment,
-        )),
+        SqlDbObject::new(item.to_string(), alias).unwrap().into(),
         line,
         offset,
         fragment,
@@ -181,14 +186,12 @@ pub fn build_parsed_sql_keyword(
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<Sql> {
-    build_parsed_item(
-        Sql::Keyword(build_parsed_keyword_item(item, line, offset, fragment)),
-        line,
-        offset,
-        fragment,
-    )
+    let keyword = SqlKeyword::new(item.to_string()).unwrap();
+
+    build_parsed_item(keyword.into(), line, offset, fragment)
 }
 
+#[allow(dead_code)]
 pub fn build_parsed_ending_item(
     item: &str,
     line: Option<u32>,
@@ -207,12 +210,9 @@ pub fn build_parsed_sql_ending(
     offset: Option<usize>,
     fragment: &str,
 ) -> ParsedItem<Sql> {
-    build_parsed_item(
-        Sql::Ending(build_parsed_ending_item(item, line, offset, fragment)),
-        line,
-        offset,
-        fragment,
-    )
+    let ending = SqlEnding::new(item.to_string()).unwrap();
+
+    build_parsed_item(ending.into(), line, offset, fragment)
 }
 
 #[allow(dead_code)]

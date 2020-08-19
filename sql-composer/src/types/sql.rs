@@ -7,12 +7,12 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Sql {
-    Literal(ParsedItem<SqlLiteral>),
-    Binding(ParsedItem<SqlBinding>),
-    Composition((ParsedItem<SqlComposition>, Vec<SqlCompositionAlias>)),
-    Ending(ParsedItem<SqlEnding>),
-    DbObject(ParsedItem<SqlDbObject>),
-    Keyword(ParsedItem<SqlKeyword>),
+    Literal(SqlLiteral),
+    Binding(SqlBinding),
+    Composition((SqlComposition, Vec<SqlCompositionAlias>)),
+    Ending(SqlEnding),
+    DbObject(SqlDbObject),
+    Keyword(SqlKeyword),
 }
 
 impl fmt::Display for Sql {
@@ -32,7 +32,7 @@ impl fmt::Display for Sql {
 
 impl Default for Sql {
     fn default() -> Self {
-        Sql::Literal(ParsedItem::default())
+        Sql::Literal(SqlLiteral::default())
     }
 }
 
@@ -50,6 +50,12 @@ impl SqlEnding {
 impl fmt::Display for SqlEnding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.value)
+    }
+}
+
+impl From<SqlEnding> for Sql {
+    fn from(value: SqlEnding) -> Self {
+        Sql::Ending(value)
     }
 }
 
@@ -83,6 +89,12 @@ impl fmt::Display for SqlDbObject {
     }
 }
 
+impl From<SqlDbObject> for Sql {
+    fn from(value: SqlDbObject) -> Self {
+        Sql::DbObject(value)
+    }
+}
+
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct SqlKeyword {
     pub value: String,
@@ -97,6 +109,12 @@ impl SqlKeyword {
 impl fmt::Display for SqlKeyword {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.value)
+    }
+}
+
+impl From<SqlKeyword> for Sql {
+    fn from(value: SqlKeyword) -> Self {
+        Sql::Keyword(value)
     }
 }
 
@@ -119,6 +137,12 @@ impl SqlLiteral {
 impl fmt::Display for SqlLiteral {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", &self.value.trim_end_matches(" "))
+    }
+}
+
+impl From<SqlLiteral> for Sql {
+    fn from(value: SqlLiteral) -> Self {
+        Sql::Literal(value)
     }
 }
 
@@ -152,6 +176,12 @@ impl SqlBinding {
 impl fmt::Display for SqlBinding {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name)
+    }
+}
+
+impl From<SqlBinding> for Sql {
+    fn from(value: SqlBinding) -> Self {
+        Sql::Binding(value)
     }
 }
 

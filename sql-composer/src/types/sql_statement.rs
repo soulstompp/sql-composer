@@ -42,24 +42,26 @@ impl SqlStatement {
     }
 
     pub fn push_sql(&mut self, ps: ParsedSql) -> Result<()> {
-        self.sql.push(ps);
+        if self.complete {
+            return Err(ErrorKind::CompositionIncomplete("sql continues after the statement completes".into()).into());
+        }
+
+        match ps.item {
+            Sql::Ending(_) => self.end(ps)?,
+            _ => self.sql.push(ps),
+        }
 
         Ok(())
     }
 
-    pub fn end(&mut self, value: &str, span: Span) -> Result<()> {
-        //TODO: check if this has already ended
+    pub fn end(&mut self, ps: ParsedSql) -> Result<()> {
         match self.sql.last() {
-            Some(_last) => self.push_sql(
-                ParsedItem::from_span(
-                    SqlEnding {
-                        value: value.into(),
-                    }
-                    .into(),
-                    span,
-                )
-                .unwrap(),
-            ),
+            Some(_last) => {
+                self.sql.push(ps);
+                self.complete = true;
+
+                Ok(())
+            },
             None => Err(ErrorKind::CompositionIncomplete("".into()).into()),
         }
     }

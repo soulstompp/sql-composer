@@ -63,6 +63,18 @@ impl SqlComposition {
         self.position = Some(new);
         Ok(())
     }
+
+    pub fn origin_position(&self) -> Option<Position> {
+        if let Some(command) = &self.command {
+            return Some(command.position.clone());
+        }
+
+        if let Some(of) = self.of.get(0) {
+            return Some(of.position.clone());
+        }
+
+        None
+    }
 }
 
 impl Hash for SqlComposition {

@@ -31,7 +31,7 @@ use std::convert::Into;
 use std::fmt;
 use std::fmt::Debug;
 
-use crate::types::{ParsedSpan, Position, Span};
+use crate::types::{ParsedSpan, Position, Span, SqlCompositionAlias};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ParsedItem<T>
@@ -67,8 +67,14 @@ impl<T> ParsedItem<T>
 where
     T: Debug + Default + PartialEq + Clone,
 {
-    pub fn from_span(item: T, span: Span) -> Result<Self> {
-        let ps: ParsedSpan = span.into();
+    pub fn from_span(item: T, span: Span, alias: Option<SqlCompositionAlias>) -> Result<Self> {
+        let ps = ParsedSpan {
+            alias:    alias,
+            line:     span.line,
+            offset:   span.offset,
+            fragment: span.fragment.to_string(),
+        };
+        
         Ok(Self {
             item:     item,
             position: ps.into(),

@@ -67,23 +67,27 @@ impl<T> ParsedItem<T>
 where
     T: Debug + Default + PartialEq + Clone,
 {
-    pub fn from_span(item: T, span: Span, alias: Option<SqlCompositionAlias>) -> Result<Self> {
+    pub fn from_spans(
+        item: T,
+        start_span: Span,
+        end_span: Span,
+        alias: Option<SqlCompositionAlias>,
+    ) -> Result<Self> {
         let ps = ParsedSpan {
-            alias:    alias,
-            line:     span.line,
-            offset:   span.offset,
-            fragment: span.fragment.to_string(),
+            alias,
+            start: start_span.into(),
+            end: (end_span.line, end_span.offset.saturating_sub(1)).into(),
         };
-        
+
         Ok(Self {
-            item:     item,
+            item,
             position: ps.into(),
         })
     }
 
     pub fn generated(item: T, command: Option<String>) -> Result<Self> {
         Ok(Self {
-            item:     item,
+            item,
             position: command.into(),
         })
     }

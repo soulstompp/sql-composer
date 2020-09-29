@@ -6,7 +6,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::path::Path;
 
-use crate::types::{ParsedItem, ParsedSql, Span, Sql, SqlCompositionAlias, SqlEnding};
+use crate::types::{ParsedItem, ParsedSql, Span, Sql, SqlCompositionAlias};
 
 use crate::parser::statement as parse_sql_statement;
 
@@ -43,7 +43,14 @@ impl SqlStatement {
 
     pub fn push_sql(&mut self, ps: ParsedSql) -> Result<()> {
         if self.complete {
-            return Err(ErrorKind::CompositionIncomplete("sql continues after the statement completes".into()).into());
+            return Err(ErrorKind::CompositionIncomplete(
+                format!(
+                    "invalid attempt to push parsed sql {:?} onto a complete statement: {:?}",
+                    ps, self
+                )
+                .into(),
+            )
+            .into());
         }
 
         match ps.item {
@@ -61,7 +68,7 @@ impl SqlStatement {
                 self.complete = true;
 
                 Ok(())
-            },
+            }
             None => Err(ErrorKind::CompositionIncomplete("".into()).into()),
         }
     }

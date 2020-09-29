@@ -8,29 +8,29 @@ use std::path::PathBuf;
 pub fn build_parsed_item<T: Debug + Default + PartialEq + Clone>(
     item: T,
     alias: Option<SqlCompositionAlias>,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<T> {
-    let span = Span {
-        line:     line.unwrap_or(1),
-        offset:   offset.unwrap_or(0),
-        fragment,
-        extra:    (),
-    };
+    let ps = Position::Parsed(ParsedSpan {
+        alias,
+        start: start.into(),
+        end: end.into(),
+    });
 
-    ParsedItem::from_span(item, span, alias)
-        .expect("expected Ok from ParsedItem::from_span in build_parsed_item()")
+    ParsedItem {
+        item,
+        position: ps.into(),
+    }
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_string(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<String> {
-    build_parsed_item(item.to_string(), None, line, offset, fragment)
+    build_parsed_item(item.to_string(), alias, start, end)
 }
 
 #[allow(dead_code)]
@@ -39,13 +39,13 @@ pub fn build_parsed_binding_item(
     min: Option<u32>,
     max: Option<u32>,
     nullable: bool,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlBinding> {
     let binding = SqlBinding::new(name.to_string(), false, min, max, nullable).unwrap();
 
-    build_parsed_item(binding, None, line, offset, fragment)
+    build_parsed_item(binding, alias, start, end)
 }
 
 #[allow(dead_code)]
@@ -54,9 +54,9 @@ pub fn build_parsed_sql_binding(
     min: Option<u32>,
     max: Option<u32>,
     nullable: bool,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     build_parsed_item(
         SqlBinding {
@@ -67,10 +67,9 @@ pub fn build_parsed_sql_binding(
             quoted: false,
         }
         .into(),
-        None,
-        line,
-        offset,
-        fragment,
+        alias,
+        start,
+        end,
     )
 }
 
@@ -80,13 +79,13 @@ pub fn build_parsed_quoted_binding_item(
     min: Option<u32>,
     max: Option<u32>,
     nullable: bool,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlBinding> {
     let quoted_binding = SqlBinding::new(name.to_string(), true, min, max, nullable).unwrap();
 
-    build_parsed_item(quoted_binding, None, line, offset, fragment)
+    build_parsed_item(quoted_binding, alias, start, end)
 }
 
 #[allow(dead_code)]
@@ -95,9 +94,9 @@ pub fn build_parsed_sql_quoted_binding(
     min: Option<u32>,
     max: Option<u32>,
     nullable: bool,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     build_parsed_item(
         SqlBinding {
@@ -108,129 +107,125 @@ pub fn build_parsed_sql_quoted_binding(
             quoted: true,
         }
         .into(),
-        None,
-        line,
-        offset,
-        fragment,
+        alias,
+        start,
+        end,
     )
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_literal_item(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlLiteral> {
     let literal = SqlLiteral::new(item.to_string()).unwrap();
 
-    build_parsed_item(literal, None, line, offset, fragment)
+    build_parsed_item(literal, alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_sql_literal(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     let literal = SqlLiteral::new(item.to_string()).unwrap();
 
-    build_parsed_item(literal.into(),None, line, offset, fragment)
+    build_parsed_item(literal.into(), alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_db_object_item(
     item: &str,
-    alias: Option<String>,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    table_alias: Option<String>,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlDbObject> {
-    let object = SqlDbObject::new(item.to_string(), alias).unwrap();
+    let object = SqlDbObject::new(item.to_string(), table_alias).unwrap();
 
-    build_parsed_item(object,None, line, offset, fragment)
+    build_parsed_item(object, alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_db_object(
     item: &str,
-    alias: Option<String>,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    table_alias: Option<String>,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     build_parsed_item(
-        SqlDbObject::new(item.to_string(), alias).unwrap().into(),
-        None,
-        line,
-        offset,
-        fragment,
+        SqlDbObject::new(item.to_string(), table_alias)
+            .unwrap()
+            .into(),
+        alias,
+        start,
+        end,
     )
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_keyword_item(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlKeyword> {
     let keyword = SqlKeyword::new(item.to_string()).unwrap();
 
-    build_parsed_item(keyword, None, line, offset, fragment)
+    build_parsed_item(keyword, alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_sql_keyword(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     let keyword = SqlKeyword::new(item.to_string()).unwrap();
 
-    build_parsed_item(keyword.into(), None, line, offset, fragment)
+    build_parsed_item(keyword.into(), alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_ending_item(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<SqlEnding> {
     let ending = SqlEnding::new(item.to_string()).unwrap();
 
-    build_parsed_item(ending, None, line, offset, fragment)
+    build_parsed_item(ending, alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_sql_ending(
     item: &str,
-    line: Option<u32>,
-    offset: Option<usize>,
-    fragment: &str,
+    alias: Option<SqlCompositionAlias>,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> ParsedItem<Sql> {
     let ending = SqlEnding::new(item.to_string()).unwrap();
 
-    build_parsed_item(ending.into(), None, line, offset, fragment)
+    build_parsed_item(ending.into(), alias, start, end)
 }
 
 #[allow(dead_code)]
 pub fn build_parsed_path_position(
     path: PathBuf,
-    line: u32,
-    offset: usize,
-    fragment: &str,
+    start: (u32, usize),
+    end: (u32, usize),
 ) -> Position {
-    let alias = SqlCompositionAlias::from_path(&path);
-
     let span = ParsedSpan {
-        alias: Some(alias),
-        offset,
-        line,
-        fragment: fragment.to_string(),
+        alias: Some(path.into()),
+        start: start.into(),
+        end:   end.into(),
     };
 
     Position::Parsed(span)
@@ -239,9 +234,9 @@ pub fn build_parsed_path_position(
 #[allow(dead_code)]
 pub fn build_span(line: Option<u32>, offset: Option<usize>, fragment: &str) -> Span {
     Span {
-        line:     line.unwrap_or(1),
-        offset:   offset.unwrap_or(0),
-        fragment: fragment,
-        extra:    (),
+        line: line.unwrap_or(1),
+        offset: offset.unwrap_or(0),
+        fragment,
+        extra: (),
     }
 }

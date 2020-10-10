@@ -6,18 +6,16 @@ use crate::error::Result;
 
 use nom::{branch::alt,
           bytes::complete::{tag, tag_no_case, take_until, take_while1},
-          character::complete::{multispace0, none_of},
+          character::complete::{multispace0, multispace1, none_of},
           combinator::{iterator, not, opt, peek},
           error::ErrorKind as NomErrorKind,
           multi::{many1, separated_list},
-          sequence::terminated,
+          sequence::{tuple, terminated},
           IResult, InputLength};
 
 pub use nom_locate::LocatedSpan;
 
 use std::path::PathBuf;
-
-use std::fmt::Debug;
 
 pub fn comma_padded(span: Span) -> IResult<Span, ()> {
     let (span, _) = multispace0(span)?;
@@ -253,7 +251,8 @@ pub fn keyword_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
     ))
 }
 
-pub fn keyword_item(start_span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
+pub fn keyword_item(span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
+    let (start_span, _) = multispace0(span)?;
     let (end_span, keyword) = keyword_sql(start_span)?;
     let (span, _) = multispace0(end_span)?;
 
@@ -270,7 +269,9 @@ pub fn keyword_item(start_span: Span) -> IResult<Span, ParsedItem<SqlKeyword>> {
 }
 
 pub fn keyword_sql(span: Span) -> IResult<Span, Span> {
-    let (span, keyword) = alt((command_sql, db_object_pre_sql, db_object_post_sql))(span)?;
+    let (span, _) = multispace0(span)?;
+    let (end_span, keyword) = alt((command_sql, db_object_pre_sql, db_object_post_sql))(span)?;
+    let (span, _) = peek(multispace0)(end_span)?;
 
     Ok((span, keyword))
 }
@@ -327,11 +328,12 @@ pub fn db_object_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
 }
 
 pub fn db_object_item(
-    keyword_start_span: Span,
+    span: Span,
 ) -> IResult<Span, (ParsedItem<SqlKeyword>, ParsedItem<SqlDbObject>)> {
-    let (span, keyword) = db_object_pre_sql(keyword_start_span)?;
-    let (keyword_end_span, _) = multispace0(span)?;
-    let (table_end_span, table) = db_object_alias_sql(keyword_end_span)?;
+    let (span, _) = multispace0(span)?;
+    let (keyword_end_span, keyword) = db_object_pre_sql(span)?;
+    let (span, _) = multispace0(keyword_end_span)?;
+    let (table_end_span, table) = db_object_alias_sql(span)?;
     let (span, _) = multispace0(table_end_span)?;
     let (alias_end_span, alias) = opt(db_object_alias_sql)(span)?;
     let (span, _) = multispace0(alias_end_span)?;
@@ -539,7 +541,7 @@ pub fn sql_literal_sql_set(span: Span) -> IResult<Span, Vec<ParsedSql>> {
 }
 
 pub fn sql_literal(span: Span) -> IResult<Span, char> {
-    let (span, _) = not(keyword_sql)(span)?;
+    let (span, _) = not(tuple((multispace1, keyword_sql)))(span)?;
     let (span, c) = none_of(":;'")(span)?;
 
     Ok((span, c))
@@ -651,8 +653,8 @@ mod tests {
         let item = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", alias.clone(), (1, 0), (1, 5)),
-                build_parsed_sql_literal("foo_id, bar ", alias.clone(), (1, 7), (1, 18)),
-                build_parsed_sql_keyword("FROM", alias.clone(), (1, 19), (1, 23)),
+                build_parsed_sql_literal("foo_id, bar", alias.clone(), (1, 7), (1, 17)),
+                build_parsed_sql_keyword("FROM", alias.clone(), (1, 19), (1, 22)),
                 build_parsed_db_object("foo", None, alias.clone(), (1, 24), (1, 26)),
                 build_parsed_sql_keyword("WHERE", alias.clone(), (1, 28), (1, 32)),
                 build_parsed_sql_literal("foo.bar = ", alias.clone(), (1, 34), (1, 43)),
@@ -685,7 +687,7 @@ mod tests {
         let item = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", alias.clone(), (1, 0), (1, 5)),
-                build_parsed_sql_literal("COUNT(foo_id)\n", alias.clone(), (1, 7), (2, 20)),
+                build_parsed_sql_literal("COUNT(foo_id)", alias.clone(), (1, 7), (1, 19)),
                 build_parsed_sql_keyword("FROM", alias.clone(), (2, 21), (2, 24)),
                 build_parsed_sql_literal("(\n  ", alias.clone(), (2, 26), (3, 29)),
                 build_parsed_item(
@@ -891,7 +893,7 @@ mod tests {
         let expected_item = SqlStatement {
             sql:      vec![
                 build_parsed_sql_keyword("SELECT", alias.clone(), (1, 0), (1, 5)),
-                build_parsed_sql_literal("* ", alias.clone(), (1, 7), (1, 8)),
+                build_parsed_sql_literal("*", alias.clone(), (1, 7), (1, 7)),
                 build_parsed_sql_keyword("FROM", alias.clone(), (1, 9), (1, 12)),
                 build_parsed_sql_literal("(", alias.clone(), (1, 14), (1, 14)),
                 build_parsed_item(
@@ -903,7 +905,7 @@ mod tests {
                     (1, 15),
                     (1, 53),
                 ),
-                build_parsed_sql_literal(") ", alias.clone(), (1, 54), (1, 55)),
+                build_parsed_sql_literal(")", alias.clone(), (1, 54), (1, 54)),
                 build_parsed_sql_keyword("WHERE", alias.clone(), (1, 56), (1, 60)),
                 build_parsed_sql_literal("name = ", alias.clone(), (1, 62), (1, 68)),
                 build_parsed_sql_quoted_binding(
@@ -936,7 +938,7 @@ mod tests {
         let expected_comp = SqlStatement {
             sql: vec![
                 build_parsed_sql_keyword("SELECT", alias.clone(), (1, 0), (1, 5)),
-                build_parsed_sql_literal("* ", alias.clone(), (1, 7), (1, 8)),
+                build_parsed_sql_literal("*", alias.clone(), (1, 7), (1, 7)),
                 build_parsed_sql_keyword("FROM", alias.clone(), (1, 9), (1, 12)),
                 build_parsed_sql_literal("(", alias.clone(), (1, 14), (1, 14)),
                 build_parsed_item(
@@ -945,7 +947,7 @@ mod tests {
                     (1, 15),
                     (1, 54),
                 ),
-                build_parsed_sql_literal(") ", alias.clone(), (1, 55), (1, 56)),
+                build_parsed_sql_literal(")", alias.clone(), (1, 55), (1, 55)),
                 build_parsed_sql_keyword("WHERE", alias.clone(), (1, 57), (1, 61)),
                 build_parsed_sql_literal("name = ", alias.clone(), (1, 63), (1, 69)),
                 build_parsed_sql_quoted_binding(

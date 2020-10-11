@@ -1,12 +1,12 @@
-use crate::error::{ErrorKind, Result};
+use crate::error::{Error, Result};
 
-use std::collections::HashMap;
+use crate::types::{ParsedItem, SqlCompositionAlias};
 use std::convert::Into;
 use std::fmt;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-
-use crate::types::{ParsedItem, Position, SqlCompositionAlias};
+use std::str::FromStr;
+use std::string::ToString;
 
 //command - :(command [distinct, all] [column1, column2] of t1.tql, t2.tql)
 //----------------------------------|-------------------------------------------
@@ -19,16 +19,49 @@ use crate::types::{ParsedItem, Position, SqlCompositionAlias};
 //            :intercept([distinct] [column1, column2 of] t1.sql, t2.tql)
 //            :union([all|distinct] [column1, column2 of] t1.sql, t2.tql)
 
+pub enum SqlMacroCommand {
+    Compose,
+    Count,
+    Union,
+}
+
+impl ToString for SqlMacroCommand {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Compose => "compose",
+            Self::Count => "count",
+            Self::Union => "union",
+        }
+        .to_string()
+    }
+}
+
+impl FromStr for SqlMacroCommand {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let c = match s {
+            "compose" => Self::Compose,
+            "count" => Self::Count,
+            "union" => Self::Union,
+            v @ _ => bail!(
+                "Unable to determine SqlMacroCommand from unknown value: {}",
+                v
+            ),
+        };
+
+        Ok(c)
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct SqlComposition {
-    pub command:      Option<ParsedItem<String>>,
+    pub command:      ParsedItem<String>,
     pub distinct:     Option<ParsedItem<bool>>,
     pub all:          Option<ParsedItem<bool>>,
     pub columns:      Option<Vec<ParsedItem<String>>>,
     pub source_alias: SqlCompositionAlias,
     pub of:           Vec<ParsedItem<SqlCompositionAlias>>,
-    pub aliases:      HashMap<SqlCompositionAlias, ParsedItem<SqlComposition>>,
-    pub position:     Option<Position>,
 }
 
 impl SqlComposition {
@@ -53,28 +86,6 @@ impl SqlComposition {
             None => Ok(None),
         }
     }
-
-    pub fn set_position(&mut self, new: Position) -> Result<()> {
-        if self.position.is_some() {
-            bail!(ErrorKind::CompositionAliasConflict(
-                "bad posisition".to_string()
-            ))
-        }
-        self.position = Some(new);
-        Ok(())
-    }
-
-    pub fn origin_position(&self) -> Option<Position> {
-        if let Some(command) = &self.command {
-            return Some(command.position.clone());
-        }
-
-        if let Some(of) = self.of.get(0) {
-            return Some(of.position.clone());
-        }
-
-        None
-    }
 }
 
 impl Hash for SqlComposition {
@@ -85,10 +96,7 @@ impl Hash for SqlComposition {
 
 impl fmt::Display for SqlComposition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.command {
-            Some(n) => write!(f, ":{}(", n)?,
-            None => write!(f, ":expand(")?,
-        }
+        write!(f, ":{}(", self.command)?;
 
         let mut c = 0;
 

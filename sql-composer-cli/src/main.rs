@@ -6,6 +6,13 @@ use structopt::StructOpt;
     feature = "dbd-postgres",
     feature = "dbd-rusqlite"
 ))]
+use sql_composer::error::Error;
+
+#[cfg(any(
+    feature = "dbd-mysql",
+    feature = "dbd-postgres",
+    feature = "dbd-rusqlite"
+))]
 use sql_composer_serde::bind_value_named_set;
 
 #[cfg(any(
@@ -13,7 +20,7 @@ use sql_composer_serde::bind_value_named_set;
     feature = "dbd-postgres",
     feature = "dbd-rusqlite"
 ))]
-use sql_composer::types::{ParsedSqlComposition, Span, SqlComposition};
+use sql_composer::types::{ParsedSqlStatement, Span};
 
 #[cfg(any(
     feature = "dbd-mysql",
@@ -34,7 +41,7 @@ use std::path::PathBuf;
     feature = "dbd-postgres",
     feature = "dbd-rusqlite"
 ))]
-use std::convert::TryFrom;
+use std::convert::TryInto;
 
 #[cfg(any(
     feature = "dbd-mysql",
@@ -143,12 +150,8 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let comp = {
-        let path = PathBuf::from(args.path);
-        ParsedSqlComposition::try_from(path).unwrap().item
-    };
-
     let uri = args.uri;
+    let path = PathBuf::from("args.path");
 
     if uri.starts_with("mysql://") {
         if cfg!(feature = "dbd-mysql") == false {
@@ -156,7 +159,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-mysql")]
-        query_mysql(uri, comp, args.bind)?;
+        query_mysql(uri, path, args.bind)?;
     }
     else if uri.starts_with("postgres://") {
         if cfg!(feature = "dbd-postgres") == false {
@@ -164,7 +167,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-postgres")]
-        query_postgres(uri, comp, args.bind)?;
+        query_postgres(uri, path, args.bind)?;
     }
     else if uri.starts_with("sqlite://") {
         if cfg!(feature = "dbd-rusqlite") == false {
@@ -172,7 +175,7 @@ fn query(args: QueryArgs) -> CliResult {
         }
 
         #[cfg(feature = "dbd-rusqlite")]
-        query_rusqlite(uri, comp, args.bind)?;
+        query_rusqlite(uri, path, args.bind)?;
     }
     else {
         panic!("unknown uri type: {}", uri);
@@ -182,7 +185,11 @@ fn query(args: QueryArgs) -> CliResult {
 }
 
 #[cfg(feature = "dbd-mysql")]
-fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
+fn query_mysql(
+    uri: String,
+    ipss: impl TryInto<ParsedSqlStatement, Error = Error>,
+    bindings: Option<String>,
+) -> CliResult {
     let pool = Pool::new(uri)?;
 
     let mut parsed_values: BTreeMap<String, Vec<MySqlSerdeValue>> = BTreeMap::new();
@@ -210,7 +217,7 @@ fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> C
                 acc
             });
 
-    let (mut prep_stmt, bindings) = pool.compose(&comp, values, vec![], HashMap::new()).unwrap();
+    let (mut prep_stmt, bindings) = pool.compose(ipss, values, vec![], HashMap::new()).unwrap();
 
     let driver_rows = prep_stmt.execute(bindings.as_slice())?;
 
@@ -283,7 +290,11 @@ fn query_mysql(uri: String, comp: SqlComposition, bindings: Option<String>) -> C
 }
 
 #[cfg(feature = "dbd-postgres")]
-fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
+fn query_postgres(
+    uri: String,
+    ipss: impl TryInto<ParsedSqlStatement, Error = Error>,
+    bindings: Option<String>,
+) -> CliResult {
     let conn = PgConnection::connect(uri, PgTlsMode::None)?;
 
     let mut parsed_values: BTreeMap<String, Vec<PgSerdeValue>> = BTreeMap::new();
@@ -310,7 +321,7 @@ fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -
                 acc
             });
 
-    let (prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
+    let (prep_stmt, bindings) = conn.compose(ipss, values, vec![], HashMap::new()).unwrap();
 
     let driver_rows = &prep_stmt.query(&bindings)?;
 
@@ -353,7 +364,11 @@ fn query_postgres(uri: String, comp: SqlComposition, bindings: Option<String>) -
 }
 
 #[cfg(feature = "dbd-rusqlite")]
-fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -> CliResult {
+fn query_rusqlite(
+    uri: String,
+    ipss: impl TryInto<ParsedSqlStatement, Error = Error>,
+    bindings: Option<String>,
+) -> CliResult {
     //TODO: base off of uri
     let conn = match uri.as_str() {
         "sqlite://:memory:" => RusqliteConnection::open_in_memory()?,
@@ -393,7 +408,7 @@ fn query_rusqlite(uri: String, comp: SqlComposition, bindings: Option<String>) -
                 acc
             });
 
-    let (mut prep_stmt, bindings) = conn.compose(&comp, values, vec![], HashMap::new()).unwrap();
+    let (mut prep_stmt, bindings) = conn.compose(ipss, values, vec![], HashMap::new()).unwrap();
 
     let column_names: Vec<String> = prep_stmt
         .column_names()

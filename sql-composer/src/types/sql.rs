@@ -9,7 +9,7 @@ use crate::types::{ParsedItem, SqlComposition, SqlCompositionAlias};
 pub enum Sql {
     Literal(SqlLiteral),
     Binding(SqlBinding),
-    Composition((SqlComposition, Vec<SqlCompositionAlias>)),
+    Composition(SqlComposition),
     Ending(SqlEnding),
     DbObject(SqlDbObject),
     Keyword(SqlKeyword),
@@ -136,7 +136,7 @@ impl SqlLiteral {
 
 impl fmt::Display for SqlLiteral {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.value.trim_end_matches(" "))
+        write!(f, "{}", &self.value.trim())
     }
 }
 

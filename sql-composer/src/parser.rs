@@ -10,7 +10,7 @@ use nom::{branch::alt,
           combinator::{iterator, not, opt, peek},
           error::ErrorKind as NomErrorKind,
           multi::{many1, separated_list},
-          sequence::{tuple, terminated},
+          sequence::{terminated, tuple},
           IResult, InputLength};
 
 pub use nom_locate::LocatedSpan;
@@ -46,13 +46,13 @@ pub fn statement(start_span: Span, alias: SqlCompositionAlias) -> Result<ParsedS
         Ok(mut acc) => {
             for pi in items {
                 match pi.item {
-                    Sql::Composition((sc, aliases)) => {
+                    Sql::Composition(sc) => {
                         if acc.sql.len() == 0 {
                             let mut ss = SqlStatement::default();
 
                             if let Position::Parsed(ps) = pi.position {
                                 ss.push_sql(ParsedItem {
-                                    item:     Sql::Composition((sc, vec![])),
+                                    item:     Sql::Composition(sc),
                                     position: Position::Parsed(ParsedSpan {
                                         alias: Some(alias.clone()),
                                         start: ps.start,
@@ -65,7 +65,7 @@ pub fn statement(start_span: Span, alias: SqlCompositionAlias) -> Result<ParsedS
                         }
 
                         acc.push_sql(ParsedItem {
-                            item:     Sql::Composition((sc, aliases)),
+                            item:     Sql::Composition(sc),
                             position: pi.position,
                         })?;
                     }
@@ -130,20 +130,18 @@ pub fn parse_macro_name(span: Span) -> IResult<Span, ParsedItem<String>> {
 pub fn composer_macro_sql_set(start_span: Span) -> IResult<Span, Vec<ParsedSql>> {
     let (end_span, item) = composer_macro_item(start_span)?;
 
-    let sc = Sql::Composition((item.0.item, vec![]));
+    let sc = Sql::Composition(item.item);
 
     Ok((
         end_span,
         vec![ParsedItem {
             item:     sc,
-            position: item.0.position,
+            position: item.position,
         }],
     ))
 }
 
-pub fn composer_macro_item(
-    start_span: Span,
-) -> IResult<Span, (ParsedSqlComposition, Vec<SqlCompositionAlias>)> {
+pub fn composer_macro_item(start_span: Span) -> IResult<Span, ParsedSqlComposition> {
     let (span, command) = parse_macro_name(start_span)?;
     let (span, distinct) = command_distinct_arg(span)?;
     let (span, _) = multispace0(span)?;
@@ -155,7 +153,7 @@ pub fn composer_macro_item(
     let (span, _) = tag(")")(span)?;
 
     let item = SqlComposition {
-        command: Some(command),
+        command,
         distinct,
         all,
         columns,
@@ -166,7 +164,7 @@ pub fn composer_macro_item(
     let pi = ParsedItem::from_spans(item, start_span, span, None)
         .expect("Unable to parse SqlComposition from composer_macro_item");
 
-    Ok((span, (pi, vec![])))
+    Ok((span, pi))
 }
 
 pub fn command_distinct_arg(start_span: Span) -> IResult<Span, Option<ParsedItem<bool>>> {
@@ -601,7 +599,6 @@ mod tests {
     use crate::types::{ParsedItem, ParsedSqlStatement, Span, Sql, SqlComposition,
                        SqlCompositionAlias, SqlDbObject, SqlEnding, SqlLiteral, SqlStatement};
 
-    use std::collections::HashMap;
     use std::convert::TryFrom;
     use std::path::PathBuf;
 
@@ -691,10 +688,7 @@ mod tests {
                 build_parsed_sql_keyword("FROM", alias.clone(), (2, 21), (2, 24)),
                 build_parsed_sql_literal("(\n  ", alias.clone(), (2, 26), (3, 29)),
                 build_parsed_item(
-                    Sql::Composition((
-                        simple_statement_compose_comp(None, Some(3), Some(31)).item,
-                        vec![],
-                    )),
+                    Sql::Composition(simple_statement_compose_comp(None, Some(3), Some(31)).item),
                     None,
                     (3, 30),
                     (3, 68),
@@ -718,14 +712,13 @@ mod tests {
         let shift_offset = shift_offset.unwrap_or(0);
 
         let item = SqlComposition {
-            command: Some(build_parsed_string(
+            command: build_parsed_string(
                 "compose",
                 alias.clone(),
                 (shift_line, shift_offset),
                 (shift_line, 6 + shift_offset),
-            )),
+            ),
             of: simple_aliases(Some(shift_line), Some(8 + shift_offset)),
-            aliases: HashMap::new(),
             ..Default::default()
         };
 
@@ -736,14 +729,8 @@ mod tests {
         alias: Option<SqlCompositionAlias>,
     ) -> ParsedItem<SqlComposition> {
         let item = SqlComposition {
-            command: Some(build_parsed_string(
-                "compose",
-                alias.clone(),
-                (1, 16),
-                (1, 22),
-            )),
+            command: build_parsed_string("compose", alias.clone(), (1, 16), (1, 22)),
             of: include_aliases(),
-            aliases: HashMap::new(),
             ..Default::default()
         };
 
@@ -897,10 +884,7 @@ mod tests {
                 build_parsed_sql_keyword("FROM", alias.clone(), (1, 9), (1, 12)),
                 build_parsed_sql_literal("(", alias.clone(), (1, 14), (1, 14)),
                 build_parsed_item(
-                    Sql::Composition((
-                        simple_statement_compose_comp(None, None, Some(16)).item,
-                        vec![],
-                    )),
+                    Sql::Composition(simple_statement_compose_comp(None, None, Some(16)).item),
                     None,
                     (1, 15),
                     (1, 53),
@@ -942,7 +926,7 @@ mod tests {
                 build_parsed_sql_keyword("FROM", alias.clone(), (1, 9), (1, 12)),
                 build_parsed_sql_literal("(", alias.clone(), (1, 14), (1, 14)),
                 build_parsed_item(
-                    Sql::Composition((include_statement_compose_comp(None).item, vec![])),
+                    Sql::Composition(include_statement_compose_comp(None).item),
                     None,
                     (1, 15),
                     (1, 54),
@@ -1006,8 +990,7 @@ mod tests {
         };
 
         let sc = SqlComposition {
-            command: Some(build_parsed_string("count", alias.clone(), (1, 1), (1, 5))),
-            position: None,
+            command: build_parsed_string("count", alias.clone(), (1, 1), (1, 5)),
             distinct: Some(build_parsed_item(true, alias.clone(), (1, 7), (1, 14))),
             columns: Some(vec![
                 build_parsed_string("col1", alias.clone(), (1, 16), (1, 19)),
@@ -1027,7 +1010,6 @@ mod tests {
                     (1, 90),
                 ),
             ],
-            aliases: HashMap::new(),
             ..Default::default()
         };
 
@@ -1047,7 +1029,7 @@ mod tests {
         },
         None).expect("expected to convert from span");
 
-        let expected = Ok((span, (psc, vec![])));
+        let expected = Ok((span, psc));
 
         assert_eq!(comp, expected);
     }
@@ -1061,24 +1043,17 @@ mod tests {
         let alias = Some(sql_str.into());
 
         let comp = SqlComposition {
-            command: Some(build_parsed_string("count", None, (1, 1), (1, 5))),
-            position: None,
+            command: build_parsed_string("count", None, (1, 1), (1, 5)),
             of: vec![build_parsed_item(
                 SqlCompositionAlias::Path("src/tests/simple-template.tql".into()),
                 None,
                 (1, 7),
                 (1, 35),
             )],
-            aliases: HashMap::new(),
             ..Default::default()
         };
 
-        let comp = build_parsed_item(
-            Sql::Composition((comp, vec![])),
-            alias.clone(),
-            (1, 0),
-            (1, 36),
-        );
+        let comp = build_parsed_item(Sql::Composition(comp), alias.clone(), (1, 0), (1, 36));
 
         let ending = build_parsed_item(
             SqlEnding::new(";".into())?.into(),

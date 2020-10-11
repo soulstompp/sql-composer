@@ -13,7 +13,7 @@ impl From<ParsedSqlComposition> for ParsedSqlStatement {
 
 impl From<ParsedSqlComposition> for ParsedSql {
     fn from(s: ParsedSqlComposition) -> Self {
-        ParsedItem::new(Sql::Composition((s.item(), vec![])), Some(s.position))
+        ParsedItem::new(Sql::Composition(s.item()), Some(s.position))
     }
 }
 
@@ -28,7 +28,7 @@ impl TryFrom<ParsedSqlStatement> for ParsedSqlComposition {
         }
 
         match &stmt.sql[0].item {
-            Sql::Composition((c, _)) => {
+            Sql::Composition(c) => {
                 let pc = ParsedItem {
                     item:     c.clone(),
                     position: pss.position,

@@ -79,7 +79,7 @@ impl SqlStatement {
         }
 
         match self.sql.get(0).unwrap().item {
-            Sql::Composition(_) => true,
+            Sql::Macro(_) => true,
             _ => false,
         }
     }

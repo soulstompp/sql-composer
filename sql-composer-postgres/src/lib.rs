@@ -20,7 +20,8 @@ pub use postgres::{Connection, TlsMode};
 
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 
-use sql_composer::types::{ParsedSqlComposition, ParsedSqlStatement, Position, SqlCompositionAlias};
+use sql_composer::types::{ParsedSqlMacro, ParsedSqlStatement, Position, SqlComposition,
+                          SqlCompositionAlias};
 
 use sql_composer::error::{Error, Result};
 
@@ -109,11 +110,11 @@ impl<'a> ComposerConnection<'a> for Connection {
         };
 
         let stmt = ipss.try_into()?;
-        let (sql, bind_vars) = c.compose_statement(&stmt, 1, None)?;
+        let sc = c.compose_statement(&stmt, 1, None)?;
 
-        let stmt = self.prepare(&sql)?;
+        let stmt = self.prepare(&sc.sql())?;
 
-        Ok((stmt, bind_vars))
+        Ok((stmt, sc.values().to_vec()))
     }
 }
 
@@ -151,19 +152,19 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
         parent: Option<Position>,
-    ) -> Result<(String, Vec<Self::Value>)> {
+    ) -> Result<SqlComposition<Self::Value>> {
         self.compose_count_default_command(composition, offset, parent)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
         parent: Option<Position>,
-    ) -> Result<(String, Vec<Self::Value>)> {
+    ) -> Result<SqlComposition<Self::Value>> {
         self.compose_union_default_command(composition, offset, parent)
     }
 
@@ -252,27 +253,27 @@ mod tests {
                                        "data" => [&person.data]
         );
 
-        let (bound_sql, bindings) = composer.compose(insert_stmt)?;
+        let bsc = composer.compose(insert_stmt)?;
 
         let expected_bound_sql = "INSERT INTO person (name, data) VALUES ( $1, $2 );";
 
-        assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
+        assert_eq!(bsc.sql(), expected_bound_sql, "insert basic bindings");
 
-        conn.execute(&bound_sql, &bindings)?;
+        conn.execute(&bsc.sql(), &bsc.values())?;
 
         let select_stmt = "SELECT id, name, data FROM person WHERE name = ':bind(name)' AND name = ':bind(name)';";
 
-        let (bound_sql, bindings) = composer.compose(select_stmt)?;
+        let bsc = composer.compose(select_stmt)?;
 
         let expected_bound_sql = "SELECT id, name, data FROM person WHERE name = $1 AND name = $2;";
 
-        assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
+        assert_eq!(bsc.sql(), expected_bound_sql, "select multi-use bindings");
 
-        let stmt = conn.prepare(&bound_sql)?;
+        let stmt = conn.prepare(&bsc.sql())?;
 
         let mut people: Vec<Person> = vec![];
 
-        for row in &stmt.query(&bindings)? {
+        for row in &stmt.query(&bsc.values())? {
             people.push(Person {
                 id:   row.get(0),
                 name: row.get(1),
@@ -317,27 +318,27 @@ mod tests {
             "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(path)?;
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0)?;
+        let bsc = composer.compose(path)?;
+        let mut msc = composer.mock_compose(&mock_values, 0)?;
 
-        mock_bound_sql.push(';');
+        msc.push_sql(";");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(bsc.values())? {
             values.push(get_row_values(row));
         }
 
-        let mock_prep_stmt = conn.prepare(&mock_bound_sql)?;
+        let mock_prep_stmt = conn.prepare(&msc.sql())?;
 
-        for row in &mock_prep_stmt.query(&mock_bindings)? {
+        for row in &mock_prep_stmt.query(msc.values())? {
             mock_values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), msc.sql(), "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
         Ok(())
     }
@@ -370,28 +371,28 @@ mod tests {
             "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(path)?;
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0)?;
+        let bsc = composer.compose(path)?;
+        let mut msc = composer.mock_compose(&mock_values, 0)?;
 
-        mock_bound_sql.push(';');
+        msc.push_sql(";");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(bsc.values())? {
             values.push(get_row_values(row));
         }
 
-        let mock_prep_stmt = conn.prepare(&bound_sql)?;
+        let mock_prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in &mock_prep_stmt.query(&mock_bindings)? {
+        for row in &mock_prep_stmt.query(&msc.values())? {
             mock_values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), msc.sql(), "preparable statements match");
         assert_eq!(values, mock_values, "exected values");
         Ok(())
     }
@@ -432,26 +433,26 @@ mod tests {
             "col_4" => &"d_value"
         });
 
-        let (bound_sql, bindings) = composer.compose(path)?;
-        let (mut mock_bound_sql, mock_bindings) = composer.mock_compose(&mock_values, 0)?;
+        let bsc = composer.compose(path)?;
+        let mut msc = composer.mock_compose(&mock_values, 0)?;
 
-        mock_bound_sql.push(';');
+        msc.push_sql(";");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(get_row_values(row));
         }
 
-        assert_eq!(bound_sql, mock_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), msc.sql(), "preparable statements match");
 
-        let mock_prep_stmt = conn.prepare(&bound_sql)?;
+        let mock_prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut mock_values: Vec<Vec<String>> = vec![];
 
-        for row in &mock_prep_stmt.query(&mock_bindings)? {
+        for row in &mock_prep_stmt.query(&msc.values())? {
             mock_values.push(get_row_values(row));
         }
 
@@ -485,15 +486,15 @@ mod tests {
                                        "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(stmt)?;
+        let bsc = composer.compose(stmt)?;
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(get_row_values(row));
         }
 
@@ -522,15 +523,15 @@ mod tests {
                                        "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(stmt)?;
+        let bsc = composer.compose(stmt)?;
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<i64>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(vec![row.get(0)]);
         }
 
@@ -561,15 +562,15 @@ mod tests {
                                        "col_3_values" => [&"b_value", &"c_value"]
         );
 
-        let (bound_sql, bindings) = composer.compose(stmt)?;
+        let bsc = composer.compose(stmt)?;
 
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(bsc.values())? {
             values.push(get_row_values(row));
         }
 
@@ -590,7 +591,7 @@ mod tests {
     fn test_include_mock_multi_value_bind() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt = ParsedSqlStatement::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt_sql = "SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));";
 
         let expected_bound_sql = "SELECT * FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 ) AS main WHERE col_1 in ( $9, $10 ) AND col_3 IN ( $11, $12 );";
 
@@ -619,14 +620,14 @@ mod tests {
             "col_4" => &"aa_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, None)?;
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        let bsc = composer.compose(stmt_sql)?;
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(get_row_values(row));
         }
 
@@ -638,7 +639,7 @@ mod tests {
     fn test_mock_double_include_multi_value_bind() -> EmptyResult {
         let conn = setup_db();
 
-        let stmt = ParsedSqlStatement::parse("SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));")?;
+        let stmt_sql = "SELECT * FROM (:compose(src/tests/values/double-include.tql)) AS main WHERE col_1 in (:bind(col_1_values EXPECTING MIN 1)) AND col_3 IN (:bind(col_3_values EXPECTING MIN 1));";
 
         let expected_bound_sql = "SELECT * FROM ( SELECT $1 AS col_1, $2 AS col_2, $3 AS col_3, $4 AS col_4 UNION ALL SELECT $5 AS col_1, $6 AS col_2, $7 AS col_3, $8 AS col_4 UNION ALL SELECT $9 AS col_1, $10 AS col_2, $11 AS col_3, $12 AS col_4 ) AS main WHERE col_1 in ( $13, $14 ) AND col_3 IN ( $15, $16 );";
 
@@ -680,14 +681,14 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, None)?;
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        let bsc = composer.compose(stmt_sql)?;
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(get_row_values(row));
         }
 
@@ -741,14 +742,14 @@ mod tests {
             "col_4" => &"dd_value"
         }]);
 
-        let (bound_sql, bindings) = composer.compose_statement(&stmt, 1, None)?;
-        assert_eq!(bound_sql, expected_bound_sql, "preparable statements match");
+        let bsc = composer.compose_statement(&stmt, 1, None)?;
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
 
-        let prep_stmt = conn.prepare(&bound_sql)?;
+        let prep_stmt = conn.prepare(&bsc.sql())?;
 
         let mut values: Vec<Vec<String>> = vec![];
 
-        for row in &prep_stmt.query(&bindings)? {
+        for row in &prep_stmt.query(&bsc.values())? {
             values.push(get_row_values(row));
         }
 

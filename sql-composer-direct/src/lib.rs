@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, HashMap};
 use sql_composer::composer::{ComposerConfig, ComposerTrait};
 use sql_composer::error::Result;
 use sql_composer::types::value::ToValue;
-use sql_composer::types::{ParsedSqlComposition, Position, SqlBinding, SqlCompositionAlias};
+use sql_composer::types::{ParsedSqlMacro, Position, SqlBinding, SqlComposition,
+                          SqlCompositionAlias};
 
 pub struct Connection();
 
@@ -62,8 +63,11 @@ impl<'a> ComposerTrait for Composer<'a> {
         &self,
         binding: SqlBinding,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>)> {
-        Ok((self.binding_tag(offset, binding.name)?, vec![]))
+    ) -> Result<SqlComposition<Self::Value>> {
+        Ok(SqlComposition {
+            sql:    self.binding_tag(offset, binding.name)?,
+            values: vec![],
+        })
     }
 
     fn get_values(&self, _name: String) -> Option<&Vec<Self::Value>> {
@@ -72,19 +76,19 @@ impl<'a> ComposerTrait for Composer<'a> {
 
     fn compose_count_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
         parent: Option<Position>,
-    ) -> Result<(String, Vec<Self::Value>)> {
+    ) -> Result<SqlComposition<Self::Value>> {
         self.compose_count_default_command(composition, offset, parent)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
         parent: Option<Position>,
-    ) -> Result<(String, Vec<Self::Value>)> {
+    ) -> Result<SqlComposition<Self::Value>> {
         self.compose_union_default_command(composition, offset, parent)
     }
 
@@ -138,7 +142,7 @@ mod tests {
                                        "data"         => [&person.data]
         );
 
-        let (bound_sql, _bindings) = composer.compose(insert_stmt)?;
+        let bsc = composer.compose(insert_stmt)?;
 
         let now_value = now.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%S%.f");
 
@@ -147,15 +151,15 @@ mod tests {
             "Steven", now_value, "NULL"
         );
 
-        assert_eq!(bound_sql, expected_bound_sql, "insert basic bindings");
+        assert_eq!(bsc.sql(), expected_bound_sql, "insert basic bindings");
 
         let select_stmt = "SELECT id, name, time_created, data FROM person WHERE name = ':bind(name)' AND time_created = ':bind(time_created)' AND name = ':bind(name)' AND time_created = ':bind(time_created)';";
 
-        let (bound_sql, _bindings) = composer.compose(select_stmt)?;
+        let bsc = composer.compose(select_stmt)?;
 
         let expected_bound_sql = format!("SELECT id, name, time_created, data FROM person WHERE name = '{}' AND time_created = '{}' AND name = '{}' AND time_created = '{}';", &person.name, now_value, &person.name, now_value);
 
-        assert_eq!(bound_sql, expected_bound_sql, "select multi-use bindings");
+        assert_eq!(bsc.sql(), expected_bound_sql, "select multi-use bindings");
         Ok(())
     }
 

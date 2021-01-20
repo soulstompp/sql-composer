@@ -1,15 +1,14 @@
 use sql_composer::parser::{comma_padded, ending, take_while_name_char};
 use sql_composer::types::Span;
 
-use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_while1},
-    character::complete::{digit1, one_of, multispace0},
-    combinator::{iterator, opt, peek},
-    error::ErrorKind as NomErrorKind,
-    multi::{separated_list},
-    number::complete::double,
-    IResult};
+use nom::{branch::alt,
+          bytes::complete::{tag, take_while1},
+          character::complete::{digit1, multispace0, one_of},
+          combinator::{iterator, opt, peek},
+          error::ErrorKind as NomErrorKind,
+          multi::separated_list,
+          number::complete::double,
+          IResult};
 
 use serde_value::Value;
 
@@ -37,11 +36,11 @@ pub fn bind_value_integer(span: Span) -> IResult<Span, Value> {
     let (span, _) = check_bind_value_ending(span)?;
 
     Ok((
-            span,
-            Value::I64(
-                i64::from_str(&found.fragment)
+        span,
+        Value::I64(
+            i64::from_str(&found.fragment)
                 .expect("unable to parse integer found by bind_value_integer"),
-            ),
+        ),
     ))
 }
 
@@ -61,11 +60,7 @@ pub fn check_bind_value_ending(span: Span) -> IResult<Span, Span> {
 }
 
 pub fn bind_value(span: Span) -> IResult<Span, Value> {
-    let (span, value) = alt((
-            bind_value_text,
-            bind_value_integer,
-            bind_value_real
-    ))(span)?;
+    let (span, value) = alt((bind_value_text, bind_value_integer, bind_value_real))(span)?;
 
     Ok((span, value))
 }
@@ -96,7 +91,7 @@ pub fn bind_value_set(span: Span) -> IResult<Span, Vec<Value>> {
         (Some(s), Some(e)) => match (s.fragment, e.fragment) {
             ("[", "]") => (),
             ("(", ")") => (),
-            (_, _)     => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
+            (_, _) => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
         },
         (Some(s), None) => return Err(nom::Err::Failure((s, NomErrorKind::Verify))),
         (None, Some(e)) => return Err(nom::Err::Failure((e, NomErrorKind::Verify))),
@@ -106,7 +101,7 @@ pub fn bind_value_set(span: Span) -> IResult<Span, Vec<Value>> {
     Ok((span, list))
 }
 
-    //"a:[a_value, aa_value, aaa_value], b:b_value, c: (c_value, cc_value, ccc_value), d: d_value";
+//"a:[a_value, aa_value, aaa_value], b:b_value, c: (c_value, cc_value, ccc_value), d: d_value";
 pub fn bind_value_kv_pair(span: Span) -> IResult<Span, (Span, Vec<Value>)> {
     let (span, key) = take_while_name_char(span)?;
     let (span, _) = multispace0(span)?;
@@ -131,12 +126,13 @@ pub fn bracket_start<'a>(span: Span) -> IResult<Span, (Span, String)> {
     Ok((span, (start, result.to_string())))
 }
 
-pub fn bracket_start_fn<'a>(span: Span) -> IResult<Span, (Span, impl FnOnce(Span<'a>) -> IResult<Span, Span>)>
-{
+pub fn bracket_start_fn<'a>(
+    span: Span,
+) -> IResult<Span, (Span, impl FnOnce(Span<'a>) -> IResult<Span, Span>)> {
     let (span, start) = alt((tag("["), tag("(")))(span)?;
     let (span, _) = multispace0(span)?;
 
-    let bracket_end_func = tag::<&'static str, Span, _>( match start.fragment {
+    let bracket_end_func = tag::<&'static str, Span, _>(match start.fragment {
         "[" => "]",
         "(" => ")",
         _ => unreachable!(),
@@ -159,23 +155,26 @@ pub fn bind_value_named_item(span: Span) -> IResult<Span, Vec<(Span, Vec<Value>)
 pub fn bind_value_named_set(span: Span) -> IResult<Span, BTreeMap<String, Vec<Value>>> {
     let mut iter = iterator(span, bind_value_named_item);
 
-    let (_, map) = iter.fold(Ok((span, BTreeMap::new())), |acc_res: IResult<Span, BTreeMap<String, Vec<Value>>>, items: Vec<(Span, Vec<Value>)>| {
-        match acc_res {
-            Ok((span, mut acc)) => {
-                for (key, values) in items {
-                    let key = key.fragment.to_string();
+    let (_, map) = iter.fold(
+        Ok((span, BTreeMap::new())),
+        |acc_res: IResult<Span, BTreeMap<String, Vec<Value>>>, items: Vec<(Span, Vec<Value>)>| {
+            match acc_res {
+                Ok((span, mut acc)) => {
+                    for (key, values) in items {
+                        let key = key.fragment.to_string();
 
-                    let entry = acc.entry(key).or_insert(vec![]);
+                        let entry = acc.entry(key).or_insert(vec![]);
 
-                    for v in values {
-                        entry.push(v);
+                        for v in values {
+                            entry.push(v);
+                        }
                     }
+                    Ok((span, acc))
                 }
-                Ok((span, acc))
-            },
-            Err(e) => Err(e)
-        }
-    })?;
+                Err(e) => Err(e),
+            }
+        },
+    )?;
 
     let (span, _) = iter.finish().unwrap();
 
@@ -195,7 +194,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{bind_value, bind_value_integer, bind_value_named_set, bind_value_named_sets,
-               bind_value_set, bind_value_text, check_bind_value_ending, Span};
+                bind_value_set, bind_value_text, check_bind_value_ending, Span};
 
     fn build_expected_bind_values() -> BTreeMap<String, Vec<Value>> {
         let mut expected_values: BTreeMap<String, Vec<Value>> = BTreeMap::new();
@@ -213,11 +212,7 @@ mod tests {
 
         expected_values.insert(
             "c".into(),
-            vec![
-                Value::I64(2),
-                Value::F64(2.25),
-                Value::String("a".into()),
-            ],
+            vec![Value::I64(2), Value::F64(2.25), Value::String("a".into())],
         );
 
         expected_values.insert("d".into(), vec![Value::I64(2)]);

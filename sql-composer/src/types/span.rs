@@ -20,42 +20,80 @@ impl From<Option<String>> for GeneratedSpan {
     }
 }
 
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub struct TextLocation {
+    line:   u32,
+    offset: usize,
+}
+
+impl Default for TextLocation {
+    fn default() -> Self {
+        Self {
+            line:   1,
+            offset: 0,
+        }
+    }
+}
+
+impl<'a> From<Span<'a>> for TextLocation {
+    fn from(s: Span) -> Self {
+        TextLocation {
+            line:   s.line,
+            offset: s.offset,
+        }
+    }
+}
+
+impl<'a> From<&Span<'a>> for TextLocation {
+    fn from(s: &Span) -> Self {
+        TextLocation {
+            line:   s.line,
+            offset: s.offset,
+        }
+    }
+}
+
+impl From<(u32, usize)> for TextLocation {
+    fn from(v: (u32, usize)) -> Self {
+        TextLocation {
+            line:   v.0,
+            offset: v.1,
+        }
+    }
+}
+
 /// ParsedSpan is for ...
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct ParsedSpan {
-    pub alias:    Option<SqlCompositionAlias>,
-    pub line:     u32,
-    pub offset:   usize,
-    pub fragment: String,
+    pub alias: Option<SqlCompositionAlias>,
+    pub start: TextLocation,
+    pub end:   TextLocation,
 }
 
 /// line number should default to 1
 impl Default for ParsedSpan {
     fn default() -> Self {
         Self {
-            line:     1,
-            alias:    None,
-            offset:   0,
-            fragment: "".to_string(),
+            alias: None,
+            start: Default::default(),
+            end:   Default::default(),
         }
     }
 }
 
 impl ParsedSpan {
-    pub fn new(span: Span, alias: Option<SqlCompositionAlias>) -> Self {
+    pub fn new(start_span: Span, end_span: Span, alias: Option<SqlCompositionAlias>) -> Self {
         Self {
-            alias:    alias,
-            line:     span.line,
-            offset:   span.offset,
-            fragment: span.fragment.to_string(),
+            alias,
+            start: start_span.into(),
+            end: end_span.into(),
         }
     }
 
     pub fn from_span(span: Span) -> Self {
         Self {
-            line: span.line,
-            offset: span.offset,
-            fragment: span.fragment.to_string(),
+            start: span.into(),
+            end: span.into(),
             ..Default::default()
         }
     }
@@ -66,9 +104,8 @@ impl ParsedSpan {
 impl<'a> From<Span<'a>> for ParsedSpan {
     fn from(span: Span) -> Self {
         Self {
-            line: span.line,
-            offset: span.offset,
-            fragment: span.fragment.to_string(),
+            start: span.into(),
+            end: span.into(),
             ..Default::default()
         }
     }
@@ -76,13 +113,16 @@ impl<'a> From<Span<'a>> for ParsedSpan {
 
 impl fmt::Display for ParsedSpan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "character {}, line {}", self.line, self.offset)?;
+        write!(
+            f,
+            "from ({}, {}) to ({}, {})",
+            self.start.line, self.start.offset, self.end.line, self.end.offset
+        )?;
 
-        match &self.alias {
-            Some(a) => write!(f, " of {}:", a)?,
-            None => write!(f, ":")?,
-        };
+        if let Some(a) = &self.alias {
+            write!(f, " of {}", a)?;
+        }
 
-        write!(f, "{}", self.fragment)
+        Ok(())
     }
 }

@@ -1,8 +1,11 @@
-use crate::types::{ParsedItem, ParsedSqlComposition, Sql, SqlBinding, SqlComposition,
-                   SqlCompositionAlias, SqlDbObject};
+use crate::types::{GeneratedSpan, ParsedItem, ParsedSqlMacro, ParsedSqlStatement, Position, Sql,
+                   SqlBinding, SqlComposition, SqlCompositionAlias, SqlDbObject};
+
 use std::collections::{BTreeMap, HashMap};
 
-use crate::error::{ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
+
+use std::convert::TryInto;
 
 pub trait ComposerConnection<'a> {
     type Composer;
@@ -12,7 +15,7 @@ pub trait ComposerConnection<'a> {
 
     fn compose(
         &'a self,
-        s: &SqlComposition,
+        ipss: impl TryInto<ParsedSqlStatement, Error = Error>,
         values: BTreeMap<String, Vec<Self::Value>>,
         root_mock_values: Vec<BTreeMap<String, Self::Value>>,
         mock_values: HashMap<SqlCompositionAlias, Vec<BTreeMap<String, Self::Value>>>,
@@ -128,207 +131,183 @@ pub struct ComposerConfig {
 pub trait ComposerTrait: Sized {
     type Value: Copy;
 
-    fn compose(&self, s: &SqlComposition) -> Result<(String, Vec<Self::Value>)> {
-        let item = ParsedItem::generated(s.clone(), None)?;
-
-        self.compose_statement(&item, 1usize, false)
+    fn compose(
+        &self,
+        stmt_item: impl TryInto<ParsedSqlStatement, Error = Error>,
+    ) -> Result<SqlComposition<Self::Value>> {
+        let p: ParsedSqlStatement = stmt_item.try_into()?;
+        self.compose_statement(&p, 1usize, None)
     }
 
     fn compose_statement(
         &self,
-        sc: &ParsedSqlComposition,
+        stmt_item: &ParsedSqlStatement,
         offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)> {
+        parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>> {
         let mut i = offset;
 
-        let mut sql = String::new();
-
-        let mut values: Vec<Self::Value> = vec![];
-
-        if sc.item.command.is_some() {
-            return self.compose_command(&sc, i, true);
-        }
+        let mut sc = SqlComposition::new();
 
         let mut pad;
         let mut skip_padding;
 
-        for c in &sc.item.sql {
+        for c in &stmt_item.item.sql {
             pad = true;
             skip_padding = false;
 
-            let (sub_sql, sub_values) = match c {
-                Sql::Literal(t) => (t.to_string(), vec![]),
-                Sql::Binding(b) => self.compose_binding(b.item.clone(), i)?,
-                Sql::Composition((ss, _aliases)) => self.compose_statement(&ss, i, true)?,
+            let mut sub_sc = SqlComposition::new();
+
+            match &c.item {
+                Sql::Literal(t) => sub_sc.push_sql(&t.to_string()),
+                Sql::Binding(b) => sub_sc.append(self.compose_binding(b.clone(), i)?),
+                Sql::Macro(sm) => {
+                    let out = ParsedItem::new(sm.clone(), Some(c.position.clone()));
+
+                    //could this just take a position?
+                    sub_sc.append(self.compose_command(&out, i, Some(c.position.clone()))?)
+                }
                 Sql::Ending(e) => {
                     pad = false;
 
-                    if child {
-                        ("".to_string(), vec![])
+                    if parent.is_some() {
+                        sub_sc.push_sql("");
                     }
                     else {
-                        (e.to_string(), vec![])
+                        sub_sc.push_sql(&e.to_string());
                     }
                 }
                 Sql::DbObject(dbo) => {
                     let dbo_alias = SqlCompositionAlias::DbObject(SqlDbObject::new(
-                        dbo.item.object_name.to_string(),
+                        dbo.object_name.to_string(),
                         None,
                     )?);
 
                     if let Some(mv) = self.mock_values().get(&dbo_alias) {
-                        let (mock_sql, mock_values) = self.mock_compose(mv, i)?;
+                        let mock_sc = self.mock_compose(mv, i)?;
 
                         //TODO: this should call the alias function on dbo_alias, which uses
                         //object_alias but falls back to object_name
-                        let mock_sql = format!("( {} ) AS {}", mock_sql, dbo.item.object_name);
+                        let mock_sql = format!("( {} ) AS {}", mock_sc.sql(), dbo.object_name);
 
-                        (mock_sql, mock_values)
+                        sub_sc.push(&mock_sql, mock_sc.values().to_vec());
                     }
                     else {
-                        (dbo.to_string(), vec![])
+                        sub_sc.push_sql(&dbo.to_string());
                     }
                 }
-                Sql::Keyword(k) => (k.to_string(), vec![]),
+                Sql::Keyword(k) => sub_sc.push_sql(&k.to_string()),
             };
 
-            if sub_sql.len() == 0 {
+            if sub_sc.sql_len() == 0 {
                 continue;
             }
 
-            if sub_sql == "," {
+            if &sub_sc.sql() == "," {
                 skip_padding = true;
             }
 
-            if !skip_padding && pad && sql.len() > 0 {
-                sql.push(' ');
+            if !skip_padding && pad && sc.sql_len() > 0 {
+                sc.push_sql(" ");
             }
 
-            sql.push_str(&sub_sql);
+            sc.append(sub_sc);
 
-            for sv in sub_values {
-                values.push(sv);
-            }
-
-            i = values.len() + offset;
+            i = sc.values_len() + offset;
         }
 
-        Ok((sql, values))
+        Ok(sc)
     }
 
     fn compose_command<'c>(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)> {
-        match &composition.item.command {
-            Some(s) => match s.item().to_lowercase().as_str() {
-                "compose" => {
-                    let mut out = composition.clone();
-
-                    out.item.command = None;
-
-                    match &out.item.of[0].item().path() {
-                        Some(path) => match self
-                            .mock_values()
-                            .get(&SqlCompositionAlias::Path(path.into()))
-                        {
-                            Some(e) => Ok(self.mock_compose(e, offset)?),
-                            None => self.compose_statement(
-                                &out.item
-                                    .aliases
-                                    .get(&out.item.of[0].item())
-                                    .expect("get called but none found at that position"),
-                                offset,
-                                child,
-                            ),
-                        },
-                        None => self.compose_statement(
-                            &out.item
-                                .aliases
-                                .get(&out.item.of[0].item())
-                                .expect("get called but none found at that position"),
-                            offset,
-                            child,
-                        ),
-                    }
+        parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>> {
+        match composition.item.command.item.as_str() {
+            "compose" => {
+                if let Some(e) = self.mock_values().get(&composition.item.of[0].item()) {
+                    return Ok(self.mock_compose(e, offset)?);
                 }
-                "count" => self.compose_count_command(composition, offset, child),
-                "union" => self.compose_union_command(composition, offset, child),
-                c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into())),
-            },
-            None => self.compose_statement(&composition, offset, child),
+                else {
+                    let alias = composition.item.of[0].item();
+                    let stmt: ParsedSqlStatement = alias.try_into()?;
+
+                    return self.compose_statement(
+                        //TODO: find a way around unwrapping here, the match seems to make things weird
+                        &stmt, offset, parent,
+                    );
+                }
+            }
+            "count" => self.compose_count_command(composition, offset, parent),
+            "union" => self.compose_union_command(composition, offset, parent),
+            c @ _ => bail!(ErrorKind::CompositionCommandUnknown(c.into())),
         }
     }
 
     fn compose_count_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)>;
+        parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>>;
 
     fn compose_count_default_command(
         &self,
-        composition: &ParsedSqlComposition,
+        psm: &ParsedSqlMacro,
         offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)> {
-        let mut out = SqlComposition::default();
+        _parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>> {
+        let mut sc = SqlComposition::new();
 
-        let mut select = String::from("SELECT COUNT(");
+        sc.push_sql("SELECT COUNT(");
 
-        let columns = composition.item.column_list()?;
+        let columns = psm.item.column_list()?;
 
         if let Some(c) = columns {
-            select.push_str(&c);
+            sc.push_sql(&c);
         }
         else {
-            select.push('1');
+            sc.push_sql("1");
         }
 
-        select.push_str(") FROM ");
+        sc.push_sql(") FROM ");
 
-        out.push_generated_literal(&select, Some("COUNT".into()))?;
+        for alias in psm.item.of.iter() {
+            sc.push_sql("(");
 
-        for alias in composition.item.of.iter() {
-            out.push_generated_literal("(", Some("COUNT".into()))?;
+            let stmt = alias.item.clone().try_into()?;
+            let asc = self.compose_statement(
+                &stmt,
+                offset,
+                Some(Position::Generated(GeneratedSpan {
+                    command: Some("count".to_string()),
+                })),
+            )?;
 
-            match composition.item.aliases.get(&alias.item()) {
-                Some(sc) => {
-                    out.push_sub_comp(sc.clone())?;
-                }
-                None => {
-                    bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
-                }
-            }
+            sc.append(asc);
 
-            out.push_generated_literal(") AS count_main", Some("COUNT".into()))?;
+            sc.push_sql(") AS count_main");
         }
 
-        out.push_generated_end(Some("COUNT".into()))?;
-
-        let item = ParsedItem::generated(out, Some("COUNT".into()))?;
-
-        self.compose_statement(&item, offset, child)
+        Ok(sc)
     }
 
     fn compose_union_command(
         &self,
-        composition: &ParsedSqlComposition,
+        composition: &ParsedSqlMacro,
         offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)>;
+        parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>>;
 
     fn compose_union_default_command(
         &self,
-        composition: &ParsedSqlComposition,
-        offset: usize,
-        child: bool,
-    ) -> Result<(String, Vec<Self::Value>)> {
-        let mut out = SqlComposition::default();
+        composition: &ParsedSqlMacro,
+        _offset: usize,
+        _parent: Option<Position>,
+    ) -> Result<SqlComposition<Self::Value>> {
+        let mut sc = SqlComposition::new();
 
         // columns in this case would mean an compose on each side of the union literal
         let _columns = composition.item.column_list()?;
@@ -344,58 +323,55 @@ pub trait ComposerTrait: Sized {
 
         for alias in composition.item.of.iter() {
             if i > 0 {
-                out.push_generated_literal("UNION ", Some("UNION".into()))?;
+                sc.push_sql(" UNION ");
             }
 
-            match composition.item.aliases.get(&alias.item()) {
-                Some(sc) => {
-                    out.push_sub_comp(sc.clone())?;
-                }
-                None => {
-                    bail!(ErrorKind::CompositionAliasUnknown(alias.to_string()));
-                }
-            }
+            let stmt = alias.item.clone().try_into()?;
+            let asc = self.compose_statement(
+                &stmt,
+                sc.values_len() + 1,
+                Some(Position::Generated(GeneratedSpan {
+                    command: Some("count".to_string()),
+                })),
+            )?;
+
+            sc.append(asc);
 
             i += 1;
         }
 
-        out.push_generated_end(Some("UNION".into()))?;
-
-        let item = ParsedItem::generated(out, Some("UNION".into()))?;
-
-        self.compose_statement(&item, offset, child)
+        Ok(sc)
     }
 
     fn compose_binding(
         &self,
         binding: SqlBinding,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>)> {
+    ) -> Result<SqlComposition<Self::Value>> {
         let name = &binding.name;
-        let mut sql = String::new();
-        let mut new_values = vec![];
+
+        let mut sc = SqlComposition::new();
 
         match self.get_values(name.to_string()) {
             Some(v) => {
                 let mut found = 0;
 
                 for iv in v.iter() {
-                    if new_values.len() > 0 {
-                        sql.push_str(", ");
+                    if sc.values_len() > 0 {
+                        sc.push_sql(", ");
                     }
 
-                    sql.push_str(&self.binding_tag(new_values.len() + offset, name.to_string())?);
-
-                    new_values.push(*iv);
+                    sc.push_sql(&self.binding_tag(sc.values_len() + offset, name.to_string())?);
+                    sc.push_value(*iv);
 
                     found += 1;
                 }
 
                 if found == 0 {
                     if binding.nullable {
-                        sql.push_str("NULL");
+                        sc.push_sql("NULL");
 
-                        return Ok((sql, new_values));
+                        return Ok(sc);
                     }
                     else {
                         bail!(ErrorKind::CompositionBindingValueInvalid(
@@ -437,7 +413,7 @@ pub trait ComposerTrait: Sized {
             )),
         };
 
-        Ok((sql, new_values))
+        Ok(sc)
     }
 
     fn binding_tag(&self, u: usize, name: String) -> Result<String>;
@@ -456,9 +432,8 @@ pub trait ComposerTrait: Sized {
         &self,
         mock_values: &Vec<BTreeMap<String, Self::Value>>,
         offset: usize,
-    ) -> Result<(String, Vec<Self::Value>)> {
-        let mut sql = String::new();
-        let mut values: Vec<Self::Value> = vec![];
+    ) -> Result<SqlComposition<Self::Value>> {
+        let mut sc = SqlComposition::new();
 
         let mut i = offset;
         let mut r = 0;
@@ -478,22 +453,22 @@ pub trait ComposerTrait: Sized {
         else {
             for row in mock_values.iter() {
                 if r > 0 {
-                    sql.push_str(" UNION ALL ");
+                    sc.push_sql(" UNION ALL ");
                 }
 
-                sql.push_str("SELECT ");
+                sc.push_sql("SELECT ");
 
                 for (name, value) in row {
                     c += 1;
 
                     if c > 1 {
-                        sql.push_str(", ")
+                        sc.push_sql(", ")
                     }
 
-                    sql.push_str(&self.binding_tag(i, name.to_string())?);
-                    sql.push_str(&format!(" AS {}", &name));
+                    sc.push_sql(&self.binding_tag(i, name.to_string())?);
+                    sc.push_sql(&format!(" AS {}", &name));
 
-                    values.push(*value);
+                    sc.push_value(*value);
 
                     i += 1;
                 }
@@ -512,6 +487,6 @@ pub trait ComposerTrait: Sized {
             }
         }
 
-        Ok((sql, values))
+        Ok(sc)
     }
 }

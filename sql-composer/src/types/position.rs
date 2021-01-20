@@ -51,7 +51,7 @@ impl fmt::Display for Position {
                     None => write!(f, "")?,
                 }
 
-                write!(f, "character {} line {}", ps.offset, ps.line)
+                write!(f, "{}", ps)
             }
         }
     }

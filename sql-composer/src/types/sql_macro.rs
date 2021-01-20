@@ -96,18 +96,37 @@ impl Hash for SqlMacro {
 
 impl fmt::Display for SqlMacro {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        //write!(f, "{:?}\n\n", self);
         write!(f, ":{}(", self.command)?;
 
-        let mut c = 0;
+        let mut i = 0;
 
-        for col in &self.columns {
-            if c > 0 {
-                write!(f, ",")?;
+        if let Some(cols) = &self.columns {
+            for col in cols {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+
+                write!(f, "{}", col)?;
+
+                i += 1;
+            }
+        }
+
+        if i > 0 {
+            write!(f, " of ");
+        }
+
+        i = 0;
+
+        for o in &self.of {
+            if i > 0 {
+                write!(f, ", ");
             }
 
-            write!(f, "{:?}", col)?;
+            write!(f, "{}", o.item);
 
-            c += 1;
+            i += 1;
         }
 
         write!(f, ")")

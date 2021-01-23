@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::error::Error;
-use crate::types::{Span, SqlDbObject, SqlLiteral, SqlMacro};
-use crate::types::sql_macro::SqlMacroCommand;
 use crate::types::sql::SqlMacroLiteral;
+use crate::types::sql_macro::SqlMacroCommand;
+use crate::types::{Span, SqlDbObject, SqlLiteral, SqlMacro};
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub enum SqlCompositionAlias {

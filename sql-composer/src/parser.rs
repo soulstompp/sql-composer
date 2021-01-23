@@ -1,4 +1,6 @@
-use crate::types::{ParsedItem, ParsedSpan, ParsedSql, ParsedSqlMacro, ParsedSqlStatement, Position, Span, Sql, SqlBinding, SqlCompositionAlias, SqlDbObject, SqlEnding, SqlKeyword, SqlLiteral, SqlMacro, SqlStatement, SqlMacroLiteral};
+use crate::types::{ParsedItem, ParsedSpan, ParsedSql, ParsedSqlMacro, ParsedSqlStatement,
+                   Position, Span, Sql, SqlBinding, SqlCompositionAlias, SqlDbObject, SqlEnding,
+                   SqlKeyword, SqlLiteral, SqlMacro, SqlMacroLiteral, SqlStatement};
 
 use crate::error::Result;
 
@@ -391,7 +393,7 @@ pub fn of_item_macro(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias
     let (end_span, pmi) = composer_macro_item(span)?;
 
     let pma = ParsedItem {
-        item: SqlCompositionAlias::Macro(SqlMacroLiteral::new(&pmi.item)),
+        item:     SqlCompositionAlias::Macro(SqlMacroLiteral::new(&pmi.item)),
         position: pmi.position,
     };
 
@@ -617,13 +619,13 @@ mod tests {
 
     type EmptyResult = Result<()>;
 
+    use crate::parser::of_list;
     use crate::tests::{build_parsed_binding_item, build_parsed_db_object,
                        build_parsed_ending_item, build_parsed_item, build_parsed_path_position,
                        build_parsed_quoted_binding_item, build_parsed_sql_binding,
                        build_parsed_sql_ending, build_parsed_sql_keyword,
                        build_parsed_sql_literal, build_parsed_sql_quoted_binding,
                        build_parsed_string, build_span};
-    use crate::parser::of_list;
 
     fn simple_aliases(
         shift_line: Option<u32>,
@@ -1389,24 +1391,22 @@ mod tests {
         let pi = "src/tests/include-template.tql";
         let of = format!("{}, {}", ps, pi);
 
-        let (remainder, alias_items) = of_list(Span{ offset: 0, line: 1, fragment: &of, extra: () }).expect("list is parsable");
+        let (remainder, alias_items) = of_list(Span {
+            offset:   0,
+            line:     1,
+            fragment: &of,
+            extra:    (),
+        })
+        .expect("list is parsable");
 
         let expected_alias_items = vec![
             build_parsed_item(SqlCompositionAlias::from_path(ps), None, (1, 0), (1, 28)),
-            build_parsed_item(SqlCompositionAlias::from_path(pi), None, (1, 31), (1, 60))
+            build_parsed_item(SqlCompositionAlias::from_path(pi), None, (1, 31), (1, 60)),
         ];
 
-        assert_eq!(
-            alias_items,
-            expected_alias_items,
-            "alias list parsed"
-        );
+        assert_eq!(alias_items, expected_alias_items, "alias list parsed");
 
-        assert_eq!(
-            remainder.fragment,
-            "",
-            "nothing remaining"
-        )
+        assert_eq!(remainder.fragment, "", "nothing remaining")
     }
 
     #[test]
@@ -1415,7 +1415,13 @@ mod tests {
         let pi = "src/tests/include-template.tql";
         let of = format!(":compose({}), :compose({})", ps, pi);
 
-        let (remainder, alias_items) = of_list(Span{ offset: 0, line: 1, fragment: &of, extra: () }).expect("list is parsable");
+        let (remainder, alias_items) = of_list(Span {
+            offset:   0,
+            line:     1,
+            fragment: &of,
+            extra:    (),
+        })
+        .expect("list is parsable");
 
         let psm = SqlMacro {
             command: ParsedItem::new("compose".into(), None),
@@ -1431,20 +1437,12 @@ mod tests {
 
         let expected_alias_items = vec![
             build_parsed_item(SqlCompositionAlias::from_macro(psm), None, (1, 0), (1, 38)),
-            build_parsed_item(SqlCompositionAlias::from_macro(pim), None, (1, 41), (1, 80))
+            build_parsed_item(SqlCompositionAlias::from_macro(pim), None, (1, 41), (1, 80)),
         ];
 
-        assert_eq!(
-            alias_items,
-            expected_alias_items,
-            "alias list parsed"
-        );
+        assert_eq!(alias_items, expected_alias_items, "alias list parsed");
 
-        assert_eq!(
-            remainder.fragment,
-            "",
-            "nothing remaining"
-        )
+        assert_eq!(remainder.fragment, "", "nothing remaining")
     }
 }
 

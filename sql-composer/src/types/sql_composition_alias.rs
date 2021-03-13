@@ -7,12 +7,15 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::error::Error;
-use crate::types::{Span, SqlDbObject, SqlLiteral};
+use crate::types::sql::SqlMacroLiteral;
+use crate::types::sql_macro::SqlMacroCommand;
+use crate::types::{Span, SqlDbObject, SqlLiteral, SqlMacro};
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub enum SqlCompositionAlias {
     Path(PathBuf),
     DbObject(SqlDbObject),
+    Macro(SqlMacroLiteral),
     SqlLiteral(SqlLiteral),
 }
 
@@ -46,6 +49,10 @@ impl SqlCompositionAlias {
         path.into().into()
     }
 
+    pub fn from_macro(m: SqlMacro) -> Self {
+        Self::Macro(SqlMacroLiteral::new(&m))
+    }
+
     /// Return an owned copy of the PathBuf for SqlCompositionAlias::Path types.
     pub fn path(&self) -> Option<PathBuf> {
         match self {
@@ -58,6 +65,7 @@ impl SqlCompositionAlias {
     pub fn read_raw_sql(&self) -> Result<String> {
         match self {
             SqlCompositionAlias::DbObject(dbo) => Ok(dbo.to_string()),
+            SqlCompositionAlias::Macro(ml) => Ok(ml.to_string()),
             SqlCompositionAlias::Path(path) => Ok(fs::read_to_string(&path)?),
             SqlCompositionAlias::SqlLiteral(s) => Ok(s.to_string()),
         }
@@ -143,8 +151,9 @@ impl FromStr for SqlCompositionAlias {
 impl fmt::Display for SqlCompositionAlias {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Path(p) => write!(f, ", {}", p.to_string_lossy()),
-            Self::DbObject(dbo) => write!(f, ", {}", dbo),
+            Self::Path(p) => write!(f, "{}", p.to_string_lossy()),
+            Self::DbObject(dbo) => write!(f, "{}", dbo),
+            Self::Macro(ml) => write!(f, "{}", ml),
             Self::SqlLiteral(l) => write!(f, "{}", l),
         }
     }

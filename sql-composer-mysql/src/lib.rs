@@ -573,6 +573,50 @@ mod tests {
     }
 
     #[test]
+    fn test_composed_union_command() -> EmptyResult {
+        let pool = setup_db();
+
+        let stmt = ":union(:count(col_1 of src/tests/values/double-include.tql), :count(col_4 of src/tests/values/include.tql), :count(col_2 of src/tests/values/double-include.tql));";
+
+        let expected_bound_sql = "SELECT COUNT(col_1) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main UNION SELECT COUNT(col_4) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main UNION SELECT COUNT(col_2) FROM (SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4 UNION ALL SELECT ? AS col_1, ? AS col_2, ? AS col_3, ? AS col_4) AS count_main;";
+
+        let mut composer = Composer::new();
+
+        composer.values = bind_values!(&dyn ToValue:
+                                       "a" => [&"a_value"],
+                                       "b" => [&"b_value"],
+                                       "c" => [&"c_value"],
+                                       "d" => [&"d_value"],
+                                       "e" => [&"e_value"],
+                                       "f" => [&"f_value"],
+                                       "col_1_values" => [&"d_value", &"a_value"],
+                                       "col_3_values" => [&"b_value", &"c_value"]
+        );
+
+        let bsc = composer.compose(stmt)?;
+
+        assert_eq!(bsc.sql(), expected_bound_sql, "preparable statements match");
+
+        let mut prep_stmt = pool.prepare(&bsc.sql())?;
+
+        let mut values: Vec<Vec<u32>> = vec![];
+
+        for row in prep_stmt.execute(bsc.values().as_slice())? {
+            let mut c: Vec<u32> = vec![];
+
+            let (count) = from_row::<(u32)>(row?);
+            c.push(count);
+
+            values.push(c);
+        }
+
+        let expected_values = vec![vec![3], vec![2]];
+
+        assert_eq!(values, expected_values, "expected values");
+        Ok(())
+    }
+
+    #[test]
     fn test_include_mock_multi_value_bind() -> EmptyResult {
         let pool = setup_db();
 

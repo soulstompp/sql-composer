@@ -1,6 +1,6 @@
 use crate::types::{ParsedItem, ParsedSpan, ParsedSql, ParsedSqlMacro, ParsedSqlStatement,
                    Position, Span, Sql, SqlBinding, SqlCompositionAlias, SqlDbObject, SqlEnding,
-                   SqlKeyword, SqlLiteral, SqlMacro, SqlStatement};
+                   SqlKeyword, SqlLiteral, SqlMacro, SqlMacroLiteral, SqlStatement};
 
 use crate::error::Result;
 
@@ -364,6 +364,10 @@ pub fn db_object_item(
 }
 
 pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
+    alt((of_item_macro, of_item_path))(span)
+}
+
+pub fn of_item_path(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
     let (end_span, of_name) = take_while1(|u| {
         let c = u as char;
 
@@ -383,6 +387,17 @@ pub fn of_item(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
         .expect("unable to build ParsedItem of SqlDbObject in db_object parser");
 
     Ok((end_span, pi))
+}
+
+pub fn of_item_macro(span: Span) -> IResult<Span, ParsedItem<SqlCompositionAlias>> {
+    let (end_span, pmi) = composer_macro_item(span)?;
+
+    let pma = ParsedItem {
+        item:     SqlCompositionAlias::Macro(SqlMacroLiteral::new(&pmi.item)),
+        position: pmi.position,
+    };
+
+    Ok((end_span, pma))
 }
 
 pub fn of_list(span: Span) -> IResult<Span, Vec<ParsedItem<SqlCompositionAlias>>> {
@@ -604,6 +619,7 @@ mod tests {
 
     type EmptyResult = Result<()>;
 
+    use crate::parser::of_list;
     use crate::tests::{build_parsed_binding_item, build_parsed_db_object,
                        build_parsed_ending_item, build_parsed_item, build_parsed_path_position,
                        build_parsed_quoted_binding_item, build_parsed_sql_binding,
@@ -1075,6 +1091,60 @@ mod tests {
     }
 
     #[test]
+    fn test_simple_count_composed_composer() -> EmptyResult {
+        let compose_sql_str = ":compose(src/tests/simple-template.tql)";
+        let sql_str = format!(":count({});", &compose_sql_str);
+
+        let stmt_item = ParsedSqlStatement::parse(sql_str.to_string())?;
+
+        let alias = Some(sql_str.clone().into());
+
+        let csm = SqlMacro {
+            command: build_parsed_string("compose", None, (1, 1), (1, 5)),
+            of: vec![build_parsed_item(
+                SqlCompositionAlias::Path("src/tests/simple-template.tql".into()),
+                None,
+                (1, 7),
+                (1, 35),
+            )],
+            ..Default::default()
+        };
+
+        let sm = SqlMacro {
+            command: build_parsed_string("count", None, (1, 1), (1, 5)),
+            of: vec![build_parsed_item(
+                SqlCompositionAlias::from_macro(csm),
+                None,
+                (1, 7),
+                (1, 45),
+            )],
+            ..Default::default()
+        };
+
+        let psm = build_parsed_item(Sql::Macro(sm), alias.clone(), (1, 0), (1, 46));
+
+        let ending = build_parsed_item(
+            SqlEnding::new(";".into())?.into(),
+            alias.clone(),
+            (1, 47),
+            (1, 47),
+        );
+
+        let expected = build_parsed_item(
+            SqlStatement {
+                sql:      vec![psm, ending],
+                complete: true,
+            },
+            Some(sql_str.clone().into()),
+            (1, 0),
+            (1, 47),
+        );
+
+        assert_eq!(stmt_item, expected);
+        Ok(())
+    }
+
+    #[test]
     fn test_parse_column_item() {
         let input = "col_1 , of ";
         let expected_fragment = "col_1";
@@ -1313,6 +1383,66 @@ mod tests {
                 }
             };
         }
+    }
+
+    #[test]
+    fn it_parses_of_list_paths() {
+        let ps = "src/tests/simple-template.tql";
+        let pi = "src/tests/include-template.tql";
+        let of = format!("{}, {}", ps, pi);
+
+        let (remainder, alias_items) = of_list(Span {
+            offset:   0,
+            line:     1,
+            fragment: &of,
+            extra:    (),
+        })
+        .expect("list is parsable");
+
+        let expected_alias_items = vec![
+            build_parsed_item(SqlCompositionAlias::from_path(ps), None, (1, 0), (1, 28)),
+            build_parsed_item(SqlCompositionAlias::from_path(pi), None, (1, 31), (1, 60)),
+        ];
+
+        assert_eq!(alias_items, expected_alias_items, "alias list parsed");
+
+        assert_eq!(remainder.fragment, "", "nothing remaining")
+    }
+
+    #[test]
+    fn it_parses_of_list_macros() {
+        let ps = "src/tests/simple-template.tql";
+        let pi = "src/tests/include-template.tql";
+        let of = format!(":compose({}), :compose({})", ps, pi);
+
+        let (remainder, alias_items) = of_list(Span {
+            offset:   0,
+            line:     1,
+            fragment: &of,
+            extra:    (),
+        })
+        .expect("list is parsable");
+
+        let psm = SqlMacro {
+            command: ParsedItem::new("compose".into(), None),
+            of: vec![ParsedItem::new(SqlCompositionAlias::from_path(ps), None)],
+            ..Default::default()
+        };
+
+        let pim = SqlMacro {
+            command: ParsedItem::new("compose".into(), None),
+            of: vec![ParsedItem::new(SqlCompositionAlias::from_path(pi), None)],
+            ..Default::default()
+        };
+
+        let expected_alias_items = vec![
+            build_parsed_item(SqlCompositionAlias::from_macro(psm), None, (1, 0), (1, 38)),
+            build_parsed_item(SqlCompositionAlias::from_macro(pim), None, (1, 41), (1, 80)),
+        ];
+
+        assert_eq!(alias_items, expected_alias_items, "alias list parsed");
+
+        assert_eq!(remainder.fragment, "", "nothing remaining")
     }
 }
 

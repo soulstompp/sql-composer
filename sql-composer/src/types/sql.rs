@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::error::Result;
 use crate::types::SqlMacro;
+use std::convert::TryFrom;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Sql {
@@ -115,6 +116,24 @@ impl fmt::Display for SqlKeyword {
 impl From<SqlKeyword> for Sql {
     fn from(value: SqlKeyword) -> Self {
         Sql::Keyword(value)
+    }
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Default, Clone)]
+pub struct SqlMacroLiteral(SqlLiteral);
+
+impl SqlMacroLiteral {
+    pub fn new(m: &SqlMacro) -> Self {
+        Self(SqlLiteral {
+            value: m.to_string(),
+            ..Default::default()
+        })
+    }
+}
+
+impl fmt::Display for SqlMacroLiteral {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", &self.0)
     }
 }
 

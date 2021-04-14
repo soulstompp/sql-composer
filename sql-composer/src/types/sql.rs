@@ -4,7 +4,6 @@ use std::fmt;
 
 use crate::error::Result;
 use crate::types::SqlMacro;
-use std::convert::TryFrom;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Sql {

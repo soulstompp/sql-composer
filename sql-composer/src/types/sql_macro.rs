@@ -114,17 +114,17 @@ impl fmt::Display for SqlMacro {
         }
 
         if i > 0 {
-            write!(f, " of ");
+            write!(f, " of ")?;
         }
 
         i = 0;
 
         for o in &self.of {
             if i > 0 {
-                write!(f, ", ");
+                write!(f, ", ")?;
             }
 
-            write!(f, "{}", o.item);
+            write!(f, "{}", o.item)?;
 
             i += 1;
         }

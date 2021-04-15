@@ -604,7 +604,7 @@ mod tests {
         for row in prep_stmt.execute(bsc.values().as_slice())? {
             let mut c: Vec<u32> = vec![];
 
-            let (count) = from_row::<(u32)>(row?);
+            let count = from_row::<u32>(row?);
             c.push(count);
 
             values.push(c);

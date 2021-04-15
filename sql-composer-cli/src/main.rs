@@ -151,7 +151,7 @@ fn query(args: QueryArgs) -> CliResult {
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let path = PathBuf::from("args.path");
+    let path = PathBuf::from(args.path);
 
     if uri.starts_with("mysql://") {
         if cfg!(feature = "dbd-mysql") == false {

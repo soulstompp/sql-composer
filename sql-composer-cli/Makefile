@@ -1,8 +1,10 @@
 # override with TARGET=release to test against release builds
 TARGET=debug
 
+
 # Potentially change/overridable.  YMMV:
-TQL=src/tests/values/double-include.tql
+# TQL is relative to COMPOSER_DIR
+TQL?=src/tests/values/double-include.tql
 BIND=[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]
 VERBOSE=-vvv
 

@@ -1,8 +1,10 @@
 # override with TARGET=release to test against release builds
 TARGET=debug
 
+
 # Potentially change/overridable.  YMMV:
-TQL=src/tests/values/double-include.tql
+# TQL is relative to COMPOSER_DIR
+TQL?=src/tests/values/double-include.tql
 BIND=[a: ['a_value'], b: ['b_value'], c: ['c_value'], d: ['d_value'], e: ['e_value'], f: ['f_value']]
 VERBOSE=-vvv
 
@@ -17,20 +19,23 @@ COMMA= ,
 include ../.env
 
 .PHONY: default
-.PHONY: all mysql postgres sqlite
+.PHONY: all mysql postgres rusqlite sqlite
 .PHONY: cargo_build
 .PHONY: sqlc
 
 default:
-	@echo "Available targets are mysql, sqlite, postgres or all. Targets may be mixed."
+	@echo "Available targets are mysql, rusqlite, postgres, or all. Targets may be mixed."
 	@echo
 	@echo "Tests are run against debug target, override with make TARGET=release ..."
 
-all: sqlite mysql postgres
+all: rusqlite mysql postgres
+
+# sqlite as alias for rusqlite
+sqlite: rusqlite
 
 # empty @true recipe is to avoid "nothing to be done for $target"
 # messages when building multiple targets.
-mysql sqlite postgres: sqlc
+mysql rusqlite postgres: sqlc
 	@true
 
 cargo_build:
@@ -56,8 +61,8 @@ sqlc: cargo_build
 #   * TARGET debug/release handling
 #   * FEATURES parsing
 
-# sqlite
-ifneq (, ${filter sqlite all,${MAKECMDGOALS}})
+# rusqlite
+ifneq (, ${filter rusqlite all,${MAKECMDGOALS}})
   FEATURE += dbd-rusqlite
   URI += sqlite://:memory:
 endif

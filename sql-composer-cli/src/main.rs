@@ -144,14 +144,14 @@ fn setup(verbosity: Verbosity) -> CliResult {
 
 fn query(args: QueryArgs) -> CliResult {
     setup(args.verbosity)?;
+    let uri = args.uri;
 
     #[cfg(any(
         feature = "dbd-mysql",
         feature = "dbd-postgres",
         feature = "dbd-rusqlite"
     ))]
-    let uri = args.uri;
-    let path = PathBuf::from("args.path");
+    let path = PathBuf::from(args.path);
 
     if uri.starts_with("mysql://") {
         if cfg!(feature = "dbd-mysql") == false {

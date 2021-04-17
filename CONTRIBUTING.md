@@ -102,11 +102,39 @@ Thank you! We'll try to respond as quickly as possible.
      See: https://github.com/rust-lang/cargo/issues/4942
 
    The features are listed in the `[features]` section of `Cargo.toml` of 
-   the individual projects.
-   * dbd-mysql
-   * dbd-rusqlite
-   * dbd-postgres
-   * composer-serde  (for sql-composer only)
+   the individual projects, as well as any `optional` dependencies.
+
+   sql-composer supports 4 feature flags:
+   * `mysql`
+   * `rusqlite`
+   * `postgres`
+   * `composer-serde`
+
+   Other crates reference these as default required features, referenced via sql-composer:
+   `sql-composer/mysql`
+
+   sql-composer-mysql:
+   * `sql-composer/mysql` (default)
+   * `composer-serde`
+
+   sql-composer-postgres:
+   * `sql-composer/postgres` (default)
+   * `composer-serde`
+
+   sql-composer-rusqlite:
+   * `sql-composer/rusqlite` (default)
+   * `composer-serde`
+
+   sql-composer-direct:
+   * `composer-serde`
+
+   sql-composer-serde has no feature flags.
+
+   sql-composer-cli defines dbd-* feature flags to enable a db type and the associated serde:
+   * `dbd-mysql`
+   * `dbd-rusqlite`
+   * `dbd-postgres`
+
 
    ```bash
    cargo test                          # run non-db and sqlite tests only
@@ -114,18 +142,26 @@ Thank you! We'll try to respond as quickly as possible.
 
    # individual features are only supported in the sub-projects
    # sql-composer:
-   (cd sql-composer && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
-   (cd sql-composer && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
-   (cd sql-composer && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
+   (cd sql-composer && cargo test --features mysql)      # compile for mysql and run mysql tests.
+   (cd sql-composer && cargo test --features postgres)   # compile for postgresql and run postgresql tests.
+   (cd sql-composer && cargo test --features rusqlite)   # compile for rusqlite and run rusqlite tests.
    (cd sql-composer && cargo test --features composer-serde) # compile for serde and run serde tests.
 
-   # multiple features are passed as single quoted string of space separated features
-   (cd sql-composer && cargo test --features "composer-serde dbd-mysql") # compile for serde and mysql
+   # multiple features are passed as one argument, separated by comma or spaces.  Use quotes if separating by spaces
+   (cd sql-composer && cargo test --features "composer-serde mysql") # compile for serde and mysql
+   (cd sql-composer && cargo test --features composer-serde,mysql)   # compile for serde and mysql
 
    # sql-composer-cli:
    (cd sql-composer-cli && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
    (cd sql-composer-cli && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
    (cd sql-composer-cli && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
+
+   # integration tests for sql-composer-cli against database instances
+   docker-compose up                      # launch postgres and mysql databases configured by .env file
+   make -C sql-composer-cli mysql         # integration test against mysql database
+   make -C sql-composer-cli rusqlite      # integration test against sqlite database
+   make -C sql-composer-cli postgres      # integration test against postgresql database
+   make -C sql-composer-cli all           # integration tests against  sqli, mysql, and postgres database instances
    ```
 
 [rustup]: https://rustup.rs/

@@ -1,0 +1,14 @@
+[package]
+name = "sql-composer-rusqlite"
+version = "0.1.0"
+description = "rusqlite driver for sql-composer SQL template engine"
+keywords = ["sql", "template", "composer", "rusqlite", "sqlite"]
+edition = "2021"
+
+[dependencies]
+sql-composer = { path = "../sql-composer" }
+rusqlite = "0.34"
+thiserror = "2"
+
+[dev-dependencies]
+rusqlite = { version = "0.34", features = ["bundled"] }

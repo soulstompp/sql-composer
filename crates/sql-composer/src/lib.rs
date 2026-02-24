@@ -31,6 +31,7 @@ extern crate core;
 
 mod clippy;
 pub mod composer;
+pub mod driver;
 pub mod error;
 pub mod mock;
 pub mod parser;

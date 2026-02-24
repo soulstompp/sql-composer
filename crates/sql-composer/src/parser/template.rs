@@ -3,6 +3,9 @@
 //! The key insight of this parser is that SQL is treated as opaque literal text.
 //! Only the `:bind(...)`, `:compose(...)`, `:count(...)`, and `:union(...)`
 //! macros are parsed; everything else passes through unchanged.
+//!
+//! Lines or trailing portions beginning with `#` are template comments and are
+//! silently stripped during parsing — they never appear in composed SQL output.
 
 use winnow::combinator::{alt, repeat, trace};
 use winnow::error::ParserError;
@@ -89,7 +92,21 @@ where
 
             // Try to consume one character
             match any::<_, Error>.parse_next(input) {
-                Ok(c) => sql.push(c.as_char()),
+                Ok(c) => {
+                    let ch = c.as_char();
+                    if ch == '#' {
+                        // Comment: skip to end of line (or EOF)
+                        loop {
+                            match any::<_, Error>.parse_next(input) {
+                                Ok(c) if c.clone().as_char() == '\n' => break,
+                                Ok(_) => continue,
+                                Err(_) => break, // EOF
+                            }
+                        }
+                    } else {
+                        sql.push(ch);
+                    }
+                }
                 Err(_) => break, // EOF
             }
         }
@@ -300,5 +317,73 @@ mod tests {
         let mut input: TestInput = "";
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_comment_standalone_line() {
+        let mut input: TestInput = "# comment\nSELECT 1;";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql("SELECT 1;".into()));
+    }
+
+    #[test]
+    fn test_comment_inline() {
+        let mut input: TestInput = "SELECT 1; # comment\nSELECT 2;";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql("SELECT 1; SELECT 2;".into()));
+    }
+
+    #[test]
+    fn test_comment_with_macro_text() {
+        let mut input: TestInput = "# :bind(x)\nSELECT 1;";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql("SELECT 1;".into()));
+    }
+
+    #[test]
+    fn test_comment_before_macro() {
+        let mut input: TestInput = "# get user\nSELECT * FROM users WHERE id = :bind(id);";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result[0],
+            Element::Sql("SELECT * FROM users WHERE id = ".into())
+        );
+        assert_eq!(
+            result[1],
+            Element::Bind(Binding {
+                name: "id".into(),
+                min_values: None,
+                max_values: None,
+                nullable: false,
+            })
+        );
+        assert_eq!(result[2], Element::Sql(";".into()));
+    }
+
+    #[test]
+    fn test_only_comments() {
+        let mut input: TestInput = "# just a comment";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_comment_lines() {
+        let mut input: TestInput = "# line 1\n# line 2\nSELECT 1;";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql("SELECT 1;".into()));
+    }
+
+    #[test]
+    fn test_comment_at_eof_no_newline() {
+        let mut input: TestInput = "SELECT 1;\n# trailing";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql("SELECT 1;\n".into()));
     }
 }

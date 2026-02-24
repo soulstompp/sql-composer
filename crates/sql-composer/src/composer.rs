@@ -1,7 +1,7 @@
 //! The composer transforms parsed templates into final SQL with dialect-specific
 //! placeholders and resolved compose references.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
@@ -58,6 +58,112 @@ impl Composer {
             visited.insert(path.clone());
         }
         self.compose_inner(template, &mut visited)
+    }
+
+    /// Compose a template with value counts, expanding multi-value bindings
+    /// into multiple placeholders.
+    ///
+    /// When a `:bind(name)` has multiple values in the map, this method emits
+    /// one placeholder per value (e.g. `$1, $2, $3` for 3 values), and repeats
+    /// the bind name in `bind_params` for each. This enables `IN` clauses:
+    ///
+    /// ```text
+    /// SELECT * FROM users WHERE id IN (:bind(ids))
+    /// -- with ids=[10, 20, 30] becomes:
+    /// SELECT * FROM users WHERE id IN ($1, $2, $3)
+    /// -- bind_params = ["ids", "ids", "ids"]
+    /// ```
+    ///
+    /// For bindings with only one value, behavior is identical to [`compose()`].
+    pub fn compose_with_values<V>(
+        &self,
+        template: &Template,
+        values: &BTreeMap<String, Vec<V>>,
+    ) -> Result<ComposedSql> {
+        let mut visited = HashSet::new();
+        if let TemplateSource::File(ref path) = template.source {
+            visited.insert(path.clone());
+        }
+        self.compose_with_values_inner(template, values, &mut visited)
+    }
+
+    fn compose_with_values_inner<V>(
+        &self,
+        template: &Template,
+        values: &BTreeMap<String, Vec<V>>,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<ComposedSql> {
+        let mut sql = String::new();
+        let mut bind_params = Vec::new();
+
+        for element in &template.elements {
+            match element {
+                Element::Sql(text) => {
+                    sql.push_str(text);
+                }
+                Element::Bind(binding) => {
+                    let count = values
+                        .get(&binding.name)
+                        .map(|vs| vs.len())
+                        .unwrap_or(1)
+                        .max(1);
+
+                    for i in 0..count {
+                        if i > 0 {
+                            sql.push_str(", ");
+                        }
+                        let index = bind_params.len() + 1;
+                        sql.push_str(&self.dialect.placeholder(index));
+                        bind_params.push(binding.name.clone());
+                    }
+                }
+                Element::Compose(compose_ref) => {
+                    let composed =
+                        self.resolve_compose_with_values(&compose_ref.path, values, visited)?;
+                    let reindexed = self.reindex_sql(
+                        &composed.sql,
+                        bind_params.len(),
+                        composed.bind_params.len(),
+                    );
+                    sql.push_str(&reindexed);
+                    bind_params.extend(composed.bind_params);
+                }
+                Element::Command(command) => {
+                    let composed = self.compose_command(command, visited)?;
+                    let reindexed = self.reindex_sql(
+                        &composed.sql,
+                        bind_params.len(),
+                        composed.bind_params.len(),
+                    );
+                    sql.push_str(&reindexed);
+                    bind_params.extend(composed.bind_params);
+                }
+            }
+        }
+
+        Ok(ComposedSql { sql, bind_params })
+    }
+
+    /// Resolve a compose reference with value-aware expansion.
+    fn resolve_compose_with_values<V>(
+        &self,
+        path: &Path,
+        values: &BTreeMap<String, Vec<V>>,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<ComposedSql> {
+        let resolved = self.find_template(path)?;
+
+        if !visited.insert(resolved.clone()) {
+            return Err(Error::CircularReference {
+                path: path.to_path_buf(),
+            });
+        }
+
+        let template = parser::parse_template_file(&resolved)?;
+        let result = self.compose_with_values_inner(&template, values, visited)?;
+
+        visited.remove(&resolved);
+        Ok(result)
     }
 
     fn compose_inner(
@@ -444,5 +550,110 @@ mod tests {
         assert_eq!(Dialect::Mysql.placeholder(10), "?");
         assert_eq!(Dialect::Sqlite.placeholder(1), "?1");
         assert_eq!(Dialect::Sqlite.placeholder(10), "?10");
+    }
+
+    #[test]
+    fn test_compose_with_values_single() {
+        let composer = Composer::new(Dialect::Postgres);
+        let template = Template {
+            elements: vec![
+                Element::Sql("SELECT * FROM users WHERE id = ".into()),
+                Element::Bind(Binding {
+                    name: "user_id".into(),
+                    min_values: None,
+                    max_values: None,
+                    nullable: false,
+                }),
+            ],
+            source: TemplateSource::Literal("test".into()),
+        };
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([
+            ("user_id".into(), vec![42]),
+        ]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id = $1");
+        assert_eq!(result.bind_params, vec!["user_id"]);
+    }
+
+    #[test]
+    fn test_compose_with_values_multi_postgres() {
+        let composer = Composer::new(Dialect::Postgres);
+        let template = Template {
+            elements: vec![
+                Element::Sql("SELECT * FROM users WHERE id IN (".into()),
+                Element::Bind(Binding {
+                    name: "ids".into(),
+                    min_values: Some(1),
+                    max_values: None,
+                    nullable: false,
+                }),
+                Element::Sql(")".into()),
+            ],
+            source: TemplateSource::Literal("test".into()),
+        };
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([
+            ("ids".into(), vec![10, 20, 30]),
+        ]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id IN ($1, $2, $3)");
+        assert_eq!(result.bind_params, vec!["ids", "ids", "ids"]);
+    }
+
+    #[test]
+    fn test_compose_with_values_multi_mysql() {
+        let composer = Composer::new(Dialect::Mysql);
+        let template = Template {
+            elements: vec![
+                Element::Sql("SELECT * FROM users WHERE id IN (".into()),
+                Element::Bind(Binding {
+                    name: "ids".into(),
+                    min_values: Some(1),
+                    max_values: None,
+                    nullable: false,
+                }),
+                Element::Sql(")".into()),
+            ],
+            source: TemplateSource::Literal("test".into()),
+        };
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([
+            ("ids".into(), vec![10, 20, 30]),
+        ]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id IN (?, ?, ?)");
+        assert_eq!(result.bind_params, vec!["ids", "ids", "ids"]);
+    }
+
+    #[test]
+    fn test_compose_with_values_multi_sqlite() {
+        let composer = Composer::new(Dialect::Sqlite);
+        let template = Template {
+            elements: vec![
+                Element::Sql("SELECT * FROM users WHERE id IN (".into()),
+                Element::Bind(Binding {
+                    name: "ids".into(),
+                    min_values: Some(1),
+                    max_values: None,
+                    nullable: false,
+                }),
+                Element::Sql(") AND status = ".into()),
+                Element::Bind(Binding {
+                    name: "status".into(),
+                    min_values: None,
+                    max_values: None,
+                    nullable: false,
+                }),
+            ],
+            source: TemplateSource::Literal("test".into()),
+        };
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([
+            ("ids".into(), vec![10, 20]),
+            ("status".into(), vec![1]),
+        ]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT * FROM users WHERE id IN (?1, ?2) AND status = ?3"
+        );
+        assert_eq!(result.bind_params, vec!["ids", "ids", "status"]);
     }
 }

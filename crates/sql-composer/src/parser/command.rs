@@ -213,7 +213,10 @@ mod tests {
         assert!(!result.distinct);
         assert!(!result.all);
         assert_eq!(result.columns, None);
-        assert_eq!(result.sources, vec![PathBuf::from("templates/get_user.tql")]);
+        assert_eq!(
+            result.sources,
+            vec![PathBuf::from("templates/get_user.tql")]
+        );
     }
 
     #[test]
@@ -267,6 +270,9 @@ mod tests {
             result.columns,
             Some(vec!["id".to_string(), "name".to_string()])
         );
-        assert_eq!(result.sources, vec![PathBuf::from("templates/get_user.tql")]);
+        assert_eq!(
+            result.sources,
+            vec![PathBuf::from("templates/get_user.tql")]
+        );
     }
 }

@@ -107,9 +107,9 @@ impl ComposerConnection for SqliteConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sql_composer::bind_values;
     use sql_composer::parser::parse_template;
     use sql_composer::types::{Dialect, TemplateSource};
-    use sql_composer::bind_values;
 
     fn boxed(v: impl rusqlite::types::ToSql + 'static) -> Box<dyn rusqlite::types::ToSql> {
         Box::new(v)
@@ -129,8 +129,7 @@ mod tests {
             .unwrap();
 
         let input = "SELECT id, name FROM users WHERE id = :bind(user_id)";
-        let template =
-            parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
         let composer = Composer::new(Dialect::Sqlite);
 
         let values = bind_values!("user_id" => [boxed(1i32)]);
@@ -138,8 +137,7 @@ mod tests {
 
         assert_eq!(sql, "SELECT id, name FROM users WHERE id = ?1");
 
-        let refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|v| v.as_ref()).collect();
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
         let mut stmt = conn.prepare(&sql).unwrap();
         let rows: Vec<(i32, String)> = stmt
             .query_map(refs.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
@@ -165,10 +163,8 @@ mod tests {
         conn.execute("INSERT INTO items (id, label) VALUES (3, 'c')", [])
             .unwrap();
 
-        let input =
-            "SELECT id, label FROM items WHERE id IN (:bind(ids)) ORDER BY id";
-        let template =
-            parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let input = "SELECT id, label FROM items WHERE id IN (:bind(ids)) ORDER BY id";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
         let composer = Composer::new(Dialect::Sqlite);
 
         let values = bind_values!("ids" => [boxed(1i32), boxed(3i32)]);
@@ -179,8 +175,7 @@ mod tests {
             "SELECT id, label FROM items WHERE id IN (?1, ?2) ORDER BY id"
         );
 
-        let refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|v| v.as_ref()).collect();
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
         let mut stmt = conn.prepare(&sql).unwrap();
         let rows: Vec<(i32, String)> = stmt
             .query_map(refs.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
@@ -188,10 +183,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        assert_eq!(
-            rows,
-            vec![(1, "a".to_string()), (3, "c".to_string())]
-        );
+        assert_eq!(rows, vec![(1, "a".to_string()), (3, "c".to_string())]);
     }
 
     #[test]
@@ -199,8 +191,7 @@ mod tests {
         let conn = SqliteConnection::open_in_memory().unwrap();
 
         let input = "SELECT :bind(a) AS col_1, :bind(b) AS col_2";
-        let template =
-            parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
         let composer = Composer::new(Dialect::Sqlite);
 
         let values = bind_values!(

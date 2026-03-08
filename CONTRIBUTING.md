@@ -10,7 +10,6 @@ describing your problem (or a very similar one) there, please open a new issue w
 the following details:
 
 - Which versions of Rust and sql-composer are you using?
-- Which feature flags are you using?
 - What are you trying to accomplish?
 - What is the full error you are seeing?
 - How can we reproduce this?
@@ -43,89 +42,58 @@ Thank you! We'll try to respond as quickly as possible.
 ### Setting up sql-composer locally
 
 1. Install Rust using [rustup], which allows you to easily switch between Rust
-   versions. sql-composer currently supports Rust Stable, Nightly, Rust Beta.
+   versions. sql-composer currently supports Rust Stable.
 
 2. Install the system libraries needed to interface with the database systems
-   you wish to use.
-
-   These are the same as when compiling sql-composer. It's generally a good idea
-   to install _all_ drivers so you can run all tests locally.
+   you wish to use (e.g. `libpq-dev` for PostgreSQL, `libmysqlclient-dev` for MySQL).
 
 3. Clone this repository and open it in your favorite editor.
 
-4. Local override of database ports or passwords
+4. The project uses a Cargo workspace under `crates/`:
 
-   If you wish to change the local database ports, override PG_DATABASE_PORT
-   and MYSQL_DATABASE_PORT via environment variables or edit the values in the
-   `.env` file.
+   ```
+   crates/
+     sql-composer/           # Core library
+     sql-composer-rusqlite/  # rusqlite driver
+     sql-composer-duckdb/    # DuckDB driver
+     sql-composer-postgres/  # PostgreSQL driver (sync + async)
+     sql-composer-mysql/     # MySQL driver (sync + async)
+     sql-composer-sqlx/      # sqlx integration
+     cargo-sqlc/             # CLI tool
+   ```
 
-   Use MYSQL_DATABASE_PASS and PG_DATABASE_PASS to override the default
-   passwords.  If the containers have already been run, changing the password
-   will not affect the container.  Shut down the container and delete the 
-   db/* files to clear the old password values.
+5. **Database setup for integration tests** (optional)
+
+   If you need to run tests that require a live database, use docker-compose to
+   launch PostgreSQL and MySQL containers:
 
    ```bash
-   # delete database storage files to force re-initialization of database
+   docker-compose up             # launch both
+   docker-compose up postgres    # launch only PostgreSQL
+   docker-compose up mysql       # launch only MySQL
+   ```
+
+   Override ports or passwords via environment variables or the `.env` file.
+   Database storage is cached in `./db/` — delete to reinitialize:
+
+   ```bash
    sudo rm -rf db/*
    ```
-5. Use docker-compose to launch containers with databases for testing.
 
-   `docker-compose up` will download and run containers for mysql and
-   postgresql.  The internal database ports (3306 or 5432) will be
-   forwarded to ports on the host as determined by MYSQL_DATABASE_PORT
-   and PG_DATABASE_PORT environment variables.  Default port values are
-   defined in the `.env` file in the root of the crate.
-
-   The containers will be named `sql_composer_mysql` and `sql_composer_postgres`.
-   Each will have an empty database named `sql_composer` owned by user `runner`
-
-   The containers will run in the foreground until interrupted with `ctrl-c`.
+6. Run the tests:
 
    ```bash
-   docker-compose up             # launch both postgresql and mysql
-   docker-compose up mysql       # launch only mysql
-   docker-compose up postgresql  # launch only postgresql
-   ```
+   # Run all workspace tests (core + rusqlite + duckdb + driver unit tests)
+   cargo test --workspace
 
-   db storage files will be cached in the `./db/` directory.  These files
-   can be deleted to force the database to re-initialize on the next run of
-   `docker-compose up`
-
-6. Now, try running the test suite to confirm everything works for you locally
-   by executing `cargo test`. (Initially, this will take a while to compile
-   everything.)  Each database is hidden behind a feature flag.
-
-   Run a test against all the databases with the `--all-features` flag
-
-   Individual features are not supported at the top level workspace, they can
-   only be enabled when building within the subprojects.
-     See: https://github.com/rust-lang/cargo/issues/4942
-
-   The features are listed in the `[features]` section of `Cargo.toml` of 
-   the individual projects.
-   * dbd-mysql
-   * dbd-rusqlite
-   * dbd-postgres
-   * composer-serde  (for sql-composer only)
-
-   ```bash
-   cargo test                          # run non-db and sqlite tests only
-   cargo test --all-features           # compile for all dbs and run all tests.
-
-   # individual features are only supported in the sub-projects
-   # sql-composer:
-   (cd sql-composer && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
-   (cd sql-composer && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
-   (cd sql-composer && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
-   (cd sql-composer && cargo test --features composer-serde) # compile for serde and run serde tests.
-
-   # multiple features are passed as single quoted string of space separated features
-   (cd sql-composer && cargo test --features "composer-serde dbd-mysql") # compile for serde and mysql
-
-   # sql-composer-cli:
-   (cd sql-composer-cli && cargo test --features dbd-mysql)      # compile for mysql and run mysql tests.
-   (cd sql-composer-cli && cargo test --features dbd-postgres)   # compile for postgresql and run postgresql tests.
-   (cd sql-composer-cli && cargo test --features dbd-rusqlite)   # compile for rusqlite and run rusqlite tests.
+   # Run tests for a specific crate
+   cargo test -p sql-composer
+   cargo test -p sql-composer-rusqlite
+   cargo test -p sql-composer-duckdb
+   cargo test -p sql-composer-postgres
+   cargo test -p sql-composer-mysql
+   cargo test -p sql-composer-sqlx --features validate
+   cargo test -p cargo-sqlc
    ```
 
 [rustup]: https://rustup.rs/
@@ -135,42 +103,29 @@ Thank you! We'll try to respond as quickly as possible.
 We follow the [Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md), enforced using [rustfmt](https://github.com/rust-lang/rustfmt).
 To run rustfmt tests locally:
 
-1. Use rustup to set rust toolchain to the version specified in the
-   [rust-toolchain file](./rust-toolchain).
-
-2. Install the rustfmt and clippy by running
+1. Install rustfmt and clippy:
    ```
-   rustup component add rustfmt-preview
-   rustup component add clippy-preview
+   rustup component add rustfmt
+   rustup component add clippy
    ```
 
-3. Run clippy using cargo from the root of your sql-composer repo.
+2. Run clippy:
    ```
-   cargo clippy
+   cargo clippy --workspace -- -D warnings
    ```
-   Each PR needs to compile without warning.
+   Each PR needs to compile without warnings.
 
-4. Run rustfmt using cargo from the root of your sql-composer repo.
+3. Run rustfmt:
 
-   To see changes that need to be made, run
-
+   To check formatting:
    ```
    cargo fmt --all -- --check
    ```
 
-   If all code is properly formatted (e.g. if you have not made any changes),
-   this should run without error or output.
-   If your code needs to be reformatted,
-   you will see a diff between your code and properly formatted code.
-   If you see code here that you didn't make any changes to
-   then you are probably running the wrong version of rustfmt.
-   Once you are ready to apply the formatting changes, run
-
+   To apply formatting:
    ```
    cargo fmt --all
    ```
-
-   You won't see any output, but all your files will be corrected.
 
 You can also use rustfmt to make corrections or highlight issues in your editor.
 Check out [their README](https://github.com/rust-lang/rustfmt) for details.

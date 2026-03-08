@@ -52,8 +52,10 @@ where
     <Input as Stream>::Token: AsChar + Clone,
     Error: ParserError<Input>,
 {
-    let digits = take_while(1.., |c: <Input as Stream>::Token| c.as_char().is_ascii_digit())
-        .parse_next(input)?;
+    let digits = take_while(1.., |c: <Input as Stream>::Token| {
+        c.as_char().is_ascii_digit()
+    })
+    .parse_next(input)?;
     let s = String::from_utf8_lossy(digits.as_bstr());
     let n = s
         .parse::<u32>()
@@ -176,9 +178,7 @@ mod tests {
     #[test]
     fn test_bind_name_only() {
         let mut input: TestInput = "active";
-        let result = bind_name::<_, ContextError>
-            .parse_next(&mut input)
-            .unwrap();
+        let result = bind_name::<_, ContextError>.parse_next(&mut input).unwrap();
         assert_eq!(result, "active");
     }
 }

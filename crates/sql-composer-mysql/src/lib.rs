@@ -79,7 +79,7 @@ pub enum AsyncError {
     Mysql(#[from] mysql_async::Error),
 }
 
-/// A wrapper around [`mysql_async::Conn`] that implements [`ComposerConnectionAsync`].
+/// A wrapper around [`mysql_async::Conn`] that implements [`sql_composer::driver::ComposerConnectionAsync`].
 ///
 /// Dereferences to the inner `mysql_async::Conn`, so all native async
 /// methods are available directly.
@@ -145,7 +145,7 @@ pub enum SyncError {
     Mysql(#[from] mysql::Error),
 }
 
-/// A wrapper around [`mysql::Conn`] that implements [`ComposerConnection`].
+/// A wrapper around [`mysql::Conn`] that implements [`sql_composer::driver::ComposerConnection`].
 ///
 /// Dereferences to the inner `mysql::Conn`, so all native sync methods
 /// are available directly.
@@ -198,3 +198,45 @@ impl driver::ComposerConnection for MysqlConnection {
 /// Error type alias — resolves to [`AsyncError`] for backward compatibility.
 #[cfg(feature = "async")]
 pub type Error = AsyncError;
+
+#[cfg(test)]
+mod tests {
+    use sql_composer::composer::Composer;
+    use sql_composer::parser::parse_template;
+    use sql_composer::types::{Dialect, TemplateSource};
+
+    #[test]
+    fn test_compose_single_bind_mysql() {
+        let input = "SELECT * FROM users WHERE id = :bind(user_id)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Mysql);
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id = ?");
+        assert_eq!(result.bind_params, vec!["user_id"]);
+    }
+
+    #[test]
+    fn test_compose_multiple_binds_mysql() {
+        let input = "SELECT * FROM users WHERE name = :bind(name) AND active = :bind(active)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Mysql);
+        let result = composer.compose(&template).unwrap();
+        // MySQL: document order, bare ?
+        assert_eq!(
+            result.sql,
+            "SELECT * FROM users WHERE name = ? AND active = ?"
+        );
+        assert_eq!(result.bind_params, vec!["name", "active"]);
+    }
+
+    #[test]
+    fn test_compose_with_values_multi_bind_mysql() {
+        let input = "SELECT * FROM users WHERE id IN (:bind(ids))";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Mysql);
+        let values = sql_composer::bind_values!("ids" => [10, 20, 30]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id IN (?, ?, ?)");
+        assert_eq!(result.bind_params, vec!["ids", "ids", "ids"]);
+    }
+}

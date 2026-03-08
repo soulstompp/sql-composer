@@ -23,11 +23,10 @@
 //! let composer = Composer::new(Dialect::Postgres);
 //! let result = composer.compose(&template).unwrap();
 //!
-//! assert_eq!(result.sql, "SELECT * FROM users WHERE id = $1 AND active = $2;");
-//! assert_eq!(result.bind_params, vec!["user_id", "active"]);
+//! // Alphabetical ordering: active=$1, user_id=$2
+//! assert_eq!(result.sql, "SELECT * FROM users WHERE id = $2 AND active = $1;");
+//! assert_eq!(result.bind_params, vec!["active", "user_id"]);
 //! ```
-
-extern crate core;
 
 mod clippy;
 pub mod composer;

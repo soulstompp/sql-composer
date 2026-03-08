@@ -99,10 +99,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         if path.extension().is_some_and(|ext| ext == "tql") {
             let content = std::fs::read_to_string(&path)?;
-            let template = parser::parse_template(
-                &content,
-                TemplateSource::File(path.clone()),
-            )?;
+            let template = parser::parse_template(&content, TemplateSource::File(path.clone()))?;
 
             let result = composer.compose(&template)?;
 
@@ -111,11 +108,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             std::fs::write(&output_path, &result.sql)?;
 
-            println!(
-                "Composing {} -> {}",
-                path.display(),
-                output_path.display()
-            );
+            println!("Composing {} -> {}", path.display(), output_path.display());
             count += 1;
         }
     }

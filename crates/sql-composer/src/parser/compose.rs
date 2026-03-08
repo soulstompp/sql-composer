@@ -68,10 +68,7 @@ mod tests {
     fn test_compose_relative_path() {
         let mut input: TestInput = "src/tests/simple-template.tql)";
         let result = compose::<_, ContextError>.parse_next(&mut input).unwrap();
-        assert_eq!(
-            result.path,
-            PathBuf::from("src/tests/simple-template.tql")
-        );
+        assert_eq!(result.path, PathBuf::from("src/tests/simple-template.tql"));
     }
 
     #[test]

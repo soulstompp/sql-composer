@@ -39,6 +39,7 @@ pub trait ComposerConnection {
     /// Takes the composer, a parsed template, and a map of named bind values.
     /// Resolves bind parameter order and returns the SQL string with ordered
     /// values ready for execution.
+    #[allow(clippy::type_complexity)]
     fn compose(
         &self,
         composer: &Composer,
@@ -60,13 +61,15 @@ pub trait ComposerConnectionAsync {
     type Error: From<Error>;
 
     /// Compose a template with bind values asynchronously.
+    #[allow(clippy::type_complexity)]
     fn compose(
         &self,
         composer: &Composer,
         template: &Template,
         values: BTreeMap<String, Vec<Self::Value>>,
-    ) -> impl std::future::Future<Output = std::result::Result<(Self::Statement, Vec<Self::Value>), Self::Error>>
-           + Send;
+    ) -> impl std::future::Future<
+        Output = std::result::Result<(Self::Statement, Vec<Self::Value>), Self::Error>,
+    > + Send;
 }
 
 /// Given a [`ComposedSql`] with ordered bind param names and a map of named values,
@@ -85,14 +88,10 @@ pub fn resolve_values<V>(
     for name in &composed.bind_params {
         let vs = values
             .get_mut(name)
-            .ok_or_else(|| Error::MissingBinding {
-                name: name.clone(),
-            })?;
+            .ok_or_else(|| Error::MissingBinding { name: name.clone() })?;
 
         if vs.is_empty() {
-            return Err(Error::MissingBinding {
-                name: name.clone(),
-            });
+            return Err(Error::MissingBinding { name: name.clone() });
         }
 
         // Take the first value — each placeholder in bind_params corresponds

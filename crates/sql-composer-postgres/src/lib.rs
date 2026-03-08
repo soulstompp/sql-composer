@@ -82,7 +82,7 @@ pub enum Error {
 // ---------------------------------------------------------------------------
 
 /// A wrapper around [`tokio_postgres::Client`] that implements
-/// [`ComposerConnectionAsync`].
+/// [`sql_composer::driver::ComposerConnectionAsync`].
 ///
 /// Dereferences to the inner `tokio_postgres::Client`, so all native async
 /// methods are available directly.
@@ -147,7 +147,7 @@ impl driver::ComposerConnectionAsync for PgClient {
 // Sync: PgConnection (postgres)
 // ---------------------------------------------------------------------------
 
-/// A wrapper around [`postgres::Client`] that implements [`ComposerConnection`].
+/// A wrapper around [`postgres::Client`] that implements [`sql_composer::driver::ComposerConnection`].
 ///
 /// Dereferences to the inner `postgres::Client`, so all native sync methods
 /// are available directly.
@@ -205,5 +205,47 @@ impl driver::ComposerConnection for PgConnection {
         let composed = composer.compose_with_values(template, &values)?;
         let ordered = driver::resolve_values(&composed, &mut values)?;
         Ok((composed.sql, ordered))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sql_composer::composer::Composer;
+    use sql_composer::parser::parse_template;
+    use sql_composer::types::{Dialect, TemplateSource};
+
+    #[test]
+    fn test_compose_single_bind_postgres() {
+        let input = "SELECT * FROM users WHERE id = :bind(user_id)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Postgres);
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id = $1");
+        assert_eq!(result.bind_params, vec!["user_id"]);
+    }
+
+    #[test]
+    fn test_compose_multiple_binds_postgres() {
+        let input = "SELECT * FROM users WHERE name = :bind(name) AND active = :bind(active)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Postgres);
+        let result = composer.compose(&template).unwrap();
+        // Alphabetical: active=$1, name=$2
+        assert_eq!(
+            result.sql,
+            "SELECT * FROM users WHERE name = $2 AND active = $1"
+        );
+        assert_eq!(result.bind_params, vec!["active", "name"]);
+    }
+
+    #[test]
+    fn test_compose_with_values_multi_bind_postgres() {
+        let input = "SELECT * FROM users WHERE id IN (:bind(ids))";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Postgres);
+        let values = sql_composer::bind_values!("ids" => [10, 20, 30]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(result.sql, "SELECT * FROM users WHERE id IN ($1, $2, $3)");
+        assert_eq!(result.bind_params, vec!["ids", "ids", "ids"]);
     }
 }

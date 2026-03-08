@@ -33,9 +33,7 @@ where
         literal(":").parse_next(input)?;
 
         alt((
-            literal("bind(")
-                .flat_map(|_| bind)
-                .map(Element::Bind),
+            literal("bind(").flat_map(|_| bind).map(Element::Bind),
             literal("compose(")
                 .flat_map(|_| compose)
                 .map(Element::Compose),
@@ -85,8 +83,7 @@ where
                 if is_macro {
                     break;
                 }
-            }
-            else {
+            } else {
                 input.reset(&checkpoint);
             }
 
@@ -190,14 +187,10 @@ mod tests {
 
     #[test]
     fn test_sql_with_compose() {
-        let mut input: TestInput =
-            "SELECT COUNT(*) FROM (\n  :compose(templates/get_user.tql)\n)";
+        let mut input: TestInput = "SELECT COUNT(*) FROM (\n  :compose(templates/get_user.tql)\n)";
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
         assert_eq!(result.len(), 3);
-        assert_eq!(
-            result[0],
-            Element::Sql("SELECT COUNT(*) FROM (\n  ".into())
-        );
+        assert_eq!(result[0], Element::Sql("SELECT COUNT(*) FROM (\n  ".into()));
         assert_eq!(
             result[1],
             Element::Compose(ComposeRef {
@@ -209,8 +202,7 @@ mod tests {
 
     #[test]
     fn test_multiple_binds() {
-        let mut input: TestInput =
-            "WHERE id = :bind(user_id) AND active = :bind(active)";
+        let mut input: TestInput = "WHERE id = :bind(user_id) AND active = :bind(active)";
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(result[0], Element::Sql("WHERE id = ".into()));
@@ -265,9 +257,7 @@ mod tests {
         assert_eq!(result.len(), 5);
         assert_eq!(
             result[0],
-            Element::Sql(
-                "SELECT id, name, email\nFROM users\nWHERE id = ".into()
-            )
+            Element::Sql("SELECT id, name, email\nFROM users\nWHERE id = ".into())
         );
         assert_eq!(
             result[1],
@@ -278,10 +268,7 @@ mod tests {
                 nullable: false,
             })
         );
-        assert_eq!(
-            result[2],
-            Element::Sql("\n  AND active = ".into())
-        );
+        assert_eq!(result[2], Element::Sql("\n  AND active = ".into()));
         assert_eq!(
             result[3],
             Element::Bind(Binding {

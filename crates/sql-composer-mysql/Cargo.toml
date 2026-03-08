@@ -3,6 +3,8 @@ name = "sql-composer-mysql"
 version = "0.1.0"
 description = "MySQL driver for sql-composer SQL template engine (sync and async)"
 keywords = ["sql", "template", "composer", "mysql"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
 edition = "2021"
 
 [dependencies]

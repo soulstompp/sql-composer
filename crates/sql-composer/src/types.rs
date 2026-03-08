@@ -108,4 +108,12 @@ impl Dialect {
             Dialect::Sqlite => format!("?{index}"),
         }
     }
+
+    /// Whether this dialect uses numbered placeholders ($1, ?1) vs positional (?).
+    ///
+    /// Numbered dialects (Postgres, SQLite) support alphabetical parameter ordering
+    /// and deduplication. Positional dialects (MySQL) use document-order placeholders.
+    pub fn supports_numbered_placeholders(&self) -> bool {
+        matches!(self, Dialect::Postgres | Dialect::Sqlite)
+    }
 }

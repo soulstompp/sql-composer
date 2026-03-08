@@ -3,6 +3,8 @@ name = "sql-composer-duckdb"
 version = "0.1.0"
 description = "DuckDB driver for sql-composer SQL template engine"
 keywords = ["sql", "template", "composer", "duckdb"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
 edition = "2021"
 
 [dependencies]

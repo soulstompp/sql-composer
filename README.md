@@ -1,44 +1,117 @@
 # sql-composer
 
-Sql Composer is a SQL pre-processor that helps to manage the intricate relationships between the many queries needed throughout complex data driven applications.
+A SQL template engine that composes reusable SQL fragments with parameterized bindings.
 
-The compositions sql-composer build allow you to efficiently interact with your database by providing the following advantages :
+sql-composer lets you write SQL templates with a simple macro syntax, then compose them into final SQL with dialect-specific placeholders and ordered bind parameters. Templates can include other templates, enabling reuse across queries.
 
-* Starts with SQL, which is often the point where an engineer has to start from anyway. The most common case is a DBA suggesting a complex generated query be replaced by a hand crafted query that is dramatically more performant.
-* Prevents a rigid relationship between the database design and the code. As tables change the queries themselves will have to change but will often not require changes to the code itself.
-* Encourages reuse of complete queries, rather than fragments of text/logic.
-* Simplifies management of bind placeholders and bind values when preparing/executing statements.
-* Permits the use of different database drivers even for the same database engine and language.
-* Composer queries will produce the same SQL across multiple languages, allowing companies with heterogeneous development environments to easily share crucial business logic in a consistent manner.
-* Allow non-engineers to work on improving the SQL and composer macros. If the query writer were to use the CLI, they could easily write and test out new complex compositions without ever writing a line of code.
+## Features
+
+- **Simple macro syntax** embedded in SQL — no new language to learn
+- **Dialect-aware placeholders** — Postgres (`$1`), MySQL (`?`), SQLite (`?1`)
+- **Template composition** — include and reuse SQL fragments via `:compose(path)`
+- **Multi-value bindings** — expand `:bind(ids)` into `$1, $2, $3` for `IN` clauses
+- **Circular reference detection** — prevents infinite loops in template includes
+- **Driver crates** — thin wrappers for rusqlite, DuckDB, postgres, MySQL, and sqlx
+- **CLI tool** — `cargo-sqlc` for pre-compiling templates
+
+## Workspace Structure
+
+```
+crates/
+  sql-composer/           # Core: parser (winnow), types, composer
+  sql-composer-rusqlite/  # rusqlite driver (ComposerConnection)
+  sql-composer-duckdb/    # DuckDB driver (ComposerConnection)
+  sql-composer-postgres/  # PostgreSQL driver (sync + async)
+  sql-composer-mysql/     # MySQL driver (sync + async)
+  sql-composer-sqlx/      # sqlx integration (verify, validate)
+  cargo-sqlc/             # CLI pre-compiler
+```
+
+## Quick Start
+
+```rust
+use sql_composer::parser::parse_template;
+use sql_composer::composer::Composer;
+use sql_composer::types::{Dialect, TemplateSource};
+
+let input = "SELECT * FROM users WHERE id = :bind(user_id) AND active = :bind(active);";
+let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
+
+let composer = Composer::new(Dialect::Postgres);
+let result = composer.compose(&template).unwrap();
+
+// Bind params are alphabetically ordered for numbered dialects
+assert_eq!(result.sql, "SELECT * FROM users WHERE id = $2 AND active = $1;");
+assert_eq!(result.bind_params, vec!["active", "user_id"]);
+```
 
 ## Macros
 
-All macros in sql-composer are called using the syntax `:command()`. These calls are processed as commands to the `Composer` and effect the resulting SQL passed along to the DB driver and the shape of the bind variables passed along for the driver’s query execution.
+All macros use the syntax `:command()`. SQL outside of macros is passed through unchanged.
 
-The `Composer` only supports two type of macros, one which produces complete statements and the other which provides query bindings. Outside of these two types of compositions the SQL provided will not be altered by the `Composer`.
+### `:bind(name)`
 
-### Composition Macros
+Creates one or more dialect-specific placeholders and adds the name to the bind parameter list.
 
-This type of macro produces a complete statement composition, and may compose together several other statement compositions.
-
+```sql
+SELECT * FROM users WHERE id = :bind(user_id) AND status = :bind(status)
+-- Postgres: SELECT * FROM users WHERE id = $2 AND status = $1
+-- MySQL:    SELECT * FROM users WHERE id = ? AND status = ?
+-- SQLite:   SELECT * FROM users WHERE id = ?2 AND status = ?1
 ```
-:command([all] [distinct] [column1, column2… of] [path, path...])
+
+For multi-value bindings (e.g. `IN` clauses), pass multiple values for the same name:
+
+```sql
+SELECT * FROM users WHERE id IN (:bind(ids))
+-- With 3 values → SELECT * FROM users WHERE id IN ($1, $2, $3)
 ```
 
-The most commonly used command is the `compose` command which reads in another composition and expands it in place. The composer handles these calls in a way that nesting calls to commands several layers deep works without an issue.
- NOTE: recursive calls are not currently caught, so care should be taken until this is cleaned up.
+### `:compose(path)`
 
-Other commands expand on the concept of calls to `compose` but wrap one or more compositions into a larger summary query. A prime example would be the `union` command, which will compose two compositions between a `UNION` operator. These additional commands are simply helpers to cut down on the number of compositions the query writer must create.
+Include another SQL template file, resolved from configured search paths.
 
-### Binding Macros
+```sql
+SELECT * FROM users WHERE :compose(filters/active_users.sql)
+```
 
-Binding macros have a simpler syntax, since this type of macro doesn’t vary much in it’s behavior by design. Gives the query writer strict control of how a user binds values to the template.
+### `:union(sources...)` and `:count(sources...)`
 
-* `:bind(name [EXPECTING (i|MIN i|MAX i|MIN i MAX i)] [NULL])` - bind one or more values with the given name, optionally the EXPECTING command can handle min/max, this defaults to exactly one value per name.
+Combine multiple template sources with `UNION` or wrap them in a `COUNT` aggregate.
 
-When the `Composer` encounters a bind macro it will create one or more comma separated driver-specific placeholders or a NULL depending on the rules of the particular bind macro. For each placeholder that is added a corresponding value is added to the bind list. Since this is all managed automatcially calls to `SqlComposition.compose()` only need to provide a Hashmap of named values to bind.
+## Driver Crates
 
-### Project Status
+Each driver crate wraps a database connection with a `ComposerConnection` (sync) or `ComposerConnectionAsync` (async) trait implementation that composes templates and resolves bind values in one step.
 
-This project is under active development and its API and commands may still change.
+### rusqlite / DuckDB
+
+```rust
+use sql_composer::bind_values;
+use sql_composer_rusqlite::SqliteConnection;
+
+let conn = SqliteConnection::open_in_memory().unwrap();
+let values = bind_values!("user_id" => [Box::new(1i32) as Box<dyn rusqlite::types::ToSql>]);
+let (sql, params) = conn.compose(&composer, &template, values).unwrap();
+```
+
+### PostgreSQL / MySQL
+
+These crates support both sync and async via feature flags (`sync`, `async`, both enabled by default).
+
+### sqlx
+
+The `sql-composer-sqlx` crate provides `verify_postgres()` for checking composed SQL against a live database, and `validate_syntax()` (feature `validate`) for offline syntax checking via sqlparser.
+
+## Core Types
+
+| Type | Description |
+|------|-------------|
+| `Template` | A parsed SQL template containing elements |
+| `Element` | SQL literal, bind macro, compose reference, or command |
+| `Composer` | Transforms templates into final SQL with placeholders |
+| `ComposedSql` | The result: final SQL string + ordered bind param names |
+| `Dialect` | Target database: `Postgres`, `Mysql`, `Sqlite` |
+
+## Project Status
+
+This project is under active development. The core API (`Template`, `Composer`, `ComposedSql`) is stabilizing, but may still change before 1.0.

@@ -1,0 +1,16 @@
+[package]
+name = "sql-composer-duckdb"
+version = "0.0.1"
+description = "DuckDB driver for sql-composer SQL template engine"
+keywords = ["sql", "template", "composer", "duckdb"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+sql-composer = { path = "../sql-composer" }
+duckdb = "1.4"
+thiserror = "2"
+
+[dev-dependencies]
+duckdb = { version = "1.4", features = ["bundled"] }

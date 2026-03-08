@@ -1,0 +1,19 @@
+[package]
+name = "sql-composer-postgres"
+version = "0.0.1"
+description = "PostgreSQL driver for sql-composer SQL template engine (sync and async)"
+keywords = ["sql", "template", "composer", "postgres"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+sql-composer = { path = "../sql-composer" }
+tokio-postgres = "0.7"
+postgres = { version = "0.19", optional = true }
+thiserror = "2"
+
+[features]
+default = ["sync", "async"]
+sync = ["dep:postgres"]
+async = []

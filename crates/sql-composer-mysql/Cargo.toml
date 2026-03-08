@@ -1,0 +1,19 @@
+[package]
+name = "sql-composer-mysql"
+version = "0.0.1"
+description = "MySQL driver for sql-composer SQL template engine (sync and async)"
+keywords = ["sql", "template", "composer", "mysql"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+sql-composer = { path = "../sql-composer" }
+mysql_async = "0.35"
+mysql = { version = "27", optional = true }
+thiserror = "2"
+
+[features]
+default = ["sync", "async"]
+sync = ["dep:mysql"]
+async = []

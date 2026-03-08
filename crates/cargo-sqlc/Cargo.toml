@@ -1,0 +1,17 @@
+[package]
+name = "cargo-sqlc"
+version = "0.0.1"
+description = "Cargo subcommand for composing SQL templates with sql-composer"
+keywords = ["sql", "cargo", "subcommand", "composer"]
+categories = ["command-line-utilities", "database"]
+repository = "https://github.com/soulstompp/sql-composer"
+license = "MIT"
+edition = "2021"
+
+[[bin]]
+name = "cargo-sqlc"
+path = "src/main.rs"
+
+[dependencies]
+sql-composer = { path = "../sql-composer" }
+clap = { version = "4", features = ["derive", "env"] }

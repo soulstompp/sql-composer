@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="EMPTY_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/crates/cargo-sqlc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-duckdb/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-mysql/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-postgres/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-rusqlite/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-sqlx/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

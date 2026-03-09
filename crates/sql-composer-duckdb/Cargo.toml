@@ -1,6 +1,6 @@
 [package]
 name = "sql-composer-duckdb"
-version = "0.0.1"
+version = "0.0.2"
 description = "DuckDB driver for sql-composer SQL template engine"
 keywords = ["sql", "template", "composer", "duckdb"]
 repository = "https://github.com/soulstompp/sql-composer"

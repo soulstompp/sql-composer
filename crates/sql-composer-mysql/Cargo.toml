@@ -1,6 +1,6 @@
 [package]
 name = "sql-composer-mysql"
-version = "0.0.1"
+version = "0.0.2"
 description = "MySQL driver for sql-composer SQL template engine (sync and async)"
 keywords = ["sql", "template", "composer", "mysql"]
 repository = "https://github.com/soulstompp/sql-composer"

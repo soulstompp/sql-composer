@@ -17,6 +17,7 @@ Reading and adapting to `.sqlc` templates is fairly straightforward, but designi
 - **Clean macro syntax** embedded in SQL — no new language to learn
 - **Dialect-aware placeholders** — Postgres (`$1`), MySQL (`?`), SQLite (`?1`)
 - **Template composition** — include and reuse complete SQL statements via `:compose(path)`
+- **Parameterized slots** — declare `@slot` placeholders in shared templates, filled by callers
 - **Multi-value bindings** — expand `:bind(ids)` into `$1, $2, $3` for `IN` clauses
 - **Recursive directory scanning** — compose entire directory trees of templates
 - **`--verify` mode** — CI-friendly check that composed output matches committed `.sql` files
@@ -173,6 +174,60 @@ WHERE it.part_num = spd.part_num
 
 All three queries share the same 4-table join. Change the join logic once in `shared/set_part_details.sqlc`, run `cargo sqlc compose`, and every composed `.sql` file is updated. The DBA can read any of the output files and see the full query — no templates, no macros, just SQL.
 
+### Parameterized composition with slots
+
+Sometimes a shared template needs to vary one piece of its logic depending on the caller. For example, the same base query might need different filters for different use cases. Instead of duplicating the entire template, use **slot arguments** — the shared template declares named slots with `@slot_name`, and the caller fills them with concrete file paths.
+
+#### `shared/filtered_set_parts.sqlc` — base query with a `@filter` slot
+
+```sql
+# Base query with a pluggable filter. The caller decides which filter to use.
+WITH filter AS (
+    :compose(@filter)
+),
+parts AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT p.*
+FROM parts p
+JOIN filter f ON f.part_num = p.part_num
+```
+
+#### `filters/by_color.sqlc` — a standalone filter query
+
+```sql
+# Filter parts by color. Complete, valid SQL — can be tested independently.
+SELECT part_num
+FROM lego_inventory_parts ip
+JOIN lego_colors c ON c.id = ip.color_id
+WHERE c.name = :bind(color_name)
+```
+
+#### `filters/by_category.sqlc` — another standalone filter
+
+```sql
+# Filter parts by category.
+SELECT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_parts p ON p.part_num = ip.part_num
+JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+WHERE pc.name = :bind(category_name)
+```
+
+#### `sets/select_colored_parts.sqlc` — fills `@filter` with the color filter
+
+```sql
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
+```
+
+#### `sets/select_category_parts.sqlc` — fills `@filter` with the category filter
+
+```sql
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)
+```
+
+Both callers compose the same base query but plug in different filters. The base template is written once; the filter logic is swapped at composition time. Slots are explicitly scoped — a child template does NOT inherit slots from its parent, so there's no spooky action at a distance.
+
 ## Quick Start
 
 ### CLI usage
@@ -304,7 +359,7 @@ SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids))
 :bind(parent_theme_id NULL)
 ```
 
-### `:compose(path)`
+### `:compose(path)` and `:compose(path, @slot = path)`
 
 Include another complete SQL template, resolved from configured search paths.
 
@@ -318,6 +373,31 @@ ORDER BY quantity DESC
 ```
 
 Every `:compose()` target must be a complete, valid SQL statement. Compose references are resolved against the search paths added via `Composer::add_search_path()`. Circular references are detected and produce an error.
+
+#### Slot arguments
+
+Templates can declare **slots** — named placeholders that the caller fills with concrete file paths:
+
+```sql
+# In the shared template: declare a slot
+:compose(@filter)
+
+# At the call site: fill the slot
+:compose(shared/base.sqlc, @filter = filters/by_color.sqlc)
+
+# Multiple slots
+:compose(shared/report.sqlc, @source = data.sqlc, @filter = filters/active.sqlc)
+
+# The target can itself be a slot
+:compose(@slot)
+:compose(@slot, @inner = detail.sqlc)
+```
+
+**Design rules:**
+- `@` is only special inside `:compose()`. In regular SQL, `@anything` passes through unchanged.
+- Slots are **explicitly scoped**. Child templates do NOT inherit parent slots. Pass them explicitly.
+- Missing slots are a compile error.
+- Slot names: alphanumeric, hyphens, underscores. No dots.
 
 ### `:union(sources...)` and `:count(sources...)`
 
@@ -533,7 +613,9 @@ sql-composer = { version = "0.0.2", features = ["serde"] }
 | `Template` | A parsed SQL template containing elements |
 | `Element` | SQL literal, bind macro, compose reference, or command |
 | `Binding` | A `:bind()` with name, optional value count constraints, and nullable flag |
-| `ComposeRef` | A `:compose()` reference to another template file |
+| `ComposeRef` | A `:compose()` reference with optional slot arguments |
+| `ComposeTarget` | Path or slot reference (`@name`) in a compose target |
+| `SlotAssignment` | A `@name = path` slot binding in `:compose()` |
 | `Command` | A `:count()` or `:union()` combinator |
 | `Composer` | Transforms templates into final SQL with placeholders |
 | `ComposedSql` | The result: final SQL string + ordered bind param names |

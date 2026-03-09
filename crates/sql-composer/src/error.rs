@@ -59,6 +59,13 @@ pub enum Error {
         /// The path where the cycle was detected.
         path: PathBuf,
     },
+
+    /// A slot referenced in a template was not provided by the caller.
+    #[error("missing slot '@{name}' — not provided by caller")]
+    MissingSlot {
+        /// The name of the missing slot.
+        name: String,
+    },
 }
 
 /// A specialized `Result` type for sql-composer operations.

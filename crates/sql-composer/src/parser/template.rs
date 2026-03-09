@@ -151,7 +151,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Binding, CommandKind, ComposeRef};
+    use crate::types::{Binding, CommandKind, ComposeRef, ComposeTarget};
     use std::path::PathBuf;
     use winnow::error::ContextError;
 
@@ -194,7 +194,8 @@ mod tests {
         assert_eq!(
             result[1],
             Element::Compose(ComposeRef {
-                path: PathBuf::from("templates/get_user.tql"),
+                target: ComposeTarget::Path(PathBuf::from("templates/get_user.tql")),
+                slots: vec![],
             })
         );
         assert_eq!(result[2], Element::Sql("\n)".into()));
@@ -372,5 +373,16 @@ mod tests {
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], Element::Sql("SELECT 1;\n".into()));
+    }
+
+    #[test]
+    fn test_at_sign_in_sql_literal() {
+        let mut input: TestInput = "SELECT @variable FROM t";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0],
+            Element::Sql("SELECT @variable FROM t".into())
+        );
     }
 }

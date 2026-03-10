@@ -8,7 +8,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sql-composer = { path = "../sql-composer" }
+sql-composer = { version = "0.0.2", path = "../sql-composer" }
 mysql_async = "0.35"
 mysql = { version = "27", optional = true }
 thiserror = "2"

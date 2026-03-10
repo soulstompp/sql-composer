@@ -9,7 +9,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sql-composer = { path = "../sql-composer" }
+sql-composer = { version = "0.0.2", path = "../sql-composer" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio"] }
 sqlparser = { version = "0.53", optional = true }
 tokio = { version = "1", features = ["rt"] }

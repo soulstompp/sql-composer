@@ -6,7 +6,7 @@ keywords = ["sql", "template", "composer", "parser", "winnow"]
 categories = ["parser-implementations", "database"]
 repository = "https://github.com/soulstompp/sql-composer"
 license = "MIT"
-readme = "README.md"
+readme = "../../README.md"
 edition = "2021"
 
 [dependencies]

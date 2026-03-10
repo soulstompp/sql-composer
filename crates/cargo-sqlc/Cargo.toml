@@ -1,6 +1,6 @@
 [package]
 name = "cargo-sqlc"
-version = "0.0.2"
+version = "0.0.3"
 description = "Cargo subcommand for composing SQL templates with sql-composer"
 keywords = ["sql", "cargo", "subcommand", "composer"]
 categories = ["command-line-utilities", "database"]
@@ -13,7 +13,7 @@ name = "cargo-sqlc"
 path = "src/main.rs"
 
 [dependencies]
-sql-composer = { version = "0.0.2", path = "../sql-composer" }
+sql-composer = { version = "0.0.3", path = "../sql-composer" }
 clap = { version = "4", features = ["derive", "env"] }
 walkdir = "2"
 tempfile = "3"

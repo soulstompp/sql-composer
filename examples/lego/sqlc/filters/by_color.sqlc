@@ -1,4 +1,4 @@
-# Filter parts by color. Complete, valid SQL — can be tested independently.
+# Filter parts by color.
 SELECT part_num
 FROM lego_inventory_parts ip
 JOIN lego_colors c ON c.id = ip.color_id

@@ -1,6 +1,6 @@
 [package]
 name = "sql-composer-sqlx"
-version = "0.0.2"
+version = "0.0.3"
 description = "sqlx integration for sql-composer: verify composed SQL against a database"
 keywords = ["sql", "sqlx", "composer", "verification"]
 categories = ["database"]
@@ -9,7 +9,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sql-composer = { version = "0.0.2", path = "../sql-composer" }
+sql-composer = { version = "0.0.3", path = "../sql-composer" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio"] }
 sqlparser = { version = "0.53", optional = true }
 tokio = { version = "1", features = ["rt"] }

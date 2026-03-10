@@ -1,27 +1,26 @@
 # Canonical resolution of full part details for a given set.
 # Joins inventory_parts -> inventories, parts, part_categories, colors.
 #
-# This CTE is the single source of truth for "what parts are in a set."
+# This query is the single source of truth for "what parts are in a set."
 # If the DBA asks you to change join order or add a filter, change it here
 # and every query that composes this template picks up the fix.
 #
 # Used by: sets/select_set_parts.sqlc
 #          reports/insert_set_summary.sqlc
 #          inventory/update_spare_counts.sqlc
-WITH set_part_details AS (
-    SELECT
-        ip.part_num,
-        p.name AS part_name,
-        pc.name AS category_name,
-        c.name AS color_name,
-        c.rgb AS color_rgb,
-        c.is_trans,
-        ip.quantity,
-        ip.is_spare
-    FROM lego_inventory_parts ip
-    JOIN lego_inventories i ON i.id = ip.inventory_id
-    JOIN lego_parts p ON p.part_num = ip.part_num
-    JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-    JOIN lego_colors c ON c.id = ip.color_id
-    WHERE i.set_num = :bind(set_num)
-)
+#          shared/filtered_set_parts.sqlc
+SELECT
+    ip.part_num,
+    p.name AS part_name,
+    pc.name AS category_name,
+    c.name AS color_name,
+    c.rgb AS color_rgb,
+    c.is_trans,
+    ip.quantity,
+    ip.is_spare
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_parts p ON p.part_num = ip.part_num
+JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+JOIN lego_colors c ON c.id = ip.color_id
+WHERE i.set_num = :bind(set_num)

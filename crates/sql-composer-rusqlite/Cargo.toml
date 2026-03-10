@@ -1,6 +1,6 @@
 [package]
 name = "sql-composer-rusqlite"
-version = "0.0.2"
+version = "0.0.3"
 description = "rusqlite driver for sql-composer SQL template engine"
 keywords = ["sql", "template", "composer", "rusqlite", "sqlite"]
 repository = "https://github.com/soulstompp/sql-composer"
@@ -8,7 +8,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sql-composer = { version = "0.0.2", path = "../sql-composer" }
+sql-composer = { version = "0.0.3", path = "../sql-composer" }
 rusqlite = "0.34"
 thiserror = "2"
 

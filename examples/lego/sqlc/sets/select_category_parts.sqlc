@@ -1,0 +1,1 @@
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)

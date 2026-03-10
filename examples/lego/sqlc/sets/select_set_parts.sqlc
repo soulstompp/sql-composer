@@ -1,0 +1,12 @@
+# List all parts for a set with full details.
+# Composes the shared part resolution CTE.
+:compose(shared/set_part_details.sqlc)
+SELECT
+    part_name,
+    category_name,
+    color_name,
+    color_rgb,
+    quantity,
+    is_spare
+FROM set_part_details
+ORDER BY category_name, part_name, color_name

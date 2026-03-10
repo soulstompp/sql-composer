@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::mock::MockTable;
 use crate::parser;
-use crate::types::{Command, CommandKind, Dialect, Element, Template, TemplateSource};
+use crate::types::{
+    Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Template, TemplateSource,
+};
 
 /// The result of composing a template: final SQL and ordered bind parameter names.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +63,8 @@ impl Composer {
         if let TemplateSource::File(ref path) = template.source {
             visited.insert(path.clone());
         }
-        self.compose_inner(template, &mut visited)
+        let slots = HashMap::new();
+        self.compose_inner(template, &slots, &mut visited)
     }
 
     /// Compose a template with value counts, expanding multi-value bindings
@@ -88,7 +91,39 @@ impl Composer {
         if let TemplateSource::File(ref path) = template.source {
             visited.insert(path.clone());
         }
-        self.compose_with_values_inner(template, values, &mut visited)
+        let slots = HashMap::new();
+        self.compose_with_values_inner(template, values, &slots, &mut visited)
+    }
+
+    // ── Slot helpers ─────────────────────────────────────────────────
+
+    /// Resolve a compose target to a concrete file path.
+    ///
+    /// `ComposeTarget::Path` returns the path directly.
+    /// `ComposeTarget::Slot` looks up the slot name in the provided slots map.
+    fn resolve_compose_target(
+        compose_ref: &ComposeRef,
+        slots: &HashMap<String, PathBuf>,
+    ) -> Result<PathBuf> {
+        match &compose_ref.target {
+            ComposeTarget::Path(p) => Ok(p.clone()),
+            ComposeTarget::Slot(name) => slots
+                .get(name)
+                .cloned()
+                .ok_or_else(|| Error::MissingSlot { name: name.clone() }),
+        }
+    }
+
+    /// Build the child slot map from a compose reference's slot assignments.
+    ///
+    /// These are the ONLY slots the child template sees — parent slots are
+    /// NOT inherited.
+    fn build_child_slots(compose_ref: &ComposeRef) -> HashMap<String, PathBuf> {
+        compose_ref
+            .slots
+            .iter()
+            .map(|s| (s.name.clone(), s.path.clone()))
+            .collect()
     }
 
     // ── Dispatch ──────────────────────────────────────────────────────
@@ -96,12 +131,13 @@ impl Composer {
     fn compose_inner(
         &self,
         template: &Template,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         if self.dialect.supports_numbered_placeholders() {
-            self.compose_inner_numbered(template, visited)
+            self.compose_inner_numbered(template, slots, visited)
         } else {
-            self.compose_inner_positional(template, visited)
+            self.compose_inner_positional(template, slots, visited)
         }
     }
 
@@ -109,12 +145,13 @@ impl Composer {
         &self,
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         if self.dialect.supports_numbered_placeholders() {
-            self.compose_with_values_numbered(template, values, visited)
+            self.compose_with_values_numbered(template, values, slots, visited)
         } else {
-            self.compose_with_values_positional(template, values, visited)
+            self.compose_with_values_positional(template, values, slots, visited)
         }
     }
 
@@ -129,6 +166,7 @@ impl Composer {
     fn collect_bind_names(
         &self,
         template: &Template,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<BTreeSet<String>> {
         let mut names = BTreeSet::new();
@@ -140,7 +178,10 @@ impl Composer {
                     names.insert(binding.name.clone());
                 }
                 Element::Compose(compose_ref) => {
-                    let sub = self.collect_compose_bind_names(&compose_ref.path, visited)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let child_slots = Self::build_child_slots(compose_ref);
+                    let sub =
+                        self.collect_compose_bind_names(&path, &child_slots, visited)?;
                     names.extend(sub);
                 }
                 Element::Command(command) => {
@@ -157,6 +198,7 @@ impl Composer {
     fn collect_compose_bind_names(
         &self,
         path: &Path,
+        child_slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<BTreeSet<String>> {
         let resolved = self.find_template(path)?;
@@ -168,23 +210,26 @@ impl Composer {
         }
 
         let template = parser::parse_template_file(&resolved)?;
-        let names = self.collect_bind_names(&template, visited)?;
+        let names = self.collect_bind_names(&template, child_slots, visited)?;
 
         visited.remove(&resolved);
         Ok(names)
     }
 
     /// Collect bind names from all sources in a command.
+    ///
+    /// Command sources are standalone templates — they get empty slots.
     fn collect_command_bind_names(
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<BTreeSet<String>> {
         let mut names = BTreeSet::new();
+        let empty_slots = HashMap::new();
         for source in &command.sources {
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            let sub = self.collect_bind_names(&template, visited)?;
+            let sub = self.collect_bind_names(&template, &empty_slots, visited)?;
             names.extend(sub);
         }
         Ok(names)
@@ -221,11 +266,12 @@ impl Composer {
     fn compose_inner_numbered(
         &self,
         template: &Template,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         // Pass 1: collect
         let mut collect_visited = visited.clone();
-        let names = self.collect_bind_names(template, &mut collect_visited)?;
+        let names = self.collect_bind_names(template, slots, &mut collect_visited)?;
 
         // Allocate
         let index_map = Self::build_index_map(&names);
@@ -233,7 +279,7 @@ impl Composer {
 
         // Pass 2: emit
         let mut sql = String::new();
-        self.emit_sql_numbered(template, &index_map, &mut sql, visited)?;
+        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
 
         Ok(ComposedSql { sql, bind_params })
     }
@@ -243,11 +289,12 @@ impl Composer {
         &self,
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         // Pass 1: collect
         let mut collect_visited = visited.clone();
-        let names = self.collect_bind_names(template, &mut collect_visited)?;
+        let names = self.collect_bind_names(template, slots, &mut collect_visited)?;
 
         // Allocate with value counts
         let index_map = Self::build_index_map_with_values(&names, values);
@@ -267,7 +314,7 @@ impl Composer {
 
         // Pass 2: emit
         let mut sql = String::new();
-        self.emit_sql_numbered(template, &index_map, &mut sql, visited)?;
+        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
 
         Ok(ComposedSql { sql, bind_params })
     }
@@ -278,6 +325,7 @@ impl Composer {
         template: &Template,
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<()> {
         for element in &template.elements {
@@ -293,7 +341,15 @@ impl Composer {
                     }
                 }
                 Element::Compose(compose_ref) => {
-                    self.emit_compose_numbered(&compose_ref.path, index_map, sql, visited)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let child_slots = Self::build_child_slots(compose_ref);
+                    self.emit_compose_numbered(
+                        &path,
+                        &child_slots,
+                        index_map,
+                        sql,
+                        visited,
+                    )?;
                 }
                 Element::Command(command) => {
                     self.emit_command_numbered(command, index_map, sql, visited)?;
@@ -307,6 +363,7 @@ impl Composer {
     fn emit_compose_numbered(
         &self,
         path: &Path,
+        child_slots: &HashMap<String, PathBuf>,
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
         visited: &mut HashSet<PathBuf>,
@@ -320,13 +377,15 @@ impl Composer {
         }
 
         let template = parser::parse_template_file(&resolved)?;
-        self.emit_sql_numbered(&template, index_map, sql, visited)?;
+        self.emit_sql_numbered(&template, index_map, sql, child_slots, visited)?;
 
         visited.remove(&resolved);
         Ok(())
     }
 
     /// Emit SQL for a command (union/count) using the global index map.
+    ///
+    /// Command sources are standalone templates — they get empty slots.
     fn emit_command_numbered(
         &self,
         command: &Command,
@@ -356,13 +415,16 @@ impl Composer {
             "UNION"
         };
 
+        let empty_slots = HashMap::new();
         for (i, source) in command.sources.iter().enumerate() {
             if i > 0 {
+                let trimmed = sql.trim_end().len();
+                sql.truncate(trimmed);
                 sql.push_str(&format!("\n{union_kw}\n"));
             }
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            self.emit_sql_numbered(&template, index_map, sql, visited)?;
+            self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
         }
 
         Ok(())
@@ -389,6 +451,7 @@ impl Composer {
 
         sql.push_str(&format!("SELECT {count_expr} FROM (\n"));
 
+        let empty_slots = HashMap::new();
         if command.sources.len() > 1 {
             let union_cmd = Command {
                 kind: CommandKind::Union,
@@ -402,7 +465,7 @@ impl Composer {
             let source = &command.sources[0];
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            self.emit_sql_numbered(&template, index_map, sql, visited)?;
+            self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
         }
 
         sql.push_str("\n) AS _count_sub");
@@ -417,6 +480,7 @@ impl Composer {
     fn compose_inner_positional(
         &self,
         template: &Template,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         let mut sql = String::new();
@@ -433,7 +497,10 @@ impl Composer {
                     bind_params.push(binding.name.clone());
                 }
                 Element::Compose(compose_ref) => {
-                    let composed = self.resolve_compose(&compose_ref.path, visited)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let child_slots = Self::build_child_slots(compose_ref);
+                    let composed =
+                        self.resolve_compose_positional(&path, &child_slots, visited)?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -452,6 +519,7 @@ impl Composer {
         &self,
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
+        slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         let mut sql = String::new();
@@ -479,8 +547,14 @@ impl Composer {
                     }
                 }
                 Element::Compose(compose_ref) => {
-                    let composed =
-                        self.resolve_compose_with_values(&compose_ref.path, values, visited)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let child_slots = Self::build_child_slots(compose_ref);
+                    let composed = self.resolve_compose_with_values_positional(
+                        &path,
+                        &child_slots,
+                        values,
+                        visited,
+                    )?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -495,8 +569,13 @@ impl Composer {
         Ok(ComposedSql { sql, bind_params })
     }
 
-    /// Resolve a compose reference by finding and parsing the template file.
-    fn resolve_compose(&self, path: &Path, visited: &mut HashSet<PathBuf>) -> Result<ComposedSql> {
+    /// Resolve a compose reference by finding and parsing the template file (positional).
+    fn resolve_compose_positional(
+        &self,
+        path: &Path,
+        child_slots: &HashMap<String, PathBuf>,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<ComposedSql> {
         let resolved = self.find_template(path)?;
 
         if !visited.insert(resolved.clone()) {
@@ -506,17 +585,18 @@ impl Composer {
         }
 
         let template = parser::parse_template_file(&resolved)?;
-        let result = self.compose_inner(&template, visited)?;
+        let result = self.compose_inner_positional(&template, child_slots, visited)?;
 
         visited.remove(&resolved);
 
         Ok(result)
     }
 
-    /// Resolve a compose reference with value-aware expansion.
-    fn resolve_compose_with_values<V>(
+    /// Resolve a compose reference with value-aware expansion (positional).
+    fn resolve_compose_with_values_positional<V>(
         &self,
         path: &Path,
+        child_slots: &HashMap<String, PathBuf>,
         values: &BTreeMap<String, Vec<V>>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
@@ -529,13 +609,16 @@ impl Composer {
         }
 
         let template = parser::parse_template_file(&resolved)?;
-        let result = self.compose_with_values_inner(&template, values, visited)?;
+        let result =
+            self.compose_with_values_positional(&template, values, child_slots, visited)?;
 
         visited.remove(&resolved);
         Ok(result)
     }
 
     /// Compose a command (count/union) into SQL (positional path).
+    ///
+    /// Command sources are standalone templates — they get empty slots.
     fn compose_command(
         &self,
         command: &Command,
@@ -555,13 +638,14 @@ impl Composer {
     ) -> Result<ComposedSql> {
         let mut parts = Vec::new();
         let mut all_params = Vec::new();
+        let empty_slots = HashMap::new();
 
         for source in &command.sources {
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            let composed = self.compose_inner(&template, visited)?;
+            let composed = self.compose_inner(&template, &empty_slots, visited)?;
 
-            parts.push(composed.sql);
+            parts.push(composed.sql.trim_end().to_string());
             all_params.extend(composed.bind_params);
         }
 
@@ -592,6 +676,8 @@ impl Composer {
             None => "*".to_string(),
         };
 
+        let empty_slots = HashMap::new();
+
         // If multiple sources, wrap a union first
         let inner = if command.sources.len() > 1 {
             let union_cmd = Command {
@@ -606,7 +692,7 @@ impl Composer {
             let source = &command.sources[0];
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            self.compose_inner(&template, visited)?
+            self.compose_inner(&template, &empty_slots, visited)?
         };
 
         let count_expr = if command.distinct {
@@ -649,7 +735,9 @@ impl Composer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Binding, Element, TemplateSource};
+    use crate::types::{Binding, ComposeTarget, Element, SlotAssignment, TemplateSource};
+    use std::io::Write;
+    use tempfile::TempDir;
 
     #[test]
     fn test_compose_plain_sql() {
@@ -1060,5 +1148,384 @@ mod tests {
         assert!(Dialect::Postgres.supports_numbered_placeholders());
         assert!(Dialect::Sqlite.supports_numbered_placeholders());
         assert!(!Dialect::Mysql.supports_numbered_placeholders());
+    }
+
+    // ── Slot tests ────────────────────────────────────────────────────
+
+    /// Helper: write a temp file and return its path.
+    fn write_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_slot_resolution_numbered() {
+        let dir = TempDir::new().unwrap();
+
+        // Filter template: standalone query
+        write_temp_file(
+            &dir,
+            "filter.sqlc",
+            "SELECT part_num FROM parts WHERE color = :bind(color)",
+        );
+
+        // Base template with @filter slot
+        write_temp_file(
+            &dir,
+            "base.sqlc",
+            "WITH f AS (\n    :compose(@filter)\n)\nSELECT * FROM f",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        // Caller template: fills the @filter slot
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("base.sqlc")),
+                slots: vec![SlotAssignment {
+                    name: "filter".into(),
+                    path: PathBuf::from("filter.sqlc"),
+                }],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(
+            result.sql,
+            "WITH f AS (\n    SELECT part_num FROM parts WHERE color = $1\n)\nSELECT * FROM f"
+        );
+        assert_eq!(result.bind_params, vec!["color"]);
+    }
+
+    #[test]
+    fn test_slot_resolution_positional() {
+        let dir = TempDir::new().unwrap();
+
+        write_temp_file(
+            &dir,
+            "filter.sqlc",
+            "SELECT part_num FROM parts WHERE color = :bind(color)",
+        );
+
+        write_temp_file(
+            &dir,
+            "base.sqlc",
+            "WITH f AS (\n    :compose(@filter)\n)\nSELECT * FROM f",
+        );
+
+        let mut composer = Composer::new(Dialect::Mysql);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("base.sqlc")),
+                slots: vec![SlotAssignment {
+                    name: "filter".into(),
+                    path: PathBuf::from("filter.sqlc"),
+                }],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(
+            result.sql,
+            "WITH f AS (\n    SELECT part_num FROM parts WHERE color = ?\n)\nSELECT * FROM f"
+        );
+        assert_eq!(result.bind_params, vec!["color"]);
+    }
+
+    #[test]
+    fn test_missing_slot_error() {
+        let dir = TempDir::new().unwrap();
+
+        // Template uses @filter but caller doesn't provide it
+        write_temp_file(
+            &dir,
+            "base.sqlc",
+            "WITH f AS (\n    :compose(@filter)\n)\nSELECT * FROM f",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("base.sqlc")),
+                slots: vec![], // no slots provided
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let err = composer.compose(&template).unwrap_err();
+        match err {
+            Error::MissingSlot { name } => assert_eq!(name, "filter"),
+            other => panic!("expected MissingSlot, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_slots_not_inherited() {
+        let dir = TempDir::new().unwrap();
+
+        // C uses @deep slot — should NOT inherit from A→B
+        write_temp_file(
+            &dir,
+            "c.sqlc",
+            "SELECT id FROM t WHERE x = :compose(@deep)",
+        );
+
+        // B composes C without passing any slots
+        write_temp_file(&dir, "b.sqlc", ":compose(c.sqlc)");
+
+        // A composes B with @deep slot
+        // But B doesn't pass @deep to C, so C should fail
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("b.sqlc")),
+                slots: vec![SlotAssignment {
+                    name: "deep".into(),
+                    path: PathBuf::from("filter.sqlc"),
+                }],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let err = composer.compose(&template).unwrap_err();
+        match err {
+            Error::MissingSlot { name } => assert_eq!(name, "deep"),
+            other => panic!("expected MissingSlot, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_explicit_slot_passthrough() {
+        let dir = TempDir::new().unwrap();
+
+        // Deep template uses @deep slot
+        write_temp_file(&dir, "deep.sqlc", ":compose(@deep)");
+
+        // Middle template explicitly passes @deep through
+        write_temp_file(&dir, "middle.sqlc", ":compose(deep.sqlc, @deep = @deep)");
+
+        // Hmm, @deep = @deep isn't valid — slot values are file paths.
+        // Instead, the middle template must know the concrete path:
+        // :compose(deep.sqlc, @deep = leaf.sqlc)
+        // OR middle itself takes a slot and passes it.
+        // But slots are file paths, not slot references.
+        // Let me redesign this test.
+
+        // leaf.sqlc — the concrete content
+        write_temp_file(&dir, "leaf.sqlc", "SELECT 1");
+
+        // deep.sqlc — uses @inner slot
+        write_temp_file(&dir, "deep.sqlc", ":compose(@inner)");
+
+        // middle.sqlc — composes deep.sqlc, passes @inner = leaf.sqlc
+        write_temp_file(
+            &dir,
+            "middle.sqlc",
+            ":compose(deep.sqlc, @inner = leaf.sqlc)",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("middle.sqlc")),
+                slots: vec![],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(result.sql, "SELECT 1");
+    }
+
+    #[test]
+    fn test_slot_circular_reference() {
+        let dir = TempDir::new().unwrap();
+
+        // a.sqlc composes b.sqlc with @slot = a.sqlc (circular)
+        write_temp_file(&dir, "a.sqlc", ":compose(b.sqlc, @slot = a.sqlc)");
+        write_temp_file(&dir, "b.sqlc", ":compose(@slot)");
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = parser::parse_template_file(&dir.path().join("a.sqlc")).unwrap();
+        let err = composer.compose(&template).unwrap_err();
+        assert!(matches!(err, Error::CircularReference { .. }));
+    }
+
+    #[test]
+    fn test_slotted_template_with_bind_params() {
+        let dir = TempDir::new().unwrap();
+
+        write_temp_file(
+            &dir,
+            "filter.sqlc",
+            "SELECT id FROM items WHERE color = :bind(color)",
+        );
+
+        write_temp_file(
+            &dir,
+            "base.sqlc",
+            "WITH f AS (\n    :compose(@filter)\n)\nSELECT * FROM f WHERE active = :bind(active)",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("base.sqlc")),
+                slots: vec![SlotAssignment {
+                    name: "filter".into(),
+                    path: PathBuf::from("filter.sqlc"),
+                }],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        // Alphabetical: active=$1, color=$2
+        assert_eq!(
+            result.sql,
+            "WITH f AS (\n    SELECT id FROM items WHERE color = $2\n)\nSELECT * FROM f WHERE active = $1"
+        );
+        assert_eq!(result.bind_params, vec!["active", "color"]);
+    }
+
+    #[test]
+    fn test_slot_path_resolved_via_search_paths() {
+        let dir = TempDir::new().unwrap();
+
+        // Put the filter in a subdirectory
+        write_temp_file(
+            &dir,
+            "filters/by_color.sqlc",
+            "SELECT part_num FROM parts WHERE color = :bind(color)",
+        );
+
+        write_temp_file(
+            &dir,
+            "shared/base.sqlc",
+            "WITH f AS (\n    :compose(@filter)\n)\nSELECT * FROM f",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("shared/base.sqlc")),
+                slots: vec![SlotAssignment {
+                    name: "filter".into(),
+                    path: PathBuf::from("filters/by_color.sqlc"),
+                }],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(
+            result.sql,
+            "WITH f AS (\n    SELECT part_num FROM parts WHERE color = $1\n)\nSELECT * FROM f"
+        );
+        assert_eq!(result.bind_params, vec!["color"]);
+    }
+
+    #[test]
+    fn test_slot_target_reference() {
+        // The target itself is a slot reference: :compose(@slot)
+        let dir = TempDir::new().unwrap();
+
+        write_temp_file(&dir, "inner.sqlc", "SELECT 42");
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        // Template with a slot reference as the compose target
+        let template = Template {
+            elements: vec![
+                Element::Sql("WITH cte AS (\n    ".into()),
+                Element::Compose(ComposeRef {
+                    target: ComposeTarget::Slot("source".into()),
+                    slots: vec![],
+                }),
+                Element::Sql("\n)\nSELECT * FROM cte".into()),
+            ],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        // Without providing the slot, should fail
+        let err = composer.compose(&template).unwrap_err();
+        assert!(matches!(err, Error::MissingSlot { .. }));
+
+        // Now compose with slots provided via internal API
+        let mut visited = HashSet::new();
+        let mut slots = HashMap::new();
+        slots.insert("source".into(), PathBuf::from("inner.sqlc"));
+        let result = composer
+            .compose_inner(&template, &slots, &mut visited)
+            .unwrap();
+        assert_eq!(result.sql, "WITH cte AS (\n    SELECT 42\n)\nSELECT * FROM cte");
+    }
+
+    #[test]
+    fn test_multiple_slots() {
+        let dir = TempDir::new().unwrap();
+
+        write_temp_file(&dir, "source.sqlc", "SELECT id, name FROM items");
+        write_temp_file(
+            &dir,
+            "filter.sqlc",
+            "SELECT id FROM items WHERE active = :bind(active)",
+        );
+
+        write_temp_file(
+            &dir,
+            "base.sqlc",
+            "WITH src AS (\n    :compose(@source)\n),\nf AS (\n    :compose(@filter)\n)\nSELECT s.* FROM src s JOIN f ON f.id = s.id",
+        );
+
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let template = Template {
+            elements: vec![Element::Compose(ComposeRef {
+                target: ComposeTarget::Path(PathBuf::from("base.sqlc")),
+                slots: vec![
+                    SlotAssignment {
+                        name: "source".into(),
+                        path: PathBuf::from("source.sqlc"),
+                    },
+                    SlotAssignment {
+                        name: "filter".into(),
+                        path: PathBuf::from("filter.sqlc"),
+                    },
+                ],
+            })],
+            source: TemplateSource::Literal("test".into()),
+        };
+
+        let result = composer.compose(&template).unwrap();
+        assert_eq!(
+            result.sql,
+            "WITH src AS (\n    SELECT id, name FROM items\n),\nf AS (\n    SELECT id FROM items WHERE active = $1\n)\nSELECT s.* FROM src s JOIN f ON f.id = s.id"
+        );
+        assert_eq!(result.bind_params, vec!["active"]);
     }
 }

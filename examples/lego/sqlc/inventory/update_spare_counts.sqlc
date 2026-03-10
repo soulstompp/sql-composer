@@ -1,0 +1,16 @@
+# Sync the spare part counts in inventory_tracking from the
+# canonical part resolution. When the DBA changes the join
+# logic in set_part_details, this UPDATE stays in sync.
+:compose(shared/set_part_details.sqlc)
+UPDATE inventory_tracking it
+SET
+    spare_count = spd.total_spare,
+    updated_at = NOW()
+FROM (
+    SELECT part_num, SUM(quantity) AS total_spare
+    FROM set_part_details
+    WHERE is_spare
+    GROUP BY part_num
+) spd
+WHERE it.part_num = spd.part_num
+  AND it.set_num = :bind(set_num)

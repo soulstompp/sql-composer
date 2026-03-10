@@ -53,12 +53,34 @@ pub struct Binding {
     pub nullable: bool,
 }
 
-/// A compose reference parsed from `:compose(path)`.
+/// What a `:compose(...)` target refers to.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ComposeTarget {
+    /// A direct file path.
+    Path(PathBuf),
+    /// A slot reference (name without `@` prefix).
+    Slot(String),
+}
+
+/// A slot assignment: `@name = path`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SlotAssignment {
+    /// The slot name (without `@` prefix).
+    pub name: String,
+    /// The file path to assign to this slot.
+    pub path: PathBuf,
+}
+
+/// A compose reference parsed from `:compose(target, @slot = path, ...)`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ComposeRef {
-    /// The path to the template to include.
-    pub path: PathBuf,
+    /// The target: either a file path or a slot reference.
+    pub target: ComposeTarget,
+    /// Slot assignments provided by the caller.
+    pub slots: Vec<SlotAssignment>,
 }
 
 /// An aggregate command parsed from `:count(...)` or `:union(...)`.

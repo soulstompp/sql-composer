@@ -1,6 +1,6 @@
 [package]
 name = "sql-composer-sqlx"
-version = "0.0.1"
+version = "0.0.2"
 description = "sqlx integration for sql-composer: verify composed SQL against a database"
 keywords = ["sql", "sqlx", "composer", "verification"]
 categories = ["database"]

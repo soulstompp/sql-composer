@@ -62,6 +62,7 @@ where
 {
     trace("sql_literal", move |input: &mut Input| {
         let mut sql = String::new();
+        let mut consumed_comment = false;
 
         loop {
             // Check if we're at a macro start
@@ -93,6 +94,7 @@ where
                     let ch = c.as_char();
                     if ch == '#' {
                         // Comment: skip to end of line (or EOF)
+                        consumed_comment = true;
                         loop {
                             match any::<_, Error>.parse_next(input) {
                                 Ok(c) if c.clone().as_char() == '\n' => break,
@@ -108,7 +110,7 @@ where
             }
         }
 
-        if sql.is_empty() {
+        if sql.is_empty() && !consumed_comment {
             return Err(ParserError::from_input(input));
         }
 
@@ -356,7 +358,9 @@ mod tests {
     fn test_only_comments() {
         let mut input: TestInput = "# just a comment";
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
-        assert!(result.is_empty());
+        // Comment-only input produces a single empty SQL element (stripped comments).
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], Element::Sql(String::new()));
     }
 
     #[test]
@@ -383,6 +387,24 @@ mod tests {
         assert_eq!(
             result[0],
             Element::Sql("SELECT @variable FROM t".into())
+        );
+    }
+
+    #[test]
+    fn test_comments_before_macro() {
+        let mut input: TestInput = "# comment line 1\n# comment line 2\n:bind(id)";
+        let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
+        // Comments are stripped; the macro is still parsed.
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], Element::Sql(String::new()));
+        assert_eq!(
+            result[1],
+            Element::Bind(Binding {
+                name: "id".into(),
+                min_values: None,
+                max_values: None,
+                nullable: false,
+            })
         );
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "lego-example"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "lego"
+path = "src/main.rs"
+
+[dependencies]
+sql-composer = { path = "../../crates/sql-composer" }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

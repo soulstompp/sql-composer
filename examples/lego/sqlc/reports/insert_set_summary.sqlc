@@ -1,0 +1,12 @@
+# Populate the per-category part count summary for a set.
+# Reuses the same part resolution as the detail query so counts
+# are always consistent with what the detail view shows.
+:compose(shared/set_part_details.sqlc)
+INSERT INTO set_category_summary (set_num, category_name, total_parts, total_spare)
+SELECT
+    :bind(set_num),
+    category_name,
+    SUM(quantity) FILTER (WHERE NOT is_spare),
+    SUM(quantity) FILTER (WHERE is_spare)
+FROM set_part_details
+GROUP BY category_name

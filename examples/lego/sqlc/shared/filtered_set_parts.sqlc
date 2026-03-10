@@ -1,0 +1,9 @@
+# Base query with a pluggable filter. The caller decides which filter to use.
+# Composes set_part_details as the first CTE, then adds filter as a sibling.
+:compose(shared/set_part_details.sqlc),
+filter AS (
+    :compose(@filter)
+)
+SELECT p.*
+FROM set_part_details p
+JOIN filter f ON f.part_num = p.part_num

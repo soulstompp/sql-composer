@@ -83,7 +83,7 @@ sqlc/
     update_spare_counts.sqlc    # UPDATE — sync spare part counts
 ```
 
-#### `shared/set_part_details.sqlc`
+#### [`shared/set_part_details.sqlc`](examples/lego/sqlc/shared/set_part_details.sqlc)
 
 ```sql
 # Canonical resolution of full part details for a given set.
@@ -117,7 +117,7 @@ WITH set_part_details AS (
 
 This is a complete, valid SQL statement on its own (a CTE followed by nothing is valid in a `:compose()` context because it gets composed into a larger query). Every `#` comment is stripped from the output — the production SQL is clean.
 
-#### `sets/select_set_parts.sqlc` — SELECT
+#### [`sets/select_set_parts.sqlc`](examples/lego/sqlc/sets/select_set_parts.sqlc) — SELECT
 
 ```sql
 # List all parts for a set with full details.
@@ -134,7 +134,7 @@ FROM set_part_details
 ORDER BY category_name, part_name, color_name
 ```
 
-#### `reports/insert_set_summary.sqlc` — INSERT SELECT
+#### [`reports/insert_set_summary.sqlc`](examples/lego/sqlc/reports/insert_set_summary.sqlc) — INSERT SELECT
 
 ```sql
 # Populate the per-category part count summary for a set.
@@ -151,7 +151,7 @@ FROM set_part_details
 GROUP BY category_name
 ```
 
-#### `inventory/update_spare_counts.sqlc` — UPDATE
+#### [`inventory/update_spare_counts.sqlc`](examples/lego/sqlc/inventory/update_spare_counts.sqlc) — UPDATE
 
 ```sql
 # Sync the spare part counts in inventory_tracking from the
@@ -178,22 +178,21 @@ All three queries share the same 4-table join. Change the join logic once in `sh
 
 Sometimes a shared template needs to vary one piece of its logic depending on the caller. For example, the same base query might need different filters for different use cases. Instead of duplicating the entire template, use **slot arguments** — the shared template declares named slots with `@slot_name`, and the caller fills them with concrete file paths.
 
-#### `shared/filtered_set_parts.sqlc` — base query with a `@filter` slot
+#### [`shared/filtered_set_parts.sqlc`](examples/lego/sqlc/shared/filtered_set_parts.sqlc) — base query with a `@filter` slot
 
 ```sql
 # Base query with a pluggable filter. The caller decides which filter to use.
-WITH filter AS (
+# Composes set_part_details as the first CTE, then adds filter as a sibling.
+:compose(shared/set_part_details.sqlc),
+filter AS (
     :compose(@filter)
-),
-parts AS (
-    :compose(shared/set_part_details.sqlc)
 )
 SELECT p.*
-FROM parts p
+FROM set_part_details p
 JOIN filter f ON f.part_num = p.part_num
 ```
 
-#### `filters/by_color.sqlc` — a standalone filter query
+#### [`filters/by_color.sqlc`](examples/lego/sqlc/filters/by_color.sqlc) — a standalone filter query
 
 ```sql
 # Filter parts by color. Complete, valid SQL — can be tested independently.
@@ -203,7 +202,7 @@ JOIN lego_colors c ON c.id = ip.color_id
 WHERE c.name = :bind(color_name)
 ```
 
-#### `filters/by_category.sqlc` — another standalone filter
+#### [`filters/by_category.sqlc`](examples/lego/sqlc/filters/by_category.sqlc) — another standalone filter
 
 ```sql
 # Filter parts by category.
@@ -214,19 +213,67 @@ JOIN lego_part_categories pc ON pc.id = p.part_cat_id
 WHERE pc.name = :bind(category_name)
 ```
 
-#### `sets/select_colored_parts.sqlc` — fills `@filter` with the color filter
+#### [`sets/select_colored_parts.sqlc`](examples/lego/sqlc/sets/select_colored_parts.sqlc) — fills `@filter` with the color filter
 
 ```sql
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
 ```
 
-#### `sets/select_category_parts.sqlc` — fills `@filter` with the category filter
+#### [`sets/select_category_parts.sqlc`](examples/lego/sqlc/sets/select_category_parts.sqlc) — fills `@filter` with the category filter
 
 ```sql
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)
 ```
 
 Both callers compose the same base query but plug in different filters. The base template is written once; the filter logic is swapped at composition time. Slots are explicitly scoped — a child template does NOT inherit slots from its parent, so there's no spooky action at a distance.
+
+### Union, count, and multi-value bindings
+
+The Lego example also demonstrates combining queries with `:union()`, counting with `:count()`, and multi-value bind parameters for `IN` clauses.
+
+#### [`sets/select_sets_by_themes.sqlc`](examples/lego/sqlc/sets/select_sets_by_themes.sqlc) — multi-value `:bind()` for `IN`
+
+```sql
+# Find sets matching any of the given theme IDs.
+# Demonstrates multi-value :bind() for IN clauses.
+SELECT
+    s.set_num,
+    s.name,
+    s.year,
+    t.name AS theme_name,
+    s.num_parts
+FROM lego_sets s
+JOIN lego_themes t ON t.id = s.theme_id
+WHERE s.theme_id IN (:bind(theme_ids EXPECTING 1..20))
+  AND s.year >= :bind(min_year)
+ORDER BY s.year DESC, s.num_parts DESC
+```
+
+At runtime, call `compose_with_values()` with the actual value count for `theme_ids`, and the composer expands `:bind(theme_ids)` into the right number of placeholders: `$2, $3, $4` for 3 values.
+
+#### [`reports/combined_theme_sets.sqlc`](examples/lego/sqlc/reports/combined_theme_sets.sqlc) — `:union()`
+
+```sql
+# Combine Technic and City sets into one result.
+# Demonstrates :union() composing two standalone queries.
+:union(queries/technic_sets.sqlc, queries/city_sets.sqlc)
+```
+
+Each union source ([`queries/technic_sets.sqlc`](examples/lego/sqlc/queries/technic_sets.sqlc), [`queries/city_sets.sqlc`](examples/lego/sqlc/queries/city_sets.sqlc)) is a complete, standalone query. Bind parameters from both sources are merged alphabetically: `$1`=city_theme, `$2`=min_year, `$3`=technic_theme.
+
+#### [`reports/count_theme_parts.sqlc`](examples/lego/sqlc/reports/count_theme_parts.sqlc) — `:count(DISTINCT)`
+
+```sql
+# Count distinct parts across all sets in a theme.
+# Demonstrates :count(DISTINCT col OF source).
+:count(DISTINCT part_num OF queries/theme_set_parts.sqlc)
+```
+
+Wraps [`queries/theme_set_parts.sqlc`](examples/lego/sqlc/queries/theme_set_parts.sqlc) in `SELECT COUNT(DISTINCT part_num) FROM (...)`.
+
+### Running the example
+
+The complete working example with all templates, a Rust binary, and setup instructions is in [`examples/lego/`](examples/lego/). See [`examples/lego/README.md`](examples/lego/README.md) for details.
 
 ## Quick Start
 

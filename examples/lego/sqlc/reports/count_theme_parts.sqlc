@@ -1,0 +1,3 @@
+# Count distinct parts across all sets in a theme.
+# Demonstrates :count(DISTINCT col OF source).
+:count(DISTINCT part_num OF queries/theme_set_parts.sqlc)

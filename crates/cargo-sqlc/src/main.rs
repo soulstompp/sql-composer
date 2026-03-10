@@ -6,6 +6,7 @@
 
 use clap::{Parser, ValueEnum};
 use sql_composer::composer::Composer;
+use sql_composer::error::Error as ComposeError;
 use sql_composer::parser;
 use sql_composer::types::{Dialect, TemplateSource};
 use std::collections::BTreeMap;
@@ -119,7 +120,15 @@ fn compose_all(
 
         let content = std::fs::read_to_string(path)?;
         let template = parser::parse_template(&content, TemplateSource::File(path.to_path_buf()))?;
-        let result = composer.compose(&template)?;
+        let result = match composer.compose(&template) {
+            Ok(r) => r,
+            Err(ComposeError::MissingSlot { .. }) => {
+                // Template has unfilled slots — it's a shared template meant
+                // to be composed by callers, not standalone. Skip it.
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         results.insert(output_rel, result.sql);
     }

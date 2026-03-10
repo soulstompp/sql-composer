@@ -418,6 +418,8 @@ impl Composer {
         let empty_slots = HashMap::new();
         for (i, source) in command.sources.iter().enumerate() {
             if i > 0 {
+                let trimmed = sql.trim_end().len();
+                sql.truncate(trimmed);
                 sql.push_str(&format!("\n{union_kw}\n"));
             }
             let resolved = self.find_template(source)?;
@@ -643,7 +645,7 @@ impl Composer {
             let template = parser::parse_template_file(&resolved)?;
             let composed = self.compose_inner(&template, &empty_slots, visited)?;
 
-            parts.push(composed.sql);
+            parts.push(composed.sql.trim_end().to_string());
             all_params.extend(composed.bind_params);
         }
 

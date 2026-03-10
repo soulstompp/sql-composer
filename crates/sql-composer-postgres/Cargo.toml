@@ -8,7 +8,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-sql-composer = { path = "../sql-composer" }
+sql-composer = { version = "0.0.2", path = "../sql-composer" }
 tokio-postgres = "0.7"
 postgres = { version = "0.19", optional = true }
 thiserror = "2"

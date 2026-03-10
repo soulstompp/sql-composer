@@ -38,11 +38,11 @@ Reading and adapting to `.sqlc` templates is fairly straightforward, but designi
 
 **Rich documentation, zero production overhead.** Templates support `#` comments that are stripped during composition. Document your business rules, explain join ordering, leave notes for agents and future developers — none of it ends up in the SQL that hits your database.
 
-**Clean macros.** Like Rust macros, sql-composer macros operate on complete, well-formed SQL — not fragments. You can't splice in a bare WHERE clause or a partial JOIN. Every `:compose()` target is a valid SQL statement that can be run, tested, and reviewed independently. This constraint prevents the fragment spaghetti that makes other template systems unmaintainable.
+**Clean macros.** sql-composer macros compose structured SQL building blocks — CTEs, queries, filters — not arbitrary string fragments. You can't splice in a bare WHERE clause or a partial JOIN. Templates are organized around composable units that each have a clear role in the final query, preventing the fragment spaghetti that makes other template systems unmaintainable.
 
 ### Caveats
 
-* sql-composer requires structuring your SQL so that shared logic lives in complete, self-contained statements which will need to be composed into larger queries. This is a different way of organizing SQL than the more common approach of copy-pasting fragments. It may take some experimentation to find the right balance of template granularity and composition for your codebase. Also, as always, a particular RDBMS engine and the evolving shape of the data will ultimately decide which of this code reuse remains viable over time.
+* sql-composer requires structuring your SQL so that shared logic lives in composable units (CTEs, subqueries, filters) that get assembled into larger queries. This is a different way of organizing SQL than the more common approach of copy-pasting fragments. It may take some experimentation to find the right balance of template granularity and composition for your codebase. Also, as always, a particular RDBMS engine and the evolving shape of the data will ultimately decide which of this code reuse remains viable over time.
 
 * This adds another layer of tooling and complexity to your SQL codebase. I am currently experimenting with a `sqlc_file!()` macro that could help somewhat mimic the amazing SQLx-style compile-time SQL errors that make life dramatically easier.
 
@@ -96,33 +96,34 @@ sqlc/
 # Used by: sets/select_set_parts.sqlc
 #          reports/insert_set_summary.sqlc
 #          inventory/update_spare_counts.sqlc
-WITH set_part_details AS (
-    SELECT
-        ip.part_num,
-        p.name AS part_name,
-        pc.name AS category_name,
-        c.name AS color_name,
-        c.rgb AS color_rgb,
-        c.is_trans,
-        ip.quantity,
-        ip.is_spare
-    FROM lego_inventory_parts ip
-    JOIN lego_inventories i ON i.id = ip.inventory_id
-    JOIN lego_parts p ON p.part_num = ip.part_num
-    JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-    JOIN lego_colors c ON c.id = ip.color_id
-    WHERE i.set_num = :bind(set_num)
-)
+#          shared/filtered_set_parts.sqlc
+SELECT
+    ip.part_num,
+    p.name AS part_name,
+    pc.name AS category_name,
+    c.name AS color_name,
+    c.rgb AS color_rgb,
+    c.is_trans,
+    ip.quantity,
+    ip.is_spare
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_parts p ON p.part_num = ip.part_num
+JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+JOIN lego_colors c ON c.id = ip.color_id
+WHERE i.set_num = :bind(set_num)
 ```
 
-This is a complete, valid SQL statement on its own (a CTE followed by nothing is valid in a `:compose()` context because it gets composed into a larger query). Every `#` comment is stripped from the output — the production SQL is clean.
+This is a complete, valid query. Callers compose it into a CTE — the `WITH ... AS (...)` wrapping lives in the calling template, not here. Every `#` comment is stripped from the output.
 
 #### [`sets/select_set_parts.sqlc`](examples/lego/sqlc/sets/select_set_parts.sqlc) — SELECT
 
 ```sql
 # List all parts for a set with full details.
-# Composes the shared part resolution CTE.
-:compose(shared/set_part_details.sqlc)
+# Composes the shared part resolution query into a CTE.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
 SELECT
     part_name,
     category_name,
@@ -140,7 +141,9 @@ ORDER BY category_name, part_name, color_name
 # Populate the per-category part count summary for a set.
 # Reuses the same part resolution as the detail query so counts
 # are always consistent with what the detail view shows.
-:compose(shared/set_part_details.sqlc)
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
 INSERT INTO set_category_summary (set_num, category_name, total_parts, total_spare)
 SELECT
     :bind(set_num),
@@ -157,7 +160,9 @@ GROUP BY category_name
 # Sync the spare part counts in inventory_tracking from the
 # canonical part resolution. When the DBA changes the join
 # logic in set_part_details, this UPDATE stays in sync.
-:compose(shared/set_part_details.sqlc)
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
 UPDATE inventory_tracking it
 SET
     spare_count = spd.total_spare,
@@ -182,8 +187,10 @@ Sometimes a shared template needs to vary one piece of its logic depending on th
 
 ```sql
 # Base query with a pluggable filter. The caller decides which filter to use.
-# Composes set_part_details as the first CTE, then adds filter as a sibling.
-:compose(shared/set_part_details.sqlc),
+# Composes set_part_details into a CTE, then adds filter as a sibling CTE.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+),
 filter AS (
     :compose(@filter)
 )
@@ -195,7 +202,7 @@ JOIN filter f ON f.part_num = p.part_num
 #### [`filters/by_color.sqlc`](examples/lego/sqlc/filters/by_color.sqlc) — a standalone filter query
 
 ```sql
-# Filter parts by color. Complete, valid SQL — can be tested independently.
+# Filter parts by color.
 SELECT part_num
 FROM lego_inventory_parts ip
 JOIN lego_colors c ON c.id = ip.color_id
@@ -419,7 +426,7 @@ WHERE category_name = :bind(category_name)
 ORDER BY quantity DESC
 ```
 
-Every `:compose()` target must be a complete, valid SQL statement. Compose references are resolved against the search paths added via `Composer::add_search_path()`. Circular references are detected and produce an error.
+Compose targets can be SQL fragments (like a CTE without a `SELECT`) — they just need to produce valid SQL when composed into the calling template. Compose references are resolved against the search paths added via `Composer::add_search_path()`. Circular references are detected and produce an error.
 
 #### Slot arguments
 

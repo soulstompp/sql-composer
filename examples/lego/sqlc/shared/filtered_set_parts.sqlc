@@ -1,6 +1,8 @@
 # Base query with a pluggable filter. The caller decides which filter to use.
-# Composes set_part_details as the first CTE, then adds filter as a sibling.
-:compose(shared/set_part_details.sqlc),
+# Composes set_part_details into a CTE, then adds filter as a sibling CTE.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+),
 filter AS (
     :compose(@filter)
 )

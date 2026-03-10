@@ -1,6 +1,8 @@
 # List all parts for a set with full details.
-# Composes the shared part resolution CTE.
-:compose(shared/set_part_details.sqlc)
+# Composes the shared part resolution query into a CTE.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
 SELECT
     part_name,
     category_name,

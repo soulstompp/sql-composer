@@ -78,6 +78,14 @@ struct ComposeArgs {
     /// Exits with code 1 if any files differ or are missing.
     #[arg(long)]
     verify: bool,
+
+    /// A view registry: every `CREATE VIEW <name> AS :define(<path>)` in this template makes
+    /// the composed SQL say `SELECT * FROM <name>` wherever <path> is composed, instead of
+    /// inlining it. `:define` is what puts a body where the name would otherwise go, so the
+    /// registry needs no exemption of its own, and a statement can give a relation a name for
+    /// its own duration by defining it in a `WITH` clause. Without this, everything inlines.
+    #[arg(long)]
+    views: Option<PathBuf>,
 }
 
 fn main() {
@@ -98,9 +106,13 @@ fn main() {
 fn compose_all(
     source_dir: &Path,
     dialect: Dialect,
+    views: Option<&Path>,
 ) -> Result<BTreeMap<PathBuf, String>, Box<dyn std::error::Error>> {
     let mut composer = Composer::new(dialect);
     composer.add_search_path(source_dir.to_path_buf());
+    if let Some(registry) = views {
+        composer.load_view_registry(registry)?;
+    }
 
     let mut results = BTreeMap::new();
 
@@ -145,7 +157,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
     }
 
-    let composed = compose_all(source_dir, dialect)?;
+    let composed = compose_all(source_dir, dialect, args.views.as_deref())?;
 
     if composed.is_empty() {
         println!("No .sqlc files found in {}", source_dir.display());
@@ -185,7 +197,11 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_path = tmp_dir.keep();
     std::fs::rename(&tmp_path, target_dir)?;
 
-    println!("Composed {} template(s) into {}", composed.len(), target_dir.display());
+    println!(
+        "Composed {} template(s) into {}",
+        composed.len(),
+        target_dir.display()
+    );
 
     if !args.skip_prepare {
         run_sqlx_prepare()?;

@@ -145,6 +145,28 @@ where
     .parse_next(input)
 }
 
+/// Parse a complete `:define(path, @slot = path, ...)` macro.
+///
+/// Assumes the `:define(` prefix has already been consumed. It is `:compose` with the target
+/// read as a definition, so the body is spliced in even where the template is named. A slot
+/// reference is not a definition of anything, so `:define(@slot)` parses as an ordinary compose.
+pub fn define<'i, Input, Error>(input: &mut Input) -> Result<ComposeRef, Error>
+where
+    Input: StreamIsPartial + Stream + Compare<&'i str>,
+    <Input as Stream>::Slice: AsBStr,
+    <Input as Stream>::Token: AsChar + Clone,
+    Error: ParserError<Input>,
+{
+    trace("define", move |input: &mut Input| {
+        let mut compose_ref = compose(input)?;
+        if let ComposeTarget::Path(path) = compose_ref.target {
+            compose_ref.target = ComposeTarget::Definition(path);
+        }
+        Ok(compose_ref)
+    })
+    .parse_next(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,10 +219,7 @@ mod tests {
         );
         assert_eq!(result.slots.len(), 1);
         assert_eq!(result.slots[0].name, "filter");
-        assert_eq!(
-            result.slots[0].path,
-            PathBuf::from("filters/by_color.sqlc")
-        );
+        assert_eq!(result.slots[0].path, PathBuf::from("filters/by_color.sqlc"));
     }
 
     #[test]
@@ -214,25 +233,16 @@ mod tests {
         );
         assert_eq!(result.slots.len(), 2);
         assert_eq!(result.slots[0].name, "source");
-        assert_eq!(
-            result.slots[0].path,
-            PathBuf::from("shared/details.sqlc")
-        );
+        assert_eq!(result.slots[0].path, PathBuf::from("shared/details.sqlc"));
         assert_eq!(result.slots[1].name, "filter");
-        assert_eq!(
-            result.slots[1].path,
-            PathBuf::from("filters/color.sqlc")
-        );
+        assert_eq!(result.slots[1].path, PathBuf::from("filters/color.sqlc"));
     }
 
     #[test]
     fn test_compose_slot_reference() {
         let mut input: TestInput = "@filter)";
         let result = compose::<_, ContextError>.parse_next(&mut input).unwrap();
-        assert_eq!(
-            result.target,
-            ComposeTarget::Slot("filter".into())
-        );
+        assert_eq!(result.target, ComposeTarget::Slot("filter".into()));
         assert!(result.slots.is_empty());
     }
 
@@ -240,10 +250,7 @@ mod tests {
     fn test_compose_slot_reference_with_assignments() {
         let mut input: TestInput = "@slot, @inner = some_file.sqlc)";
         let result = compose::<_, ContextError>.parse_next(&mut input).unwrap();
-        assert_eq!(
-            result.target,
-            ComposeTarget::Slot("slot".into())
-        );
+        assert_eq!(result.target, ComposeTarget::Slot("slot".into()));
         assert_eq!(result.slots.len(), 1);
         assert_eq!(result.slots[0].name, "inner");
         assert_eq!(result.slots[0].path, PathBuf::from("some_file.sqlc"));

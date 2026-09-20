@@ -61,6 +61,10 @@ pub enum ComposeTarget {
     Path(PathBuf),
     /// A slot reference (name without `@` prefix).
     Slot(String),
+    /// The definition of the template at this path, from `:define(path)`. It is composed inline
+    /// even where that template is named, because a definition is where the body goes, and the
+    /// name in front of it stands for the template everywhere under the one defining it.
+    Definition(PathBuf),
 }
 
 /// A slot assignment: `@name = path`.

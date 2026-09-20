@@ -1,7 +1,7 @@
 //! Top-level template parser that dispatches between macros and literal SQL.
 //!
 //! The key insight of this parser is that SQL is treated as opaque literal text.
-//! Only the `:bind(...)`, `:compose(...)`, `:count(...)`, and `:union(...)`
+//! Only the `:bind(...)`, `:compose(...)`, `:define(...)`, `:count(...)`, and `:union(...)`
 //! macros are parsed; everything else passes through unchanged.
 //!
 //! Lines or trailing portions beginning with `#` are template comments and are
@@ -17,11 +17,11 @@ use crate::types::Element;
 
 use super::bind::bind;
 use super::command::{command_body, command_kind};
-use super::compose::compose;
+use super::compose::{compose, define};
 
 /// Parse a single macro invocation after the `:` prefix.
 ///
-/// Tries `bind(`, `compose(`, `count(`, or `union(` in order.
+/// Tries `bind(`, `compose(`, `define(`, `count(`, or `union(` in order.
 fn macro_invocation<'i, Input, Error>(input: &mut Input) -> Result<Element, Error>
 where
     Input: StreamIsPartial + Stream + Compare<&'i str>,
@@ -36,6 +36,9 @@ where
             literal("bind(").flat_map(|_| bind).map(Element::Bind),
             literal("compose(")
                 .flat_map(|_| compose)
+                .map(Element::Compose),
+            literal("define(")
+                .flat_map(|_| define)
                 .map(Element::Compose),
             |input: &mut Input| {
                 let kind = command_kind(input)?;
@@ -72,6 +75,7 @@ where
                 let is_macro = alt((
                     literal::<_, Input, Error>("bind(").void(),
                     literal::<_, Input, Error>("compose(").void(),
+                    literal::<_, Input, Error>("define(").void(),
                     literal::<_, Input, Error>("count(").void(),
                     literal::<_, Input, Error>("union(").void(),
                 ))
@@ -384,10 +388,7 @@ mod tests {
         let mut input: TestInput = "SELECT @variable FROM t";
         let result = template::<_, ContextError>.parse_next(&mut input).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0],
-            Element::Sql("SELECT @variable FROM t".into())
-        );
+        assert_eq!(result[0], Element::Sql("SELECT @variable FROM t".into()));
     }
 
     #[test]

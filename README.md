@@ -353,7 +353,7 @@ Add `sql-composer` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sql-composer = "0.0.2"
+sql-composer = "0.0.4"
 ```
 
 Parse a template and compose it into final SQL:
@@ -504,8 +504,8 @@ Each driver crate wraps a database connection with a `ComposerConnection` (sync)
 
 ```toml
 [dependencies]
-sql-composer = "0.0.2"
-sql-composer-rusqlite = "0.0.2"
+sql-composer = "0.0.4"
+sql-composer-rusqlite = "0.0.4"
 ```
 
 ```rust,ignore
@@ -535,8 +535,8 @@ let _rows = stmt.query(refs.as_slice()).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.2"
-sql-composer-duckdb = "0.0.2"
+sql-composer = "0.0.4"
+sql-composer-duckdb = "0.0.4"
 ```
 
 ```rust,ignore
@@ -561,9 +561,9 @@ let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.2"
-sql-composer-postgres = "0.0.2"  # both sync and async enabled by default
-# sql-composer-postgres = { version = "0.0.2", default-features = false, features = ["async"] }
+sql-composer = "0.0.4"
+sql-composer-postgres = "0.0.4"  # both sync and async enabled by default
+# sql-composer-postgres = { version = "0.0.4", default-features = false, features = ["async"] }
 ```
 
 **Features:** `sync` (enables `postgres` crate), `async` (enables `tokio-postgres`). Both enabled by default.
@@ -599,9 +599,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer = "0.0.2"
-sql-composer-mysql = "0.0.2"  # both sync and async enabled by default
-# sql-composer-mysql = { version = "0.0.2", default-features = false, features = ["async"] }
+sql-composer = "0.0.4"
+sql-composer-mysql = "0.0.4"  # both sync and async enabled by default
+# sql-composer-mysql = { version = "0.0.4", default-features = false, features = ["async"] }
 ```
 
 **Features:** `sync` (enables `mysql` crate), `async` (enables `mysql_async`). Both enabled by default.
@@ -635,9 +635,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.0.2"                                        # postgres verification (default)
-# sql-composer-sqlx = { version = "0.0.2", features = ["validate"] } # add offline syntax checking
-# sql-composer-sqlx = { version = "0.0.2", features = ["mysql"] }    # mysql instead of postgres
+sql-composer-sqlx = "0.0.4"                                        # postgres verification (default)
+# sql-composer-sqlx = { version = "0.0.4", features = ["validate"] } # add offline syntax checking
+# sql-composer-sqlx = { version = "0.0.4", features = ["mysql"] }    # mysql instead of postgres
 ```
 
 **Features:** `postgres` (default, enables live verification against PostgreSQL), `mysql` (live verification against MySQL), `validate` (offline syntax checking via `sqlparser`).
@@ -682,7 +682,7 @@ The `sql-composer` core crate has the following optional features:
 
 ```toml
 # With serde support
-sql-composer = { version = "0.0.2", features = ["serde"] }
+sql-composer = { version = "0.0.4", features = ["serde"] }
 ```
 
 ## Core Types

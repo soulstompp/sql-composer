@@ -527,6 +527,16 @@ impl Composer {
         match command.kind {
             CommandKind::Union => self.emit_union_numbered(command, index_map, sql, visited),
             CommandKind::Count => self.emit_count_numbered(command, index_map, sql, visited),
+            CommandKind::Intersect => self.emit_set_operation_numbered(
+                command,
+                "INTERSECT",
+                "_intersect",
+                index_map,
+                sql,
+                visited,
+            ),
+            CommandKind::Except => self
+                .emit_set_operation_numbered(command, "EXCEPT", "_except", index_map, sql, visited),
         }
     }
 
@@ -608,6 +618,46 @@ impl Composer {
         }
 
         sql.push_str("\n) AS _count_sub");
+        Ok(())
+    }
+
+    /// Emit SQL for an INTERSECT or EXCEPT command using the global index map.
+    ///
+    /// Every source is its own derived table, and so is the whole. A source is text this
+    /// composer does not parse, so a source that is itself a union (or ends in an `ORDER BY`)
+    /// would otherwise regroup with this operator; and the whole is closed so that it composes
+    /// wherever a single query does, a `:union` member included.
+    fn emit_set_operation_numbered(
+        &self,
+        command: &Command,
+        keyword: &str,
+        alias: &str,
+        index_map: &BTreeMap<String, (usize, usize)>,
+        sql: &mut String,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<()> {
+        let operator = Self::set_operator(command, keyword)?;
+        let empty_slots = HashMap::new();
+
+        sql.push_str("SELECT * FROM (\n");
+        for (i, source) in command.sources.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(&format!("\n{operator}\n"));
+            }
+            sql.push_str("SELECT * FROM (\n");
+            if let Some(view) = self.view_reference(source)? {
+                sql.push_str(&format!("SELECT * FROM {view}"));
+            } else {
+                let resolved = self.find_template(source)?;
+                let template = parser::parse_template_file(&resolved)?;
+                self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
+            }
+            let trimmed = sql.trim_end().len();
+            sql.truncate(trimmed);
+            sql.push_str(&format!("\n) AS {alias}_{}", i + 1));
+        }
+        sql.push_str(&format!("\n) AS {alias}"));
+
         Ok(())
     }
 
@@ -773,6 +823,12 @@ impl Composer {
         match command.kind {
             CommandKind::Union => self.compose_union(command, visited),
             CommandKind::Count => self.compose_count(command, visited),
+            CommandKind::Intersect => {
+                self.compose_set_operation(command, "INTERSECT", "_intersect", visited)
+            }
+            CommandKind::Except => {
+                self.compose_set_operation(command, "EXCEPT", "_except", visited)
+            }
         }
     }
 
@@ -864,6 +920,70 @@ impl Composer {
         Ok(ComposedSql {
             sql,
             bind_params: inner.bind_params,
+        })
+    }
+
+    /// Compose an INTERSECT or EXCEPT command (positional path), wrapped as
+    /// [`Self::emit_set_operation_numbered`] wraps it and for the same reason.
+    fn compose_set_operation(
+        &self,
+        command: &Command,
+        keyword: &str,
+        alias: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<ComposedSql> {
+        let operator = Self::set_operator(command, keyword)?;
+        let empty_slots = HashMap::new();
+        let mut parts = Vec::new();
+        let mut all_params = Vec::new();
+
+        for (i, source) in command.sources.iter().enumerate() {
+            let body = match self.view_reference(source)? {
+                Some(view) => format!("SELECT * FROM {view}"),
+                None => {
+                    let resolved = self.find_template(source)?;
+                    let template = parser::parse_template_file(&resolved)?;
+                    let composed = self.compose_inner(&template, &empty_slots, visited)?;
+                    all_params.extend(composed.bind_params);
+                    composed.sql
+                }
+            };
+            parts.push(format!(
+                "SELECT * FROM (\n{}\n) AS {alias}_{}",
+                body.trim_end(),
+                i + 1
+            ));
+        }
+
+        let sql = format!(
+            "SELECT * FROM (\n{}\n) AS {alias}",
+            parts.join(&format!("\n{operator}\n"))
+        );
+
+        Ok(ComposedSql {
+            sql,
+            bind_params: all_params,
+        })
+    }
+
+    /// The operator an `:intersect` or `:except` command writes, with its modifier.
+    ///
+    /// A column list is refused rather than ignored: it names what `:count` counts, and a set
+    /// operation compares whole rows, so a list here could only be a caller expecting a
+    /// projection that would not happen.
+    fn set_operator(command: &Command, keyword: &str) -> Result<String> {
+        if command.columns.is_some() {
+            return Err(Error::Parse {
+                location: format!(":{}(...)", keyword.to_ascii_lowercase()),
+                message: format!("{keyword} compares whole rows and takes no `columns OF` list"),
+            });
+        }
+        Ok(if command.all {
+            format!("{keyword} ALL")
+        } else if command.distinct {
+            format!("{keyword} DISTINCT")
+        } else {
+            keyword.to_string()
         })
     }
 
@@ -1925,6 +2045,137 @@ mod tests {
         assert_eq!(
             composer.compose(&file_template(&dir, "named.sqlc")).unwrap().sql,
             composer.compose(&file_template(&dir, "defined.sqlc")).unwrap().sql
+        );
+    }
+
+    fn set_operation_fixture(dialect: Dialect) -> (TempDir, Composer) {
+        let dir = TempDir::new().unwrap();
+        write_temp_file(&dir, "a.sqlc", "SELECT id FROM a WHERE k = :bind(k)\n");
+        write_temp_file(&dir, "b.sqlc", "SELECT id FROM b");
+        write_temp_file(
+            &dir,
+            "c.sqlc",
+            "-- c's provenance\nSELECT id FROM c WHERE j = :bind(j)",
+        );
+        write_temp_file(&dir, "b_or_c.sqlc", ":union(b.sqlc, c.sqlc)");
+        let mut composer = Composer::new(dialect);
+        composer.add_search_path(dir.path().to_path_buf());
+        (dir, composer)
+    }
+
+    #[test]
+    fn test_intersect_wraps_every_source_and_the_whole() {
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "both.sqlc", ":intersect(a.sqlc, b.sqlc)");
+        let composed = composer.compose(&file_template(&dir, "both.sqlc")).unwrap();
+        assert_eq!(
+            composed.sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $1\n) AS _intersect_1\n\
+             INTERSECT\nSELECT * FROM (\nSELECT id FROM b\n) AS _intersect_2\n) AS _intersect"
+        );
+        assert_eq!(composed.bind_params, vec!["k"]);
+    }
+
+    #[test]
+    fn test_except_keeps_a_union_source_grouped() {
+        // Spliced bare, `a EXCEPT b UNION c` is `(a EXCEPT b) UNION c`: every row of c comes back.
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "neither.sqlc", ":except(a.sqlc, b_or_c.sqlc)");
+        let composed = composer
+            .compose(&file_template(&dir, "neither.sqlc"))
+            .unwrap();
+        assert_eq!(
+            composed.sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $2\n) AS _except_1\n\
+             EXCEPT\nSELECT * FROM (\nSELECT id FROM b\nUNION\n-- c's provenance\n\
+             SELECT id FROM c WHERE j = $1\n) AS _except_2\n) AS _except"
+        );
+        assert_eq!(composed.bind_params, vec!["j", "k"]);
+    }
+
+    #[test]
+    fn test_a_set_operation_is_closed_as_a_union_member() {
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "a_not_b.sqlc", ":except(a.sqlc, b.sqlc)");
+        write_temp_file(&dir, "either.sqlc", ":union(ALL a_not_b.sqlc, c.sqlc)");
+        let sql = composer
+            .compose(&file_template(&dir, "either.sqlc"))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $2\n) AS _except_1\n\
+             EXCEPT\nSELECT * FROM (\nSELECT id FROM b\n) AS _except_2\n) AS _except\n\
+             UNION ALL\n-- c's provenance\nSELECT id FROM c WHERE j = $1"
+        );
+    }
+
+    #[test]
+    fn test_set_operation_modifiers() {
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        for (template, operator) in [
+            (":except(ALL a.sqlc, b.sqlc)", "\nEXCEPT ALL\n"),
+            (":except(DISTINCT a.sqlc, b.sqlc)", "\nEXCEPT DISTINCT\n"),
+            (":intersect(ALL a.sqlc, b.sqlc)", "\nINTERSECT ALL\n"),
+            (
+                ":intersect(DISTINCT a.sqlc, b.sqlc)",
+                "\nINTERSECT DISTINCT\n",
+            ),
+        ] {
+            write_temp_file(&dir, "op.sqlc", template);
+            let sql = composer
+                .compose(&file_template(&dir, "op.sqlc"))
+                .unwrap()
+                .sql;
+            assert!(sql.contains(operator), "{template} composed to {sql}");
+        }
+    }
+
+    #[test]
+    fn test_set_operation_positional_matches_numbered_text() {
+        let (dir, postgres) = set_operation_fixture(Dialect::Postgres);
+        let mut mysql = Composer::new(Dialect::Mysql);
+        mysql.add_search_path(dir.path().to_path_buf());
+        write_temp_file(&dir, "neither.sqlc", ":except(a.sqlc, b_or_c.sqlc)");
+        let composed = mysql.compose(&file_template(&dir, "neither.sqlc")).unwrap();
+        // Document order: a's bind comes before c's.
+        assert_eq!(composed.bind_params, vec!["k", "j"]);
+
+        let numbered = postgres
+            .compose(&file_template(&dir, "neither.sqlc"))
+            .unwrap()
+            .sql;
+        assert_eq!(composed.sql, numbered.replace("$1", "?").replace("$2", "?"));
+    }
+
+    #[test]
+    fn test_set_operation_refuses_a_column_list() {
+        for dialect in [Dialect::Postgres, Dialect::Mysql] {
+            let (dir, composer) = set_operation_fixture(dialect);
+            write_temp_file(&dir, "cols.sqlc", ":except(id OF a.sqlc, b.sqlc)");
+            let err = composer
+                .compose(&file_template(&dir, "cols.sqlc"))
+                .unwrap_err();
+            assert!(
+                matches!(err, Error::Parse { .. }),
+                "{dialect:?}: expected a refusal, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_view_is_referenced_as_a_set_operation_source() {
+        let (dir, composer) = view_fixture();
+        write_temp_file(&dir, "other.sqlc", "SELECT 1 AS y");
+        write_temp_file(&dir, "rest.sqlc", ":except(grand.sqlc, other.sqlc)");
+        let sql = composer
+            .compose(&file_template(&dir, "rest.sqlc"))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM v.grand\n) AS _except_1\n\
+             EXCEPT\nSELECT * FROM (\nSELECT 1 AS y\n) AS _except_2\n) AS _except"
         );
     }
 }

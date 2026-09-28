@@ -471,6 +471,31 @@ Combine multiple template sources:
 :count(set_num, name OF queries/star_wars_sets.sqlc)
 ```
 
+### `:intersect(sources...)` and `:except(first, rest...)`
+
+The other two set operations:
+
+```sql
+-- Rows every source holds
+:intersect(queries/technic_sets.sqlc, queries/sets_since_2010.sqlc)
+
+-- Rows of the first source that no later source holds: the first is the minuend,
+-- so order matters, and :except(a, b, c) is a less everything in b or c
+:except(queries/technic_sets.sqlc, queries/city_sets.sqlc)
+
+-- With ALL (bag semantics) or DISTINCT modifiers, as for :union
+:except(ALL queries/technic_sets.sqlc, queries/city_sets.sqlc)
+```
+
+Each source is wrapped in a derived table (`SELECT * FROM (...) AS _except_1`), and so is the whole
+(`AS _except`). The composer does not parse the SQL it splices, and `INTERSECT` binds more tightly
+than `UNION` and `EXCEPT`. A source that is itself a union would otherwise regroup:
+`a EXCEPT b UNION c` means `(a EXCEPT b) UNION c`, which returns a plausible table and raises no
+error. Closing the whole also lets an `:intersect` or `:except` be a `:union` member.
+
+`:intersect` and `:except` take no `columns OF` list. They compare whole rows, so a list is refused
+rather than ignored. SQLite accepts neither `ALL` nor `DISTINCT` after `INTERSECT` or `EXCEPT`.
+
 ## Driver Crates
 
 Each driver crate wraps a database connection with a `ComposerConnection` (sync) or `ComposerConnectionAsync` (async) trait implementation that composes templates and resolves bind values in one step.
@@ -670,7 +695,7 @@ sql-composer = { version = "0.0.2", features = ["serde"] }
 | `ComposeRef` | A `:compose()` reference with optional slot arguments |
 | `ComposeTarget` | Path or slot reference (`@name`) in a compose target |
 | `SlotAssignment` | A `@name = path` slot binding in `:compose()` |
-| `Command` | A `:count()` or `:union()` combinator |
+| `Command` | A `:count()`, `:union()`, `:intersect()` or `:except()` combinator |
 | `Composer` | Transforms templates into final SQL with placeholders |
 | `ComposedSql` | The result: final SQL string + ordered bind param names |
 | `Dialect` | Target database: `Postgres`, `Mysql`, `Sqlite` |

@@ -1,8 +1,9 @@
 //! Top-level template parser that dispatches between macros and literal SQL.
 //!
 //! The key insight of this parser is that SQL is treated as opaque literal text.
-//! Only the `:bind(...)`, `:compose(...)`, `:define(...)`, `:count(...)`, and `:union(...)`
-//! macros are parsed; everything else passes through unchanged.
+//! Only the `:bind(...)`, `:compose(...)`, `:define(...)`, `:count(...)`, `:union(...)`,
+//! `:intersect(...)` and `:except(...)` macros are parsed; everything else passes through
+//! unchanged.
 //!
 //! Lines or trailing portions beginning with `#` are template comments and are
 //! silently stripped during parsing — they never appear in composed SQL output.
@@ -21,7 +22,8 @@ use super::compose::{compose, define};
 
 /// Parse a single macro invocation after the `:` prefix.
 ///
-/// Tries `bind(`, `compose(`, `define(`, `count(`, or `union(` in order.
+/// Tries `bind(`, `compose(`, `define(`, then the commands `count(`, `union(`, `intersect(` and
+/// `except(`, in order.
 fn macro_invocation<'i, Input, Error>(input: &mut Input) -> Result<Element, Error>
 where
     Input: StreamIsPartial + Stream + Compare<&'i str>,
@@ -78,6 +80,8 @@ where
                     literal::<_, Input, Error>("define(").void(),
                     literal::<_, Input, Error>("count(").void(),
                     literal::<_, Input, Error>("union(").void(),
+                    literal::<_, Input, Error>("intersect(").void(),
+                    literal::<_, Input, Error>("except(").void(),
                 ))
                 .parse_next(input)
                 .is_ok();

@@ -35,7 +35,7 @@ pub enum Element {
     Bind(Binding),
     /// `:compose(path)` - include another template.
     Compose(ComposeRef),
-    /// `:count(...)` or `:union(...)` - an aggregate command.
+    /// `:count(...)`, `:union(...)`, `:intersect(...)` or `:except(...)` - a command over sources.
     Command(Command),
 }
 
@@ -87,11 +87,11 @@ pub struct ComposeRef {
     pub slots: Vec<SlotAssignment>,
 }
 
-/// An aggregate command parsed from `:count(...)` or `:union(...)`.
+/// A command parsed from `:count(...)`, `:union(...)`, `:intersect(...)` or `:except(...)`.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Command {
-    /// The kind of command (count or union).
+    /// The kind of command.
     pub kind: CommandKind,
     /// Whether the DISTINCT modifier is present.
     pub distinct: bool,
@@ -111,6 +111,18 @@ pub enum CommandKind {
     Count,
     /// UNION command - combines sources with UNION.
     Union,
+    /// INTERSECT command - the rows every source holds.
+    ///
+    /// Each source is wrapped as its own derived table, and so is the whole, because `INTERSECT`
+    /// binds more tightly than `UNION` and `EXCEPT`: a source that is itself a union, spliced in
+    /// bare, would regroup, and the result would be a plausible table with no error.
+    Intersect,
+    /// EXCEPT command - the rows of the first source that no later source holds.
+    ///
+    /// The first source is the minuend and order matters: `:except(a, b, c)` is `a` less
+    /// everything in `b` or `c`. Sources are wrapped as for [`CommandKind::Intersect`], since a
+    /// union as a later source would otherwise be read as `(a EXCEPT b) UNION c`.
+    Except,
 }
 
 /// Target database dialect for placeholder syntax.

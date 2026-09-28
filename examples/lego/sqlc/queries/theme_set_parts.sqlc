@@ -1,8 +1,10 @@
-# All part numbers in inventories for sets of a given theme.
-# Used as a :count() source.
-SELECT ip.part_num
+# Every line of every inventory of every set in a theme scope (the theme and every theme below it),
+# one row per line, keyed by the line. Used as a :count() source.
+SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare
 FROM lego_inventory_parts ip
 JOIN lego_inventories i ON i.id = ip.inventory_id
 JOIN lego_sets s ON s.set_num = i.set_num
-JOIN lego_themes t ON t.id = s.theme_id
-WHERE t.name = :bind(theme_name)
+JOIN (
+    :compose(shared/theme_closure.sqlc)
+) tc ON tc.theme_id = s.theme_id
+WHERE tc.ancestor_id = :bind(theme_id)

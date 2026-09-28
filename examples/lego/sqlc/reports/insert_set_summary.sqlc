@@ -1,14 +1,25 @@
-# Populate the per-category part count summary for a set.
+# Populate the per-category part count summary for a set: one row per (set, version, category). A
+# set LEGO sold in several versions gets one summary per version, never a sum across them.
 # Reuses the same part resolution as the detail query so counts
 # are always consistent with what the detail view shows.
+#
+# A category with no spare lines gets a spare total of 0, and one with only spare lines gets a part
+# total of 0. A line with no category (its part is not in the catalogue) is not summarised here; the
+# parts listing shows it. Running it again replaces the version's summary rather than adding a
+# second copy.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 )
-INSERT INTO set_category_summary (set_num, category_name, total_parts, total_spare)
+INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
 SELECT
     :bind(set_num),
+    version,
     category_name,
-    SUM(quantity) FILTER (WHERE NOT is_spare),
-    SUM(quantity) FILTER (WHERE is_spare)
+    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0),
+    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0)
 FROM set_part_details
-GROUP BY category_name
+WHERE category_name IS NOT NULL
+GROUP BY version, category_name
+ON CONFLICT (set_num, version, category_name) DO UPDATE
+SET total_parts = EXCLUDED.total_parts,
+    total_spare = EXCLUDED.total_spare

@@ -1,0 +1,12 @@
+# The moulds (part numbers) used by any set in a theme scope: one row per part_num. The caller
+# decides the scope (the @scope slot): a scope is a set of theme ids, with one column, theme_id.
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        :compose(@scope)
+    ) sc
+)

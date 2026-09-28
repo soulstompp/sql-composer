@@ -1,6 +1,9 @@
-# Filter parts by category.
-SELECT ip.part_num
-FROM lego_inventory_parts ip
-JOIN lego_parts p ON p.part_num = ip.part_num
+# A part category, as filter patterns: (this part, any colour) for every part in the category. A
+# category belongs to the part, so the patterns come from the parts catalogue and not from any
+# inventory. A filter's contract is in shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
 JOIN lego_part_categories pc ON pc.id = p.part_cat_id
 WHERE pc.name = :bind(category_name)

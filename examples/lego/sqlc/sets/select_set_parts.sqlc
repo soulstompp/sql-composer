@@ -1,14 +1,20 @@
-# List all parts for a set with full details.
-# Composes the shared part resolution query into a CTE.
+# List all parts for a set with full details, one row per line, version by version.
+# Composes the shared part resolution query into a CTE. The ORDER BY ends on the line key, so the
+# order is total and a truncated listing is always the same rows.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 )
 SELECT
+    inventory_id,
+    version,
+    part_num,
+    color_id,
+    is_spare,
+    part_status,
     part_name,
     category_name,
     color_name,
     color_rgb,
-    quantity,
-    is_spare
+    quantity
 FROM set_part_details
-ORDER BY category_name, part_name, color_name
+ORDER BY version, inventory_id, category_name, part_name, color_name, part_num, color_id, is_spare

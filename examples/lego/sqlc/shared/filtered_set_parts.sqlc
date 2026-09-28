@@ -1,5 +1,8 @@
-# Base query with a pluggable filter. The caller decides which filter to use.
-# Composes set_part_details into a CTE, then adds filter as a sibling CTE.
+# A set's lines that match a filter. The caller decides which filter to use (the @filter slot).
+#
+# A filter returns patterns with two columns, part_num and color_id, in which NULL means "any
+# value". A line matches when some pattern agrees with it on every column the pattern names, and it
+# comes back once however many patterns it matches.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 ),
@@ -8,4 +11,9 @@ filter AS (
 )
 SELECT p.*
 FROM set_part_details p
-JOIN filter f ON f.part_num = p.part_num
+WHERE EXISTS (
+    SELECT 1
+    FROM filter f
+    WHERE (f.part_num IS NULL OR f.part_num = p.part_num)
+      AND (f.color_id IS NULL OR f.color_id = p.color_id)
+)

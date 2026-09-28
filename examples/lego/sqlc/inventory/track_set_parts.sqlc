@@ -1,0 +1,10 @@
+# Start tracking a set: one inventory_tracking row per (set, version, part) that the set's
+# inventories hold, with a spare count of 0 until the spare counts are synced. A part already
+# tracked is left as it is.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+INSERT INTO inventory_tracking (set_num, version, part_num)
+SELECT DISTINCT :bind(set_num), version, part_num
+FROM set_part_details
+ON CONFLICT (set_num, version, part_num) DO NOTHING

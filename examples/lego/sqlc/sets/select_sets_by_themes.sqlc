@@ -1,5 +1,6 @@
-# Find sets matching any of the given theme IDs.
-# Demonstrates multi-value :bind() for IN clauses.
+# Find sets in any of the given theme scopes: each given theme and every theme below it. One row per
+# set, however many of the given scopes contain it. The ORDER BY ends on set_num, so the order is
+# total. Demonstrates a multi-value bind for an IN clause.
 SELECT
     s.set_num,
     s.name,
@@ -8,6 +9,13 @@ SELECT
     s.num_parts
 FROM lego_sets s
 JOIN lego_themes t ON t.id = s.theme_id
-WHERE s.theme_id IN (:bind(theme_ids EXPECTING 1..20))
+WHERE EXISTS (
+    SELECT 1
+    FROM (
+        :compose(shared/theme_closure.sqlc)
+    ) tc
+    WHERE tc.theme_id = s.theme_id
+      AND tc.ancestor_id IN (:bind(theme_ids EXPECTING 1..20))
+)
   AND s.year >= :bind(min_year)
-ORDER BY s.year DESC, s.num_parts DESC
+ORDER BY s.year DESC, s.num_parts DESC, s.set_num

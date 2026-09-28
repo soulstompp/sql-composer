@@ -1,0 +1,3 @@
+# The moulds City sets use and no Technic set does: one row per part_num.
+# Demonstrates :except(); the first source is the one subtracted from.
+:except(queries/city_moulds.sqlc, queries/technic_moulds.sqlc)

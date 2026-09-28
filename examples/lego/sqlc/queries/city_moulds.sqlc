@@ -1,0 +1,2 @@
+# The moulds used by any City set: one row per part_num.
+:compose(shared/scope_moulds.sqlc, @scope = scopes/city.sqlc)

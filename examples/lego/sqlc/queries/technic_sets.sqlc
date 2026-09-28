@@ -1,6 +1,14 @@
-# Technic sets — standalone query, also used as a :union() source.
-SELECT s.set_num, s.name, s.year, s.num_parts, 'Technic' AS theme_group
+# Technic sets: every set in the Technic scope (scopes/technic.sqlc) released in min_year or later,
+# one row per set. The scope's name is read from the themes table by the scope's own id, so the label
+# can never disagree with the scope that chose the rows.
+# Standalone query, also used as a :union() source.
+SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
 FROM lego_sets s
-JOIN lego_themes t ON t.id = s.theme_id
-WHERE t.name = :bind(technic_theme)
+JOIN lego_themes scope ON scope.id = :bind(technic_theme_id)
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        :compose(scopes/technic.sqlc)
+    ) sc
+)
   AND s.year >= :bind(min_year)

@@ -66,6 +66,17 @@ pub enum Error {
         /// The name of the missing slot.
         name: String,
     },
+
+    /// A template registered as a view takes an argument, which a view cannot.
+    #[error("{path} is registered as the view {view} and {reason}")]
+    ViewTakesArguments {
+        /// The registered template.
+        path: PathBuf,
+        /// The view it was registered as.
+        view: String,
+        /// What it takes: a bound parameter or an open slot.
+        reason: String,
+    },
 }
 
 /// A specialized `Result` type for sql-composer operations.

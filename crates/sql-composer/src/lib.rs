@@ -6,6 +6,8 @@
 //! - `:compose(path)` — include another template
 //! - `:count(sources...)` — count aggregate
 //! - `:union(sources...)` — union combinator
+//! - `:intersect(sources...)` — the rows every source holds
+//! - `:except(first, rest...)` — the rows of the first source that no other source holds
 //!
 //! SQL text is treated as opaque literals and passed through unchanged.
 //! Only the macro syntax is parsed.

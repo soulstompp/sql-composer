@@ -1,0 +1,17 @@
+# Every theme paired with every theme at or below it: one row per (ancestor_id, theme_id), each
+# theme its own ancestor at depth 0. A theme scope is a theme's whole subtree, so a scope joins this
+# relation on theme_id and picks its ancestor_id. It never matches one theme id alone, and never a
+# name, which several themes can share.
+# The CYCLE clause guarantees the walk ends even if a parent_id ever pointed back into its own
+# subtree; such a theme would be marked, and left out.
+WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
+    SELECT t.id, t.id, 0
+    FROM lego_themes t
+  UNION ALL
+    SELECT c.ancestor_id, t.id, c.depth + 1
+    FROM lego_themes t
+    JOIN closure c ON t.parent_id = c.theme_id
+) CYCLE theme_id SET in_cycle USING walked
+SELECT ancestor_id, theme_id, depth
+FROM closure
+WHERE NOT in_cycle

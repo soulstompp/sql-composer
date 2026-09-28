@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.4
+
+### sql-composer
+
+- **`:intersect(sources...)` and `:except(first, rest...)`** — The other two set operations, with the `ALL` and `DISTINCT` modifiers `:union` takes. `:except(a, b, c)` is `a` less everything in `b` or `c`. Every source, and the whole, is wrapped as a derived table, so a source that is itself a union keeps its grouping and either can be a `:union` member. A `columns OF` list is refused.
+- **`:define(path)`** — Composes a template's body even where that template is named. The name in front of `AS` stands for it everywhere under the template that defines it, so a statement can name its relations once in a `WITH` clause.
+- **View registry** — `Composer::add_view` and `Composer::load_view_registry` make the composer write `SELECT * FROM <name>` wherever a registered template is composed, instead of inlining it. A registry is a template of `CREATE VIEW <name> AS :define(<path>)` statements. A registered template that binds a parameter or leaves a slot open is refused.
+
+### cargo-sqlc
+
+- **`--views <registry>`** — `cargo sqlc compose` composes with a view registry.
+
+### examples
+
+- **Lego example reworked** — A set's parts are listed version by version, and the summary and tracking tables keep versions apart. Theme scopes are a theme and every theme below it, chosen by id; colour and category filters are `(part_num, color_id)` patterns; bind values match parameters by name. New subcommands `shared-moulds` (`:intersect`), `city-only-moulds` (`:except`) and `laws`, which checks each promise against the same answer computed directly in SQL.
+
+### All crates
+
+- Version bump to 0.0.4.
+
 ## 0.0.3
 
 ### sql-composer

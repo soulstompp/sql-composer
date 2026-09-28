@@ -1,0 +1,6 @@
+# The City scope: the theme city_theme_id and every theme below it, one row per theme_id.
+SELECT tc.theme_id
+FROM (
+    :compose(shared/theme_closure.sqlc)
+) tc
+WHERE tc.ancestor_id = :bind(city_theme_id)

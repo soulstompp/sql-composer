@@ -1,5 +1,10 @@
-# Canonical resolution of full part details for a given set.
-# Joins inventory_parts -> inventories, parts, part_categories, colors.
+# What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
+# line (inventory_id, part_num, color_id, is_spare). A set LEGO sold in more than one version has
+# one inventory per version, and each line carries its version. Nothing here adds two versions
+# together: a caller that totals a set totals it per version.
+#
+# A line is never dropped for what the catalogue lacks. A line whose part is not in the parts
+# catalogue keeps its row, with part_status 'uncatalogued' and no part name or category.
 #
 # This query is the single source of truth for "what parts are in a set."
 # If the DBA asks you to change join order or add a filter, change it here
@@ -7,20 +12,25 @@
 #
 # Used by: sets/select_set_parts.sqlc
 #          reports/insert_set_summary.sqlc
+#          inventory/track_set_parts.sqlc
 #          inventory/update_spare_counts.sqlc
 #          shared/filtered_set_parts.sqlc
 SELECT
+    ip.inventory_id,
+    i.version,
     ip.part_num,
+    ip.color_id,
+    ip.is_spare,
+    ip.quantity,
+    CASE WHEN p.part_num IS NULL THEN 'uncatalogued' ELSE 'catalogued' END AS part_status,
     p.name AS part_name,
     pc.name AS category_name,
     c.name AS color_name,
     c.rgb AS color_rgb,
-    c.is_trans,
-    ip.quantity,
-    ip.is_spare
+    c.is_trans
 FROM lego_inventory_parts ip
 JOIN lego_inventories i ON i.id = ip.inventory_id
-JOIN lego_parts p ON p.part_num = ip.part_num
-JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-JOIN lego_colors c ON c.id = ip.color_id
+LEFT JOIN lego_parts p ON p.part_num = ip.part_num
+LEFT JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+LEFT JOIN lego_colors c ON c.id = ip.color_id
 WHERE i.set_num = :bind(set_num)

@@ -1,4 +1,4 @@
-//! Parser for `:count(...)` and `:union(...)` command macros.
+//! Parser for `:count(...)`, `:union(...)`, `:intersect(...)` and `:except(...)` command macros.
 
 use std::path::PathBuf;
 
@@ -126,7 +126,7 @@ where
 
 /// Parse the command kind from the prefix keyword.
 ///
-/// This parses `count(` or `union(` and returns the command kind.
+/// This parses `count(`, `union(`, `intersect(` or `except(` and returns the command kind.
 pub fn command_kind<'i, Input, Error>(input: &mut Input) -> Result<CommandKind, Error>
 where
     Input: StreamIsPartial + Stream + Compare<&'i str>,
@@ -138,13 +138,15 @@ where
         alt((
             literal("count(").map(|_| CommandKind::Count),
             literal("union(").map(|_| CommandKind::Union),
+            literal("intersect(").map(|_| CommandKind::Intersect),
+            literal("except(").map(|_| CommandKind::Except),
         ))
         .parse_next(input)
     })
     .parse_next(input)
 }
 
-/// Parse the body of a command after `count(` or `union(` has been consumed.
+/// Parse the body of a command after its `kind(` prefix has been consumed.
 ///
 /// Grammar: `[DISTINCT] [ALL] [columns OF] source1[, source2, ...] )`
 pub fn command_body<'i, Input, Error>(
@@ -257,6 +259,41 @@ mod tests {
         let result = command_body::<_, ContextError>(&mut input, kind).unwrap();
         assert!(!result.distinct);
         assert!(result.all);
+    }
+
+    #[test]
+    fn test_command_kind_intersect_and_except() {
+        let mut input: TestInput = "intersect(";
+        let result = command_kind::<_, ContextError>
+            .parse_next(&mut input)
+            .unwrap();
+        assert_eq!(result, CommandKind::Intersect);
+
+        let mut input: TestInput = "except(";
+        let result = command_kind::<_, ContextError>
+            .parse_next(&mut input)
+            .unwrap();
+        assert_eq!(result, CommandKind::Except);
+    }
+
+    #[test]
+    fn test_command_except_keeps_its_sources_in_order() {
+        let mut input: TestInput = "except(ALL whole.sqlc, part_a.sqlc, part_b.sqlc)";
+        let kind = command_kind::<_, ContextError>
+            .parse_next(&mut input)
+            .unwrap();
+        let result = command_body::<_, ContextError>(&mut input, kind).unwrap();
+        assert_eq!(result.kind, CommandKind::Except);
+        assert!(result.all);
+        assert!(!result.distinct);
+        assert_eq!(
+            result.sources,
+            vec![
+                PathBuf::from("whole.sqlc"),
+                PathBuf::from("part_a.sqlc"),
+                PathBuf::from("part_b.sqlc")
+            ]
+        );
     }
 
     #[test]

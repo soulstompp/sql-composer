@@ -1,8 +1,8 @@
 //! winnow 0.7 parsers for sql-composer template macros.
 //!
 //! The parser treats SQL text as opaque literals and only recognizes the
-//! template macro syntax: `:bind(...)`, `:compose(...)`, `:count(...)`,
-//! and `:union(...)`.
+//! template macro syntax: `:bind(...)`, `:compose(...)`, `:define(...)`, `:count(...)`,
+//! `:union(...)`, `:intersect(...)` and `:except(...)`.
 
 pub mod bind;
 pub mod command;

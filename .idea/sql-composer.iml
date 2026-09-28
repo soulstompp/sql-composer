@@ -9,6 +9,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-rusqlite/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer-sqlx/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/sql-composer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/lego/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -162,6 +162,36 @@ pub struct Catalogue {
     pub part_pool: Vec<String>,
 }
 
+/// The eight real tables `Catalogue::read` reads.
+pub const TABLES: [&str; 8] = [
+    "lego_colors",
+    "lego_themes",
+    "lego_part_categories",
+    "lego_parts",
+    "lego_sets",
+    "lego_inventories",
+    "lego_inventory_parts",
+    "lego_inventory_sets",
+];
+
+/// The real tables `schema` does not hold, in the order of `TABLES`.
+pub async fn missing(
+    conn: &mut PgConnection,
+    schema: &str,
+) -> Result<Vec<&'static str>, sqlx::Error> {
+    let mut absent = Vec::new();
+    for t in TABLES {
+        let found: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(format!("{schema}.{t}"))
+            .fetch_one(&mut *conn)
+            .await?;
+        if found.is_none() {
+            absent.push(t);
+        }
+    }
+    Ok(absent)
+}
+
 impl Catalogue {
     /// Reads the eight real tables from `schema`.
     pub async fn read(pool: &mut PgConnection, schema: &str) -> Result<Catalogue, sqlx::Error> {

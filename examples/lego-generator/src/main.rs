@@ -182,6 +182,18 @@ struct Cli {
     upto_phase: Option<usize>,
 }
 
+/// Whether two schema names, as written on the command line, name the same schema: an unquoted
+/// name folds to lower case, as Postgres folds it, and a quoted one keeps its case.
+fn same_schema(a: &str, b: &str) -> bool {
+    fn folded(s: &str) -> String {
+        match s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+            Some(quoted) => quoted.replace("\"\"", "\""),
+            None => s.to_ascii_lowercase(),
+        }
+    }
+    folded(a) == folded(b)
+}
+
 fn on(s: &str) -> Result<bool, String> {
     match s {
         "on" | "true" => Ok(true),
@@ -223,6 +235,13 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<(), String> {
     let wall = Instant::now();
+    if same_schema(&cli.schema, &cli.source_schema) {
+        return Err(format!(
+            "--schema {} names the --source-schema: the target schema is dropped and recreated, \
+             and the source schema holds the real catalogue",
+            cli.schema
+        ));
+    }
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let settings = Settings {
         schema: cli.schema.clone(),
@@ -259,6 +278,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
+        let absent = catalogue::missing(&mut conn, &cli.source_schema)
+            .await
+            .map_err(|e| format!("reading {}: {e}", cli.source_schema))?;
+        if !absent.is_empty() {
+            return Err(format!(
+                "schema {} of this database does not hold the real catalogue (missing: {}). Load \
+                 it with `cargo run -p lego-example -- --database-url <the same URL> setup`, which \
+                 needs psql on the PATH, or name the schema that holds it with --source-schema",
+                cli.source_schema,
+                absent.join(", ")
+            ));
+        }
         let cat = Catalogue::read(&mut conn, &cli.source_schema)
             .await
             .map_err(|e| format!("reading {}: {e}", cli.source_schema))?;

@@ -1,0 +1,21 @@
+[package]
+name = "lego-generator"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Generates a large LEGO catalogue, with builders' collections and purchase logs, and loads it into Postgres in hierarchical batches"
+
+[[bin]]
+name = "lego-generator"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+log = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+# The IANA time zone database, bundled, so every machine reads the same offset history.
+jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }

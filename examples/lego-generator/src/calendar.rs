@@ -73,6 +73,18 @@ pub const ZONE_NAMES: [&str; 8] = [
     "Asia/Kolkata",
 ];
 
+/// Each home zone's country, by its ISO 3166 code, as the IANA database's `zone.tab` gives it.
+pub const ZONE_COUNTRIES: [(&str, &str); 8] = [
+    ("Europe/Lisbon", "PT"),
+    ("Europe/Copenhagen", "DK"),
+    ("America/New_York", "US"),
+    ("Australia/Sydney", "AU"),
+    ("Europe/London", "GB"),
+    ("Asia/Tokyo", "JP"),
+    ("America/Los_Angeles", "US"),
+    ("Asia/Kolkata", "IN"),
+];
+
 /// A builder's home zone: its IANA name and its offset history, from the bundled database.
 #[derive(Clone, Debug)]
 pub struct Zone {

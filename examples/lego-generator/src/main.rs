@@ -11,6 +11,7 @@ mod catalogue;
 mod demand;
 mod encode;
 mod load;
+mod oo;
 mod rng;
 mod switchboard;
 mod text;
@@ -176,6 +177,10 @@ struct Cli {
     /// Generate and encode every wave, write nothing.
     #[arg(long)]
     dry_run: bool,
+    /// Also build the object-oriented tables in this schema, which is dropped and recreated: the
+    /// generated sets, colours and builders, each decomposed by kind with table inheritance.
+    #[arg(long)]
+    oo_schema: Option<String>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
     /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
     #[arg(long)]
@@ -241,6 +246,14 @@ async fn run(cli: Cli) -> Result<(), String> {
              and the source schema holds the real catalogue",
             cli.schema
         ));
+    }
+    if let Some(oo) = &cli.oo_schema {
+        if same_schema(oo, &cli.schema) || same_schema(oo, &cli.source_schema) {
+            return Err(format!(
+                "--oo-schema {oo} names the --schema or the --source-schema: the object-oriented \
+                 schema is dropped and recreated"
+            ));
+        }
     }
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let settings = Settings {
@@ -469,6 +482,10 @@ async fn run(cli: Cli) -> Result<(), String> {
             "autovacuum_during_load".into(),
             cli.autovacuum_during_load.clone(),
         ),
+        (
+            "oo_schema".into(),
+            cli.oo_schema.clone().unwrap_or_default(),
+        ),
     ];
     for d in DECLS {
         let planted = world
@@ -654,6 +671,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
 
     let mut steps = Vec::new();
+    let mut oo_rows = Vec::new();
     if !cli.dry_run {
         let mut conn = load::build_session(&cli.database_url, &settings)
             .await
@@ -661,11 +679,19 @@ async fn run(cli: Cli) -> Result<(), String> {
         steps = load::finish(&mut conn, &settings)
             .await
             .map_err(|e| format!("finish: {e}"))?;
+        if let Some(oo) = &cli.oo_schema {
+            let built = oo::build(&mut conn, &cli.schema, oo).await?;
+            steps.extend(built.steps);
+            oo_rows = built.rows;
+        }
     }
 
     // The summary.
     for (step, d) in &steps {
         summary(&[&"step", step, &format!("{:.3}", d.as_secs_f64())]);
+    }
+    for (class, rows) in &oo_rows {
+        summary(&[&"oo", class, rows]);
     }
     {
         let levels = metrics.levels.lock().expect("metrics lock");

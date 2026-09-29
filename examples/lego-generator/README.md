@@ -118,6 +118,55 @@ the buying (the sets on sale, the share bought at least once, and the purchases 
 most bought first), the WAL written and each table's final size. The same configuration is written to the table
 `generator_run`.
 
+## Object-oriented tables
+
+`--oo-schema <name>` also builds the generated sets, colours and builders as class hierarchies, with
+PostgreSQL's table inheritance, in a schema of their own. That schema is dropped and recreated, and
+may not name `--schema` or `--source-schema`. Each hierarchy's root table keeps the generated
+table's name and columns. The rows are the generated rows, unchanged, and each is written to the
+table of its most specific class. Every class's CHECK reads the row's own columns:
+
+- **Sets, by the root theme of their theme:**
+  - `licensed`, holding the licensed sets, with `star_wars` under it;
+  - `in_house`, holding every other set, with:
+    - `classic_play` over `town`, `space`, `castle` and `pirates`;
+    - `technic`, with `technic_star_wars` under it;
+    - `star_wars_elsewhere`.
+  - `star_wars_all` is a second parent of the three Star Wars classes, so a Star Wars set is also a
+    licensed, a Technic or an in-house set. A set with no theme is in `in_house`.
+- **Colours, by hue:**
+  - `neutral` holds the colours whose channels differ by less than 32, which have no hue to speak
+    of;
+  - `primary` (red, green, blue), `secondary` (yellow, cyan, magenta) and `tertiary` (orange,
+    chartreuse, spring green, azure, violet, rose) hold the rest, a class per hue.
+  - The hue is `<schema>.colour_wheel(rgb)`: the place on a twelve-hue wheel, counted from red, each
+    place thirty degrees. A colour's class follows its `rgb`, not its name.
+- **Builders, by the country of their home zone,** from the IANA database's `zone.tab`. A country
+  with two home zones (the United States) has a class per zone under it.
+
+Each class has the generated table's primary key, and is vacuumed and analysed. Read a hierarchy
+through its root, with the generated schema behind it for the other tables:
+
+```sql
+SET search_path = lego_oo, lego;
+SELECT count(*) FROM lego_sets WHERE theme_id = 158;                  -- the Star Wars classes only
+SELECT count(*) FROM lego_colors WHERE lego_oo.colour_wheel(rgb) = 0;  -- the red class
+```
+
+A query that names a class's own condition, such as a theme, a zone or a wheel place, reads only
+the classes that can hold it. The planner leaves out the others, as long as the value is a constant
+when the statement is planned.
+
+After the build, a certificate reads every class's CHECKs back from the catalogue and checks four
+things. The build fails if any does not hold:
+
+- each hierarchy holds exactly the generated table's rows;
+- every row satisfying a class's CHECKs lies in that class or below it;
+- every row of a class satisfies its CHECKs;
+- a class meant to hold no rows of its own holds none.
+
+The `SUMMARY oo` lines give the rows each class holds of its own.
+
 ## Tests
 
 ```sh

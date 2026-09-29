@@ -13,12 +13,17 @@ which is dropped and recreated on every run.
 ## Running
 
 The real catalogue comes from the LEGO example's `setup`, which loads it into `public` of the
-database it names. From the repository root:
+database it names. Name the same database in both commands. From the repository root:
 
 ```sh
-cargo run -p lego-example -- setup
+cargo run -p lego-example -- --database-url postgres://localhost:5432/sqlc_lego setup
 cargo run --release -p lego-generator -- --database-url postgres://localhost:5432/sqlc_lego --size small
 ```
+
+`setup` needs `psql` on the `PATH`, and ends with "Setup complete!". It creates the database before
+it loads the catalogue, so a `setup` that stops early leaves an empty database behind. The generator
+checks for the eight tables before it reads anything, and names the ones it cannot find.
+`--schema` may not name the `--source-schema`: the target schema is dropped and recreated.
 
 `--size small|medium|huge` names a number of synthesized sets; `--sets N` sets it directly and wins.
 The default is `huge`. Everything else scales with it: builders, collection rows and purchases

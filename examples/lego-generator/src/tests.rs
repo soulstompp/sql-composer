@@ -872,3 +872,12 @@ fn a_twin_record_is_classified_like_any_set() {
         "no seed put a twin in a decade's first year"
     );
 }
+
+#[test]
+fn a_target_schema_is_refused_when_it_names_the_source_schema() {
+    assert!(crate::same_schema("public", "public"));
+    assert!(crate::same_schema("Public", "public"));
+    assert!(crate::same_schema("\"public\"", "PUBLIC"));
+    assert!(!crate::same_schema("\"Public\"", "public"));
+    assert!(!crate::same_schema("lego", "public"));
+}

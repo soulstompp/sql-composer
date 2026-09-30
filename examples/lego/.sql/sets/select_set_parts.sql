@@ -33,4 +33,12 @@ SELECT
     color_rgb,
     quantity
 FROM set_part_details
-ORDER BY version, inventory_id, category_name, part_name, color_name, part_num, color_id, is_spare
+ORDER BY
+    version,
+    inventory_id,
+    category_name IS NULL, category_name,
+    part_name IS NULL, part_name,
+    color_name IS NULL, color_name,
+    part_num,
+    color_id,
+    is_spare

@@ -26,4 +26,4 @@ WHERE NOT in_cycle
       AND tc.ancestor_id IN ($2)
 )
   AND s.year >= $1
-ORDER BY s.year DESC, s.num_parts DESC, s.set_num
+ORDER BY s.year DESC, s.num_parts IS NULL DESC, s.num_parts DESC, s.set_num

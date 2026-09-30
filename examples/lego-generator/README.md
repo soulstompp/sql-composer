@@ -106,7 +106,9 @@ offset history from the IANA time zone database bundled into the binary, from 19
 
 The row names the set it holds by its number, `set_num`, and the set's name is the sets' own. Where
 the builder typed the set's number or name their own way (traps K1, K2, K3 and K5), the row also
-keeps what they typed, in `typed_set_num` or `typed_name`; on every other row both are NULL.
+keeps what they typed, in `typed_set_num` or `typed_name`; on every other row both are NULL. Each
+copy the row holds is one purchase, which names the row by `(builder_id, row_no)`: the copies are
+counted from the purchases, and a purchase reaches its set through its row.
 
 ## Traps
 

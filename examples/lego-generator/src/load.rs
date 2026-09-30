@@ -73,8 +73,8 @@ pub const TABLES: [TableDef; 13] = [
     TableDef { name: "lego_inventory_parts", columns: "inventory_id, part_num, color_id, quantity, is_spare", typed: "inventory_id integer NOT NULL, part_num varchar(255) NOT NULL, color_id integer NOT NULL, quantity integer NOT NULL, is_spare boolean NOT NULL", key: None },
     TableDef { name: "lego_inventory_sets", columns: "inventory_id, set_num, quantity", typed: "inventory_id integer NOT NULL, set_num varchar(255) NOT NULL, quantity integer NOT NULL", key: None },
     TableDef { name: "lego_builders", columns: "builder_id, name, home_zone", typed: "builder_id integer NOT NULL, name varchar(255) NOT NULL, home_zone varchar(64) NOT NULL", key: Some("builder_id") },
-    TableDef { name: "lego_collection", columns: "builder_id, row_no, set_num, typed_set_num, typed_name, quantity", typed: "builder_id integer NOT NULL, row_no integer NOT NULL, set_num varchar(255) NOT NULL, typed_set_num varchar(255), typed_name varchar(255), quantity integer NOT NULL", key: Some("builder_id, row_no") },
-    TableDef { name: "lego_purchases", columns: "purchase_id, builder_id, row_no, set_num, store, ordered_at, ordered_local, delivered_at", typed: "purchase_id bigint NOT NULL, builder_id integer NOT NULL, row_no integer NOT NULL, set_num varchar(255) NOT NULL, store varchar(64) NOT NULL, ordered_at timestamptz NOT NULL, ordered_local varchar(32) NOT NULL, delivered_at timestamptz", key: Some("purchase_id") },
+    TableDef { name: "lego_collection", columns: "builder_id, row_no, set_num, typed_set_num, typed_name", typed: "builder_id integer NOT NULL, row_no integer NOT NULL, set_num varchar(255) NOT NULL, typed_set_num varchar(255), typed_name varchar(255)", key: Some("builder_id, row_no") },
+    TableDef { name: "lego_purchases", columns: "purchase_id, builder_id, row_no, store, ordered_at, ordered_local, delivered_at", typed: "purchase_id bigint NOT NULL, builder_id integer NOT NULL, row_no integer NOT NULL, store varchar(64) NOT NULL, ordered_at timestamptz NOT NULL, ordered_local varchar(32) NOT NULL, delivered_at timestamptz", key: Some("purchase_id") },
     TableDef { name: "trap_manifest", columns: "trap, origin, tbl, row_key, phase, wave, socket, detail", typed: "trap varchar(8) NOT NULL, origin varchar(16) NOT NULL, tbl varchar(64) NOT NULL, row_key text NOT NULL, phase varchar(32) NOT NULL, wave bigint NOT NULL, socket varchar(32), detail text NOT NULL", key: None },
     TableDef { name: "generator_run", columns: "key, value", typed: "key text NOT NULL, value text NOT NULL", key: Some("key") },
 ];
@@ -88,8 +88,8 @@ pub const STRANDS: [(&str, &str); 8] = [
     ("lego_inventory_sets", "inventory_id, set_num"),
     ("lego_inventory_parts", "inventory_id, part_num, color_id"),
     ("lego_parts", "part_cat_id, part_num"),
-    ("lego_purchases", "set_num, builder_id"),
-    ("lego_collection", "set_num, builder_id"),
+    ("lego_purchases", "builder_id, row_no"),
+    ("lego_collection", "set_num, builder_id, row_no"),
 ];
 
 /// The name of a strand's index on `table` over `columns`.

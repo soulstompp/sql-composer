@@ -810,11 +810,19 @@ fn buying_reaches_almost_every_set_skewed_and_within_each_timeline() {
     assert!(once > 0.9, "{once} of the sets on sale bought");
     assert!((0.4..0.7).contains(&top_share), "top tenth {top_share}");
 
+    // A purchase's set is its collection row's.
+    let row_set: HashMap<(i32, i32), &str> = e
+        .builders
+        .iter()
+        .flat_map(|x| x.collection.iter())
+        .map(|c| ((c.builder_id, c.row_no), c.set_num.as_str()))
+        .collect();
+    let set_of = |p: &world::PurchaseOut| row_set[&(p.builder_id, p.row_no)];
     let today = calendar::days_from_civil(world::TODAY.0, world::TODAY.1, world::TODAY.2);
     let mut read = 0;
     for p in e.builders.iter().flat_map(|x| x.purchases.iter()) {
         let (Some(&s), Stamp::At { t, offset_min }) =
-            (w.real.set_by_num.get(&p.set_num), p.ordered_at)
+            (w.real.set_by_num.get(set_of(p)), p.ordered_at)
         else {
             continue;
         };
@@ -847,7 +855,7 @@ fn buying_reaches_almost_every_set_skewed_and_within_each_timeline() {
         .builders
         .iter()
         .flat_map(|x| x.purchases.iter())
-        .filter(|p| twins.contains(&p.set_num.as_str()))
+        .filter(|p| twins.contains(&set_of(p)))
         .collect();
     assert!(
         named.is_empty(),

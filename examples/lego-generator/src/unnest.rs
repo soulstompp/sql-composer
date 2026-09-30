@@ -144,24 +144,19 @@ pub async fn insert(
                 .iter()
                 .map(|r| r.typed_name.as_deref())
                 .collect();
-            let f: Vec<i32> = w.collection.iter().map(|r| r.quantity).collect();
             let bytes = c
                 .iter()
                 .chain(d.iter().chain(e.iter()).flatten())
                 .map(|s| s.len() as u64)
                 .sum::<u64>()
-                + 12 * a.len() as u64;
-            let sql = q(
-                "lego_collection",
-                "int4[], int4[], text[], text[], text[], int4[]",
-            );
+                + 8 * a.len() as u64;
+            let sql = q("lego_collection", "int4[], int4[], text[], text[], text[]");
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
                 .bind(c)
                 .bind(d)
                 .bind(e)
-                .bind(f)
                 .execute(&mut **tx)
                 .await;
             (sql, bytes, r)
@@ -170,7 +165,6 @@ pub async fn insert(
             let a: Vec<i64> = w.purchases.iter().map(|r| r.purchase_id).collect();
             let b: Vec<i32> = w.purchases.iter().map(|r| r.builder_id).collect();
             let c: Vec<i32> = w.purchases.iter().map(|r| r.row_no).collect();
-            let d: Vec<&str> = w.purchases.iter().map(|r| r.set_num.as_str()).collect();
             let e: Vec<&str> = w.purchases.iter().map(|r| r.store).collect();
             let f: Vec<String> = w
                 .purchases
@@ -187,22 +181,20 @@ pub async fn insert(
                 .iter()
                 .map(|r| stamp_text(&r.delivered_at))
                 .collect();
-            let bytes = d
+            let bytes = e
                 .iter()
-                .chain(e.iter())
                 .chain(g.iter())
                 .map(|s| s.len() as u64)
                 .sum::<u64>()
                 + 32 * a.len() as u64;
             let sql = q(
                 "lego_purchases",
-                "int8[], int4[], int4[], text[], text[], timestamptz[], text[], timestamptz[]",
+                "int8[], int4[], int4[], text[], timestamptz[], text[], timestamptz[]",
             );
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
                 .bind(c)
-                .bind(d)
                 .bind(e)
                 .bind(f)
                 .bind(g)

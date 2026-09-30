@@ -224,22 +224,20 @@ impl Enc {
     }
 
     pub fn collection(&mut self, r: &CollectionOut) {
-        self.begin(6);
+        self.begin(5);
         self.i32(r.builder_id);
         self.i32(r.row_no);
         self.str(&r.set_num);
         self.opt_str(r.typed_set_num.as_deref());
         self.opt_str(r.typed_name.as_deref());
-        self.i32(r.quantity);
         self.end();
     }
 
     pub fn purchase(&mut self, r: &PurchaseOut) {
-        self.begin(8);
+        self.begin(7);
         self.i64(r.purchase_id);
         self.i32(r.builder_id);
         self.i32(r.row_no);
-        self.str(&r.set_num);
         self.str(r.store);
         self.stamp(&r.ordered_at);
         self.str(&r.ordered_local);

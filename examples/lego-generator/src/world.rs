@@ -116,7 +116,6 @@ pub struct CollectionOut {
     pub typed_set_num: Option<String>,
     /// The set's name as the builder typed it (trap K3).
     pub typed_name: Option<String>,
-    pub quantity: i32,
 }
 
 /// An instant with the offset it is written in, or the open end of time.
@@ -126,12 +125,12 @@ pub enum Stamp {
     Infinity,
 }
 
+/// One copy a collection row holds, bought: the row is `(builder_id, row_no)`, and names the set.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PurchaseOut {
     pub purchase_id: i64,
     pub builder_id: i32,
     pub row_no: i32,
-    pub set_num: String,
     pub store: &'static str,
     pub ordered_at: Stamp,
     pub ordered_local: String,
@@ -1538,7 +1537,8 @@ impl World {
                     }),
                     _ => None,
                 };
-                let quantity: i32 = match trap {
+                // The copies the row holds, each one a purchase.
+                let copies: u64 = match trap {
                     Some((Trap::D1, _)) => 2,
                     Some((Trap::D5, _)) => 1,
                     _ => match r.below(100) {
@@ -1553,7 +1553,6 @@ impl World {
                     set_num: set_num.clone(),
                     typed_set_num,
                     typed_name,
-                    quantity,
                 });
                 let row_key = format!("{builder_id}|{row_no}");
                 if let Some((t @ (Trap::K1 | Trap::K2 | Trap::K3 | Trap::K5), _)) = trap {
@@ -1572,14 +1571,8 @@ impl World {
                 let first_year = set_year.map_or(FIRST_PURCHASE_YEAR, |y| {
                     i64::from(y).max(FIRST_PURCHASE_YEAR)
                 });
-                let stamps = self.purchase_times(
-                    zone_index(j),
-                    trap,
-                    set,
-                    first_year,
-                    quantity as u64,
-                    &mut rp,
-                );
+                let stamps =
+                    self.purchase_times(zone_index(j), trap, set, first_year, copies, &mut rp);
                 out.bought.push((set, stamps.len() as u32));
                 for (k, (store, ordered, local, delivered)) in stamps.into_iter().enumerate() {
                     let purchase_id = (c * 4 + k as u64 + 1) as i64;
@@ -1587,7 +1580,6 @@ impl World {
                         purchase_id,
                         builder_id,
                         row_no,
-                        set_num: set_num.clone(),
                         store,
                         ordered_at: ordered,
                         ordered_local: local,

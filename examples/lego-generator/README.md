@@ -5,10 +5,10 @@ their collections and their purchase logs.
 
 The real catalogue is the eight `lego_*` tables (colours, themes, part categories, parts, sets,
 inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them once,
-writes them through unchanged but for the release years of the years with no release (see Years),
-and adds synthesized sets modelled on them: each synthesized set takes its root theme, year and
-contents from a real set, with its own set number and name. The generated tables go to `--schema`,
-which is dropped and recreated on every run.
+writes them through unchanged but for the release years of the years with no release (see Years)
+and a few root themes (see Traps), and adds synthesized sets modelled on them: each synthesized set
+takes its root theme, year and contents from a real set, with its own set number and name. The
+generated tables go to `--schema`, which is dropped and recreated on every run.
 
 ## Running
 
@@ -116,6 +116,15 @@ Some rows are planted on purpose: key spellings, boundary years and absences, or
 the collation or on ties, and dates across clock changes. Every planted row is listed in
 `trap_manifest`, with the phase, wave and socket it came from. The program prints each trap, its rate
 and how many it planted when it starts.
+
+Every reference in the generated tables names a row its table holds, traps included:
+
+- a set of trap B3 with a theme the real catalogue's theme list does not hold carries a root theme
+  the generated `lego_themes` adds, named by its id;
+- an inventory of trap K8, filed under the number on the box, is filed under a bare set record of
+  that number, which stands beside the set's `-1` record as trap K7's do;
+- a synthesized set leaves out its model's lines whose part number the parts list does not hold.
+  Those lines are the real catalogue's own, written unchanged and listed under trap B10.
 
 ## Output
 

@@ -10,7 +10,7 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{ConnectOptions, Connection, PgConnection, PgPool, Postgres, Transaction};
 use tracing::{debug, error, info, warn};
 
-use crate::catalogue::Catalogue;
+use crate::catalogue::{Catalogue, Theme};
 use crate::encode::{Cell, Enc, Format};
 use crate::world::{BuilderWave, ManifestOut, SetWave};
 
@@ -375,11 +375,55 @@ async fn copy_batch(
     copy.finish().await
 }
 
-/// The reference tables, copied through unchanged, each created and loaded in one transaction.
+/// The reference tables, in the order they are loaded.
+pub const REFERENCE_TABLES: [&str; 4] = [
+    "lego_colors",
+    "lego_themes",
+    "lego_part_categories",
+    "lego_parts",
+];
+
+/// The rows of reference table `name`: the real catalogue's, and after its themes the root themes
+/// the generator adds (`World::added_themes`).
+pub fn encode_reference(name: &str, cat: &Catalogue, added_themes: &[Theme], enc: &mut Enc) {
+    match name {
+        "lego_colors" => cat.colours.iter().for_each(|c| {
+            enc.reference_row(&[
+                Cell::Int(c.id),
+                Cell::Text(&c.name),
+                Cell::Text(&c.rgb),
+                Cell::Text(&c.is_trans),
+            ])
+        }),
+        "lego_themes" => cat.themes.iter().chain(added_themes).for_each(|th| {
+            enc.reference_row(&[
+                Cell::Int(th.id),
+                Cell::Text(&th.name),
+                Cell::OptInt(th.parent_id),
+            ])
+        }),
+        "lego_part_categories" => cat
+            .categories
+            .iter()
+            .for_each(|c| enc.reference_row(&[Cell::Int(c.id), Cell::Text(&c.name)])),
+        "lego_parts" => cat.parts.iter().for_each(|p| {
+            enc.reference_row(&[
+                Cell::Text(&p.part_num),
+                Cell::Text(&p.name),
+                Cell::Int(p.part_cat_id),
+            ])
+        }),
+        other => unreachable!("{other} is not a reference table"),
+    }
+}
+
+/// The reference tables, copied through unchanged but for the added themes, each created and
+/// loaded in one transaction.
 pub async fn load_reference_tables(
     pool: &PgPool,
     s: &Settings,
     cat: &Catalogue,
+    added_themes: &[Theme],
     metrics: &Metrics,
 ) -> Result<(), LoadError> {
     let err = |t: &'static str, rows: u64, e: sqlx::Error, rb: bool| {
@@ -393,42 +437,10 @@ pub async fn load_reference_tables(
             rolled_back: rb,
         }
     };
-    for name in [
-        "lego_colors",
-        "lego_themes",
-        "lego_part_categories",
-        "lego_parts",
-    ] {
+    for name in REFERENCE_TABLES {
         let t = table(name);
         let mut enc = Enc::new(s.format);
-        match name {
-            "lego_colors" => cat.colours.iter().for_each(|c| {
-                enc.reference_row(&[
-                    Cell::Int(c.id),
-                    Cell::Text(&c.name),
-                    Cell::Text(&c.rgb),
-                    Cell::Text(&c.is_trans),
-                ])
-            }),
-            "lego_themes" => cat.themes.iter().for_each(|th| {
-                enc.reference_row(&[
-                    Cell::Int(th.id),
-                    Cell::Text(&th.name),
-                    Cell::OptInt(th.parent_id),
-                ])
-            }),
-            "lego_part_categories" => cat
-                .categories
-                .iter()
-                .for_each(|c| enc.reference_row(&[Cell::Int(c.id), Cell::Text(&c.name)])),
-            _ => cat.parts.iter().for_each(|p| {
-                enc.reference_row(&[
-                    Cell::Text(&p.part_num),
-                    Cell::Text(&p.name),
-                    Cell::Int(p.part_cat_id),
-                ])
-            }),
-        }
+        encode_reference(name, cat, added_themes, &mut enc);
         enc.finish();
         let started = Instant::now();
         let mut tx = pool

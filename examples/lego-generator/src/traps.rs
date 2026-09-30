@@ -37,6 +37,8 @@ pub enum Trap {
     D6,
     D7,
     D8,
+    /// Listed after the others, so that each earlier trap keeps the draws its number seeds.
+    B10,
 }
 
 impl fmt::Display for Trap {
@@ -89,13 +91,14 @@ pub const DECLS: &[Decl] = &[
     Decl { trap: Trap::K8, title: "an inventory filed under the number on the box, without its -1", population: Population::Sets, per_million: 100, floor: 3 },
     Decl { trap: Trap::B1, title: "a set released in a decade's first year", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::B2, title: "an unreleased set with no year", population: Population::Sets, per_million: 50, floor: 3 },
-    Decl { trap: Trap::B3, title: "a set with no theme, or with a theme the theme list does not hold", population: Population::Sets, per_million: 50, floor: 4 },
+    Decl { trap: Trap::B3, title: "a set with no theme, or with a root theme the real catalogue's theme list does not hold", population: Population::Sets, per_million: 50, floor: 4 },
     Decl { trap: Trap::B4, title: "an Automatic Binding Bricks set of 1949", population: Population::Sets, per_million: 10, floor: 2 },
     Decl { trap: Trap::B5, title: "a set announced for 2031", population: Population::Sets, per_million: 10, floor: 2 },
     Decl { trap: Trap::B6, title: "a part count filed as -1", population: Population::Sets, per_million: 250, floor: 3 },
     Decl { trap: Trap::B7, title: "lines in colour -1 (Unknown) and 9999 ([No Color], Black's rgb)", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::B8, title: "NOT IN over a list that holds a NULL (sets with no theme)", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::B9, title: "the 2000s counted two ways: 2001 to 2010 holds no set, 2000 to 2009 only 2000", population: Population::Natural, per_million: 0, floor: 0 },
+    Decl { trap: Trap::B10, title: "a real line naming a part number the parts list does not hold", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O1, title: "physical row order shuffled within every wave", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O2, title: "lettered set numbers in byte order against linguistic order", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O3, title: "a range on set numbers whose split point moves with the collation", population: Population::Natural, per_million: 0, floor: 0 },

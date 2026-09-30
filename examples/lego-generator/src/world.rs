@@ -4,10 +4,10 @@
 //! Every row is a function of the wiring (seed, sizes, patch, dials) and of the row's own index,
 //! except that a wave's rows are written in a shuffled physical order.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::calendar::{self, LocalTime, Shift, Zone};
-use crate::catalogue::{decade_of, is_release_year, split_version, Real, DECADE_LO};
+use crate::catalogue::{decade_of, is_release_year, split_version, Real, Theme, DECADE_LO};
 use crate::chords::{self, Z_PAIRS};
 use crate::demand::{self, Alias, Spike, Timeline};
 use crate::rng::{Purpose, Rng};
@@ -387,6 +387,30 @@ impl World {
         self.wiring.builders * self.wiring.rows_per_builder
     }
 
+    /// The theme a set of trap B3 carries: none for an even ordinal, else a root theme the real
+    /// catalogue does not hold, which the generated theme list adds (`added_themes`).
+    fn unlisted_theme(&self, k: u64) -> Option<i32> {
+        (!k.is_multiple_of(2)).then(|| self.real.max_theme_id + 1 + (k % 7) as i32)
+    }
+
+    /// The root themes the generated theme list holds beside the real catalogue's: the ones the
+    /// sets of trap B3 carry, each named by its id.
+    pub fn added_themes(&self) -> Vec<Theme> {
+        let ids: BTreeSet<i32> = self
+            .set_traps
+            .values()
+            .filter(|(t, _)| *t == Trap::B3)
+            .filter_map(|&(_, k)| self.unlisted_theme(k))
+            .collect();
+        ids.into_iter()
+            .map(|id| Theme {
+                id,
+                name: format!("Unlisted theme {id}"),
+                parent_id: None,
+            })
+            .collect()
+    }
+
     fn assign_traps(&mut self) -> Result<(), String> {
         let seed = self.wiring.seed;
         for d in DECLS {
@@ -534,10 +558,11 @@ impl World {
             Some((Trap::K8, _)) => {
                 let mut pick = self.slot(socket, &mut rt);
                 for _ in 0..64 {
-                    if real
-                        .first_inventory(pick.0)
-                        .is_some_and(|inv| !real.lines(inv.id).is_empty())
-                    {
+                    if real.first_inventory(pick.0).is_some_and(|inv| {
+                        real.lines(inv.id)
+                            .iter()
+                            .any(|l| real.cat.lists_part(l.part))
+                    }) {
                         break;
                     }
                     pick = self.slot(socket, &mut rt);
@@ -628,13 +653,7 @@ impl World {
         match trap {
             Some((Trap::K4, _)) => name = text::latin1_round_trip(&name),
             Some((Trap::B2, _)) => year = None,
-            Some((Trap::B3, k)) => {
-                theme_id = if k.is_multiple_of(2) {
-                    None
-                } else {
-                    Some(real.max_theme_id + 1 + (k % 7) as i32)
-                };
-            }
+            Some((Trap::B3, k)) => theme_id = self.unlisted_theme(k),
             Some((Trap::B4, _)) => year = Some(1949),
             Some((Trap::B5, _)) => year = Some(2031),
             _ => {}
@@ -997,7 +1016,7 @@ impl World {
     }
 
     /// Natural traps a line carries: a sentinel colour, a part number whose text and number readings
-    /// disagree about the basic bricks 3001 to 3010.
+    /// disagree about the basic bricks 3001 to 3010, a part number the parts list does not hold.
     #[allow(clippy::too_many_arguments)]
     fn classify_line(
         &self,
@@ -1037,6 +1056,18 @@ impl World {
                 String::new(),
             ));
         }
+        if !self.real.cat.lists_part(part) {
+            m.push(manifest(
+                Trap::B10,
+                origin,
+                "lego_inventory_parts",
+                &key(),
+                phase,
+                wave,
+                self.socket_label(*sock),
+                String::new(),
+            ));
+        }
     }
 
     /// Synthesized sets `lo..hi` as one wave.
@@ -1057,10 +1088,14 @@ impl World {
             let mut rl = Rng::stream(seed, Purpose::SetLines, i);
 
             // Lines: the model's lowest-version inventory, a share recoloured into a colour the part
-            // is known in, merged back onto the line key.
+            // is known in, merged back onto the line key. A line naming a part number the parts
+            // list does not hold is the real catalogue's own, and is not copied.
             scratch.clear();
             if let Some(inv) = tinv {
                 for l in real.lines(inv.id) {
+                    if !real.cat.lists_part(l.part) {
+                        continue;
+                    }
                     let mut colour = l.color_id;
                     if rl.chance_ppm(self.wiring.recolour_ppm) {
                         if let Some(cs) = real.part_colours.get(&l.part) {
@@ -1304,31 +1339,46 @@ impl World {
                 ));
             }
             out.sets.push(set);
-            // A bare record beside the -1: the number on the box, filed as a set of its own.
-            if matches!(h.trap, Some((Trap::K7, _))) {
-                let mut rtw = Rng::stream(seed, Purpose::SetCord, i ^ 0x7719);
-                let crosses = rtw.unit() < self.wiring.cross_twins;
-                let theme = match (crosses, h.theme_id) {
-                    (false, Some(th)) => real
-                        .parent_of_theme
-                        .get(&th)
-                        .copied()
-                        .flatten()
-                        .or(Some(th)),
-                    (true, _) => real.cat.sets[*rtw.pick(&real.templates) as usize].theme_id,
-                    (false, None) => None,
-                };
-                let k = h.trap.map_or(0, |t| t.1);
+            // A bare record beside the -1: the number on the box, filed as a set of its own. A K8
+            // set's inventory is filed under it, with the set's own theme and part count.
+            let twin = match h.trap {
+                Some((Trap::K7, k)) => {
+                    let mut rtw = Rng::stream(seed, Purpose::SetCord, i ^ 0x7719);
+                    let crosses = rtw.unit() < self.wiring.cross_twins;
+                    let theme = match (crosses, h.theme_id) {
+                        (false, Some(th)) => real
+                            .parent_of_theme
+                            .get(&th)
+                            .copied()
+                            .flatten()
+                            .or(Some(th)),
+                        (true, _) => real.cat.sets[*rtw.pick(&real.templates) as usize].theme_id,
+                        (false, None) => None,
+                    };
+                    Some((
+                        theme,
+                        if k.is_multiple_of(2) {
+                            Some(0)
+                        } else {
+                            num_parts.map(|n| (n - 1).max(0))
+                        },
+                        format!("twin of {}", h.set_num),
+                    ))
+                }
+                Some((Trap::K8, _)) => Some((
+                    h.theme_id,
+                    num_parts,
+                    format!("twin of {}, holding its inventory", h.set_num),
+                )),
+                _ => None,
+            };
+            if let Some((theme, twin_parts, detail)) = twin {
                 let twin = crate::catalogue::SetRec {
                     set_num: h.base.clone(),
                     name: h.name.clone(),
                     year: h.year,
                     theme_id: theme,
-                    num_parts: if k.is_multiple_of(2) {
-                        Some(0)
-                    } else {
-                        num_parts.map(|n| (n - 1).max(0))
-                    },
+                    num_parts: twin_parts,
                 };
                 // The bare record is a set row of its own: it carries the traps its year and
                 // number carry, and counts in its phase and socket.
@@ -1371,7 +1421,7 @@ impl World {
                     &phase,
                     wave_no,
                     sock_label,
-                    format!("twin of {}", h.set_num),
+                    detail,
                 ));
             }
         }
@@ -1665,7 +1715,8 @@ impl World {
         out
     }
 
-    /// Traps that belong to a whole table or to an absence rather than to a row.
+    /// Traps that belong to a whole table or to an absence rather than to a row, and the root themes
+    /// the generated theme list adds.
     pub fn plan_manifest(&self) -> Vec<ManifestOut> {
         let mut m = Vec::new();
         for table in [
@@ -1719,6 +1770,18 @@ impl World {
             None,
             "synthesized sets modelled on one real set tie on their brick count".into(),
         ));
+        for t in self.added_themes() {
+            m.push(manifest(
+                Trap::B3,
+                Origin::Synthetic,
+                "lego_themes",
+                &t.id.to_string(),
+                "plan",
+                -1,
+                None,
+                "a root theme the real catalogue does not hold".into(),
+            ));
+        }
         m
     }
 

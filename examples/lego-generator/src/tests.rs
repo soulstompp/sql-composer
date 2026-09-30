@@ -1,7 +1,7 @@
 //! Tests over a small real-shaped catalogue built in memory: the generation is a function of the
 //! wiring, and the manifest names exactly the rows that carry each trap.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::calendar::{self, LocalTime, ZONE_NAMES};
 use crate::catalogue::{
@@ -10,6 +10,7 @@ use crate::catalogue::{
     MODEL_FIT,
 };
 use crate::chords;
+use crate::encode::{Enc, Format};
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
 use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
@@ -191,6 +192,18 @@ fn fixture() -> Catalogue {
     }
     cat.sets = sets;
     cat.part_pool = parts.iter().map(|p| (*p).to_string()).collect();
+    // A part number some lines name and the parts table does not hold, as the real catalogue has.
+    let unlisted = cat.part_pool.len() as u32;
+    cat.part_pool.push("rb00164".into());
+    for inv in cat.inventories.iter().filter(|i| i.id % 7 == 0) {
+        cat.lines.push(LineRec {
+            inventory_id: inv.id,
+            part: unlisted,
+            color_id: 0,
+            quantity: 1,
+            is_spare: false,
+        });
+    }
     cat.lines
         .sort_by_key(|l| (l.inventory_id, l.part, l.color_id, l.is_spare));
     cat
@@ -235,6 +248,7 @@ fn world(sets: u64, chunk: u64, patch: &str) -> World {
 struct Everything {
     sets: Vec<SetWave>,
     builders: Vec<BuilderWave>,
+    plan: Vec<world::ManifestOut>,
 }
 
 fn generate(w: &World) -> Everything {
@@ -250,7 +264,183 @@ fn generate(w: &World) -> Everything {
     let builders = (0..w.wiring.builders.div_ceil(chunk))
         .map(|b| w.builder_wave(b, b * chunk, ((b + 1) * chunk).min(w.wiring.builders)))
         .collect();
-    Everything { sets, builders }
+    Everything {
+        sets,
+        builders,
+        plan: w.plan_manifest(),
+    }
+}
+
+/// One generated table as the load writes it: its columns, and its rows as the text COPY format
+/// reads them back, NULL as `None`.
+struct Written {
+    columns: Vec<&'static str>,
+    rows: Vec<Vec<Option<String>>>,
+}
+
+impl Written {
+    fn at(&self, column: &str) -> usize {
+        self.columns
+            .iter()
+            .position(|c| *c == column)
+            .unwrap_or_else(|| panic!("no column {column}"))
+    }
+
+    /// A row's values in `columns`, or `None` where one of them is NULL.
+    fn project(&self, row: &[Option<String>], columns: &[&str]) -> Option<Vec<String>> {
+        columns.iter().map(|c| row[self.at(c)].clone()).collect()
+    }
+}
+
+fn copy_text_rows(buf: &[u8]) -> Vec<Vec<Option<String>>> {
+    let unescape = |f: &str| {
+        let mut out = String::with_capacity(f.len());
+        let mut cs = f.chars();
+        while let Some(c) = cs.next() {
+            match (c, c == '\\') {
+                (_, true) => match cs.next() {
+                    Some('t') => out.push('\t'),
+                    Some('n') => out.push('\n'),
+                    Some('r') => out.push('\r'),
+                    Some(o) => out.push(o),
+                    None => {}
+                },
+                (c, false) => out.push(c),
+            }
+        }
+        out
+    };
+    std::str::from_utf8(buf)
+        .expect("utf-8")
+        .split_terminator('\n')
+        .map(|line| {
+            line.split('\t')
+                .map(|f| (f != "\\N").then(|| unescape(f)))
+                .collect()
+        })
+        .collect()
+}
+
+/// Every table the load writes, each row as the load's own batches encode it.
+fn written(w: &World, e: &Everything) -> BTreeMap<&'static str, Written> {
+    let mut out: BTreeMap<&'static str, Written> = crate::load::TABLES
+        .iter()
+        .map(|t| {
+            (
+                t.name,
+                Written {
+                    columns: t.columns.split(", ").collect(),
+                    rows: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    let mut enc = Enc::new(Format::Text);
+    let mut take = |name: &'static str, enc: &mut Enc| {
+        enc.finish();
+        out.get_mut(name)
+            .expect("declared table")
+            .rows
+            .extend(copy_text_rows(&enc.buf));
+        enc.reset();
+    };
+    let added = w.added_themes();
+    for name in crate::load::REFERENCE_TABLES {
+        crate::load::encode_reference(name, &w.real.cat, &added, &mut enc);
+        take(name, &mut enc);
+    }
+    let pool = &w.real.cat.part_pool;
+    let mut batches: Vec<crate::load::Batches> = e
+        .sets
+        .iter()
+        .map(|x| crate::load::set_wave_batches(String::new(), x, pool))
+        .collect();
+    batches.extend(
+        e.builders
+            .iter()
+            .map(|x| crate::load::builder_wave_batches(String::new(), x)),
+    );
+    batches.push(crate::load::Batches {
+        label: String::new(),
+        levels: vec![("trap_manifest", crate::load::Level::Manifest(&e.plan))],
+    });
+    for b in &batches {
+        for (name, level) in &b.levels {
+            level.encode(&mut enc);
+            take(name, &mut enc);
+        }
+    }
+    out
+}
+
+/// The key the manifest names a row of `table` by, where the manifest names that table's rows.
+fn manifest_key(t: &Written, table: &str, row: &[Option<String>]) -> Option<String> {
+    let cols: &[&str] = match table {
+        "lego_sets" => &["set_num"],
+        "lego_themes" | "lego_inventories" => &["id"],
+        "lego_collection" => &["builder_id", "row_no"],
+        "lego_purchases" => &["purchase_id"],
+        "lego_inventory_parts" => &["inventory_id", "part_num", "color_id", "is_spare"],
+        _ => return None,
+    };
+    t.project(row, cols).map(|v| v.join("|"))
+}
+
+/// A reference: a table, its columns, and the table and key they name. A NULL names no row.
+type Reference = (&'static str, &'static str, &'static str, &'static str);
+
+/// Every reference among the generated tables.
+const REFERENCES: &[Reference] = &[
+    ("lego_themes", "parent_id", "lego_themes", "id"),
+    ("lego_parts", "part_cat_id", "lego_part_categories", "id"),
+    ("lego_sets", "theme_id", "lego_themes", "id"),
+    ("lego_inventories", "set_num", "lego_sets", "set_num"),
+    (
+        "lego_inventory_parts",
+        "inventory_id",
+        "lego_inventories",
+        "id",
+    ),
+    ("lego_inventory_parts", "part_num", "lego_parts", "part_num"),
+    ("lego_inventory_parts", "color_id", "lego_colors", "id"),
+    (
+        "lego_inventory_sets",
+        "inventory_id",
+        "lego_inventories",
+        "id",
+    ),
+    ("lego_inventory_sets", "set_num", "lego_sets", "set_num"),
+    (
+        "lego_collection",
+        "builder_id",
+        "lego_builders",
+        "builder_id",
+    ),
+    ("lego_collection", "set_num", "lego_sets", "set_num"),
+    (
+        "lego_purchases",
+        "builder_id, row_no",
+        "lego_collection",
+        "builder_id, row_no",
+    ),
+];
+
+fn cols(list: &str) -> Vec<&str> {
+    list.split(", ").collect()
+}
+
+/// The manifest's rows as written: (trap, origin, table, row key).
+fn manifest_rows(db: &BTreeMap<&str, Written>) -> Vec<(String, String, String, String)> {
+    let m = &db["trap_manifest"];
+    m.rows
+        .iter()
+        .map(|r| {
+            let v = m
+                .project(r, &["trap", "origin", "tbl", "row_key"])
+                .expect("no NULL");
+            (v[0].clone(), v[1].clone(), v[2].clone(), v[3].clone())
+        })
+        .collect()
 }
 
 fn sorted<T: Ord + Clone>(v: impl Iterator<Item = T>) -> Vec<T> {
@@ -379,6 +569,13 @@ fn the_manifest_names_exactly_the_trapped_rows() {
             .unwrap()
     };
     let themes: HashSet<i32> = w.real.cat.themes.iter().map(|t| t.id).collect();
+    let parts: HashSet<&str> = w
+        .real
+        .cat
+        .parts
+        .iter()
+        .map(|p| p.part_num.as_str())
+        .collect();
     let local_day = |p: &world::PurchaseOut| match p.ordered_at {
         Stamp::At { t, offset_min } => (t + i64::from(offset_min) * 60).div_euclid(86_400),
         Stamp::Infinity => unreachable!(),
@@ -430,11 +627,15 @@ fn the_manifest_names_exactly_the_trapped_rows() {
                     && lines.contains_key(&m.row_key)
             }
             Trap::K7 => sets.contains_key(&m.row_key),
+            // Filed under the bare record beside the -1, which holds no inventory of its own.
             Trap::K8 => {
                 let inv = invs[&m.row_key];
                 let has_lines = lines.values().any(|l| l.inventory_id == inv.id);
+                let dash_one = format!("{}-1", inv.set_num);
                 split_version(&inv.set_num).is_none()
-                    && !sets.contains_key(&inv.set_num)
+                    && sets.contains_key(&inv.set_num)
+                    && sets.contains_key(&dash_one)
+                    && !invs.values().any(|i| i.set_num == dash_one)
                     && has_lines
             }
             Trap::B1 => sets[&m.row_key]
@@ -456,6 +657,11 @@ fn the_manifest_names_exactly_the_trapped_rows() {
                 .bytes()
                 .any(|b| b.is_ascii_alphabetic()),
             Trap::O5 => sets.contains_key(&m.row_key),
+            Trap::B10 => {
+                m.origin == world::Origin::Real
+                    && lines.contains_key(&m.row_key)
+                    && !parts.contains(m.row_key.split('|').nth(1).unwrap())
+            }
             Trap::B9 | Trap::O1 | Trap::O3 | Trap::O4 => true,
             Trap::D1 => {
                 let p = purchases[&m.row_key];
@@ -569,6 +775,17 @@ fn the_manifest_names_exactly_the_trapped_rows() {
             .map(|(k, _)| k.clone())
             .collect(),
     );
+    expect(
+        Trap::B10,
+        lines
+            .iter()
+            .filter(|(_, l)| !parts.contains(pool[l.part as usize].as_str()))
+            .map(|(k, _)| k.clone())
+            .collect(),
+    );
+    assert!(manifest
+        .get(&Trap::B10)
+        .is_some_and(|rows| !rows.is_empty()));
     // The builder's own spelling is kept on the K traps' collection rows, and on no other.
     let kept = |f: fn(&world::CollectionOut) -> bool| -> HashSet<String> {
         coll.iter()
@@ -1036,4 +1253,178 @@ fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
             "pair {pair}"
         );
     }
+}
+
+/// Every reference lands in a row of its owner: through each reference, every row names a row the
+/// named table holds, and every row the manifest names exists. The one exception is the real
+/// catalogue's own lines whose part number its parts list does not hold, which the manifest lists
+/// under B10, every one of them real.
+#[test]
+fn every_reference_lands_in_a_row_of_its_owner() {
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let e = generate(&w);
+    let db = written(&w, &e);
+    let manifest = manifest_rows(&db);
+    let declared: BTreeSet<String> = manifest
+        .iter()
+        .filter(|m| m.0 == "B10")
+        .map(|m| {
+            assert_eq!(m.1, "real", "{m:?}");
+            m.3.clone()
+        })
+        .collect();
+    assert!(!declared.is_empty(), "no line names an unlisted part");
+    for &(table, columns, owner, key) in REFERENCES {
+        let o = &db[owner];
+        let boxes: HashSet<Vec<String>> = o
+            .rows
+            .iter()
+            .filter_map(|r| o.project(r, &cols(key)))
+            .collect();
+        let t = &db[table];
+        let (mut balls, mut strays) = (0, BTreeSet::new());
+        for r in &t.rows {
+            let Some(ball) = t.project(r, &cols(columns)) else {
+                continue;
+            };
+            balls += 1;
+            if !boxes.contains(&ball) {
+                strays.insert(manifest_key(t, table, r).unwrap_or_else(|| ball.join("|")));
+            }
+        }
+        let refers = format!("{table} ({columns}) -> {owner} ({key})");
+        assert!(balls > 0, "{refers}: no row names one");
+        let allowed = if (table, columns) == ("lego_inventory_parts", "part_num") {
+            declared.clone()
+        } else {
+            BTreeSet::new()
+        };
+        assert_eq!(
+            strays, allowed,
+            "{refers}: the rows, of {balls}, that name no row of the owner"
+        );
+    }
+    let mut keys: HashMap<&str, HashSet<String>> = HashMap::new();
+    for (table, t) in &db {
+        for r in &t.rows {
+            if let Some(k) = manifest_key(t, table, r) {
+                keys.entry(table).or_default().insert(k);
+            }
+        }
+    }
+    let unnamed: Vec<&(String, String, String, String)> = manifest
+        .iter()
+        .filter(|m| m.3 != "*")
+        .filter(|m| !keys.get(m.2.as_str()).is_some_and(|k| k.contains(&m.3)))
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "manifest rows naming no row: {unnamed:?}"
+    );
+}
+
+/// No column repeats a value its references decide: outside its key and its references, no column
+/// of a generated table equals a column of the row it reaches through one, two or three references,
+/// on every row that no trap lists, unless the column holds one value throughout.
+#[test]
+fn no_column_repeats_a_value_its_references_decide() {
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let e = generate(&w);
+    let db = written(&w, &e);
+    let listed: HashSet<(String, String)> =
+        manifest_rows(&db).into_iter().map(|m| (m.2, m.3)).collect();
+    // Each owner's rows by the key a reference names them by.
+    let mut index: HashMap<(&str, &str), HashMap<Vec<String>, usize>> = HashMap::new();
+    for &(_, _, owner, key) in REFERENCES {
+        let o = &db[owner];
+        index.entry((owner, key)).or_insert_with(|| {
+            o.rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| o.project(r, &cols(key)).map(|k| (k, i)))
+                .collect()
+        });
+    }
+    let (mut compared, mut repeats) = (0usize, Vec::new());
+    for def in crate::load::TABLES
+        .iter()
+        .filter(|t| !matches!(t.name, "trap_manifest" | "generator_run"))
+    {
+        let table = def.name;
+        let t = &db[table];
+        let refs: Vec<&Reference> = REFERENCES.iter().filter(|r| r.0 == table).collect();
+        let key: Vec<&str> = def.key.map_or(Vec::new(), |k| k.split(", ").collect());
+        let own: Vec<&str> = t
+            .columns
+            .iter()
+            .copied()
+            .filter(|c| !key.contains(c) && !refs.iter().any(|r| cols(r.1).contains(c)))
+            .collect();
+        let mut paths: Vec<Vec<&Reference>> = refs.iter().map(|r| vec![*r]).collect();
+        for _ in 1..3 {
+            let longer: Vec<Vec<&Reference>> = paths
+                .iter()
+                .filter(|p| p.len() == paths.iter().map(Vec::len).max().unwrap_or(0))
+                .flat_map(|p| {
+                    let end = p.last().expect("a path").2;
+                    REFERENCES.iter().filter(move |r| r.0 == end).map(move |r| {
+                        let mut q = p.clone();
+                        q.push(r);
+                        q
+                    })
+                })
+                .collect();
+            paths.extend(longer);
+        }
+        for path in &paths {
+            let owner = path.last().expect("a path").2;
+            let o = &db[owner];
+            let mut stat: HashMap<(&str, &str), (bool, usize, HashSet<&str>)> = HashMap::new();
+            for row in &t.rows {
+                if manifest_key(t, table, row)
+                    .is_some_and(|k| listed.contains(&(table.to_string(), k)))
+                {
+                    continue;
+                }
+                let mut at: Option<&Vec<Option<String>>> = Some(row);
+                let mut from = table;
+                for r in path {
+                    at = at
+                        .and_then(|cur| db[from].project(cur, &cols(r.1)))
+                        .and_then(|k| index[&(r.2, r.3)].get(&k).copied())
+                        .map(|i| &db[r.2].rows[i]);
+                    from = r.2;
+                }
+                let Some(reached) = at else {
+                    continue;
+                };
+                for c in &own {
+                    let Some(v) = &row[t.at(c)] else {
+                        continue;
+                    };
+                    for a in &o.columns {
+                        let Some(u) = &reached[o.at(a)] else {
+                            continue;
+                        };
+                        let s = stat.entry((*c, *a)).or_insert((true, 0, HashSet::new()));
+                        s.0 &= v == u;
+                        s.1 += 1;
+                        s.2.insert(v.as_str());
+                    }
+                }
+            }
+            for ((c, a), (equal, n, values)) in stat {
+                compared += n;
+                if equal && values.len() > 1 {
+                    let through: Vec<&str> = path.iter().map(|r| r.2).collect();
+                    repeats.push(format!(
+                        "{table}.{c} = {owner}.{a} on all {n} rows, through {}",
+                        through.join(" -> ")
+                    ));
+                }
+            }
+        }
+    }
+    assert!(compared > 0);
+    assert!(repeats.is_empty(), "{repeats:#?}");
 }

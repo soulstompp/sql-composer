@@ -193,6 +193,12 @@ pub async fn missing(
 }
 
 impl Catalogue {
+    /// Whether the parts table holds part-number pool entry `part`. The pool holds the parts table's
+    /// numbers first, then the numbers only lines name.
+    pub fn lists_part(&self, part: u32) -> bool {
+        (part as usize) < self.parts.len()
+    }
+
     /// Reads the eight real tables from `schema`.
     pub async fn read(pool: &mut PgConnection, schema: &str) -> Result<Catalogue, sqlx::Error> {
         let q = |t: &str| format!("{schema}.{t}");

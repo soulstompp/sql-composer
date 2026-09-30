@@ -546,9 +546,15 @@ async fn run(cli: Cli) -> Result<(), String> {
         load::create_schema(&pool, &settings)
             .await
             .map_err(|e| format!("create schema: {e}"))?;
-        load::load_reference_tables(&pool, &settings, &world.real.cat, &metrics)
-            .await
-            .map_err(|e| e.to_string())?;
+        load::load_reference_tables(
+            &pool,
+            &settings,
+            &world.real.cat,
+            &world.added_themes(),
+            &metrics,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         load::write_run(&pool, &settings, &run_rows)
             .await
             .map_err(|e| format!("generator_run: {e}"))?;

@@ -8,6 +8,7 @@
 
 mod calendar;
 mod catalogue;
+mod chords;
 mod demand;
 mod encode;
 mod load;
@@ -92,7 +93,7 @@ struct Cli {
     #[arg(long, default_value_t = 4)]
     jobs: u32,
     /// The phases of the switchboard, as `<pattern>:<percent>,…`.
-    #[arg(long, default_value = "natural:91,wavy:9")]
+    #[arg(long, default_value = "natural:90,wavy:9,zchord:1")]
     patch: String,
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,

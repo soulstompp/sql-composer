@@ -28,6 +28,7 @@ pub enum Trap {
     O2,
     O3,
     O4,
+    O5,
     D1,
     D2,
     D3,
@@ -53,6 +54,8 @@ pub enum Population {
     CollectionRows,
     /// Not planted: it arises from the real catalogue or from other traps' rows.
     Natural,
+    /// Written by a phase of the patch, not at a rate.
+    Phase,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +71,7 @@ pub struct Decl {
 
 impl Decl {
     pub fn planted(&self, population: u64) -> u64 {
-        if matches!(self.population, Population::Natural) || population == 0 {
+        if matches!(self.population, Population::Natural | Population::Phase) || population == 0 {
             return 0;
         }
         (u64::from(self.per_million) * population / 1_000_000).max(u64::from(self.floor))
@@ -97,6 +100,7 @@ pub const DECLS: &[Decl] = &[
     Decl { trap: Trap::O2, title: "lettered set numbers in byte order against linguistic order", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O3, title: "a range on set numbers whose split point moves with the collation", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O4, title: "sets tied on their brick count at a top-N cut", population: Population::Natural, per_million: 0, floor: 0 },
+    Decl { trap: Trap::O5, title: "pairs of packs whose child sets' release years, read by their last digit round the decade, lie the same distances apart two at a time, but not three at a time", population: Population::Phase, per_million: 0, floor: 0 },
     Decl { trap: Trap::D1, title: "two purchases in the hour a fall-back clock reads twice", population: Population::CollectionRows, per_million: 2_000, floor: 2 },
     Decl { trap: Trap::D2, title: "a receipt printed in standard time inside a spring-forward gap", population: Population::CollectionRows, per_million: 2_000, floor: 2 },
     Decl { trap: Trap::D3, title: "a purchase whose local month is not its UTC month", population: Population::CollectionRows, per_million: 5_000, floor: 4 },

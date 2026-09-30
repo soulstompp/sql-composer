@@ -9,6 +9,7 @@ use crate::catalogue::{
     Colour, InvRec, LineRec, NestRec, Part, Real, SetRec, Theme, GROWTH_FACTOR, MODELLED,
     MODEL_FIT,
 };
+use crate::chords;
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
 use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
@@ -260,7 +261,7 @@ fn sorted<T: Ord + Clone>(v: impl Iterator<Item = T>) -> Vec<T> {
 
 #[test]
 fn the_same_wiring_generates_the_same_rows() {
-    let patch = "natural:70,wavy:20,interleaved:10";
+    let patch = "natural:60,wavy:20,interleaved:10,zchord:10";
     let a = generate(&world(3000, 100, patch));
     let b = generate(&world(3000, 100, patch));
     for (x, y) in a.sets.iter().zip(&b.sets) {
@@ -318,7 +319,7 @@ fn a_different_seed_generates_different_rows() {
 /// carries a trap the generator classifies is in the manifest.
 #[test]
 fn the_manifest_names_exactly_the_trapped_rows() {
-    let w = world(3000, 100, "natural:70,wavy:20,interleaved:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
     let e = generate(&w);
     let pool = &w.real.cat.part_pool;
     let sets: HashMap<String, &world::SetOut> = e
@@ -448,6 +449,7 @@ fn the_manifest_names_exactly_the_trapped_rows() {
                 .set_num
                 .bytes()
                 .any(|b| b.is_ascii_alphabetic()),
+            Trap::O5 => sets.contains_key(&m.row_key),
             Trap::B9 | Trap::O1 | Trap::O3 | Trap::O4 => true,
             Trap::D1 => {
                 let p = purchases[&m.row_key];
@@ -715,7 +717,7 @@ fn the_modelled_years_grow_at_the_factor_times_the_fitted_rate() {
 /// sets reach every modelled year.
 #[test]
 fn no_set_is_released_in_a_gap_and_the_modelled_years_are_reached() {
-    let w = world(3000, 100, "natural:70,wavy:20,interleaved:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
     let e = generate(&w);
     let fixture_years: HashMap<String, i32> = fixture()
         .sets
@@ -880,4 +882,126 @@ fn a_target_schema_is_refused_when_it_names_the_source_schema() {
     assert!(crate::same_schema("\"public\"", "PUBLIC"));
     assert!(!crate::same_schema("\"Public\"", "public"));
     assert!(!crate::same_schema("lego", "public"));
+}
+
+/// The paired packs: equal counts of year gaps between their child sets, different counts of three
+/// consecutive child years.
+#[test]
+fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
+    let w = world(3000, 100, "natural:80,zchord:20");
+    let e = generate(&w);
+    let years: HashMap<&str, i32> = w
+        .real
+        .cat
+        .sets
+        .iter()
+        .filter_map(|s| s.year.map(|y| (s.set_num.as_str(), y)))
+        .collect();
+    let mut packs: BTreeMap<u64, Vec<(String, Vec<i32>)>> = BTreeMap::new();
+    for wave in &e.sets {
+        let inv_of: HashMap<i32, &str> = wave
+            .inventories
+            .iter()
+            .map(|i| (i.id, i.set_num.as_str()))
+            .collect();
+        let mut kids: HashMap<&str, Vec<i32>> = HashMap::new();
+        for n in &wave.nests {
+            kids.entry(inv_of[&n.inventory_id])
+                .or_default()
+                .push(years[n.set_num.as_str()]);
+        }
+        for m in wave.manifest.iter().filter(|m| m.trap == Trap::O5) {
+            let pair: u64 = m
+                .detail
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .trim_start_matches("pair=")
+                .parse()
+                .unwrap();
+            let class = m
+                .detail
+                .split_whitespace()
+                .find(|w| w.starts_with("class="))
+                .unwrap()
+                .to_string();
+            packs
+                .entry(pair)
+                .or_default()
+                .push((class, kids[m.row_key.as_str()].clone()));
+        }
+    }
+    assert!(packs.len() >= 3);
+    let triples_by_class: HashMap<&str, u32> = [
+        ("0,1,2,5,7", 1),
+        ("0,1,3,5,6", 0),
+        ("0,1,2,4,7", 1),
+        ("0,1,3,4,6", 0),
+        ("0,1,2,3,6", 2),
+        ("0,1,2,4,5", 1),
+    ]
+    .into_iter()
+    .collect();
+    // A year pattern's key, read from the years alone: each year by its last digit, and the least of
+    // the pattern's turns round the decade and their mirror images.
+    let pattern_key = |ys: &[i32]| -> String {
+        let pcs: Vec<i32> = ys.iter().map(|y| y.rem_euclid(10)).collect();
+        let mut best: Option<Vec<i32>> = None;
+        for inv in [false, true] {
+            for n in 0..10 {
+                let mut img: Vec<i32> = pcs
+                    .iter()
+                    .map(|&x| ((if inv { -x } else { x }) + n).rem_euclid(10))
+                    .collect();
+                img.sort_unstable();
+                img.dedup();
+                if best.as_ref().is_none_or(|b| img < *b) {
+                    best = Some(img);
+                }
+            }
+        }
+        best.unwrap()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let z_pairs: Vec<(String, String)> = chords::Z_PAIRS
+        .iter()
+        .map(|(a, b)| (chords::class_label(a), chords::class_label(b)))
+        .collect();
+    for (pair, members) in &packs {
+        assert_eq!(members.len(), 2, "pair {pair}");
+        let pcs = |ys: &[i32]| ys.iter().map(|y| y.rem_euclid(10)).collect::<Vec<_>>();
+        assert_eq!(members[0].1.len(), 5);
+        assert_eq!(
+            chords::gap_counts(&pcs(&members[0].1)),
+            chords::gap_counts(&pcs(&members[1].1)),
+            "pair {pair}"
+        );
+        let (c0, c1) = (pattern_key(&members[0].1), pattern_key(&members[1].1));
+        assert!(
+            z_pairs
+                .iter()
+                .any(|(a, b)| (a == &c0 && b == &c1) || (a == &c1 && b == &c0)),
+            "pair {pair}: {c0} and {c1} are not a declared pair"
+        );
+        for (class, ys) in members {
+            assert_eq!(
+                class.trim_start_matches("class="),
+                pattern_key(ys),
+                "pair {pair}: the manifest's pattern is the years' pattern"
+            );
+            assert_eq!(
+                chords::consecutive_triples(ys),
+                triples_by_class[pattern_key(ys).as_str()],
+                "pair {pair} class {class}"
+            );
+        }
+        assert_ne!(
+            chords::consecutive_triples(&members[0].1),
+            chords::consecutive_triples(&members[1].1),
+            "pair {pair}"
+        );
+    }
 }

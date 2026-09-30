@@ -78,6 +78,9 @@ weight is its real sets plus the releases of its modelled years. The patch
 - `wavy`: a wave travelling over the sockets, forward then back (`--wavy-period`, `--wavy-amplitude`);
 - `hotspot`: one socket takes a share of the sets (`--hotspot-share`, `--hotspot-socket`);
 - `swing`: waves alternate between two groups of sockets (`--swing-a`, `--swing-b`, `--swing-period`);
+- `zchord`: packs written in pairs, their child sets chosen by release year so that the years, read
+  by their last digit round the decade, lie the same distances apart two at a time, but not three at
+  a time. Each pack is listed in `trap_manifest` under O5.
 
 The relationships between sets (the cords) each have a dial for how often they cross from one socket
 to another: nesting (`--cross-nesting`), versions (`--cross-versions`), twins (`--cross-twins`) and

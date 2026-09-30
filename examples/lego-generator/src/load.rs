@@ -172,7 +172,8 @@ const MONTH: Part = Part::Cycle {
 const ORDERED_AT: Part = Part::Line("ordered_at");
 
 /// The composite indexes built after the load, by table: each led by the columns the join into its
-/// table fixes, and ending on the column the next join reads.
+/// table fixes, ending on or carrying the column the next join reads, and carrying the columns the
+/// queries read from the table, so that a query answered through the index need not read the table.
 pub const STRANDS: &[Strand] = &[
     Strand {
         table: "lego_themes",
@@ -215,7 +216,7 @@ pub const STRANDS: &[Strand] = &[
     Strand {
         table: "lego_parts",
         parts: &[Part::Column("part_cat_id"), Part::Column("part_num")],
-        include: &[],
+        include: &["name"],
     },
     Strand {
         table: "lego_collection",
@@ -227,6 +228,11 @@ pub const STRANDS: &[Strand] = &[
         include: &[],
     },
     Strand {
+        table: "lego_collection",
+        parts: &[Part::Column("builder_id"), Part::Column("row_no")],
+        include: &["set_num"],
+    },
+    Strand {
         table: "lego_purchases",
         parts: &[
             Part::Column("builder_id"),
@@ -234,12 +240,12 @@ pub const STRANDS: &[Strand] = &[
             MONTH,
             ORDERED_AT,
         ],
-        include: &["ordered_at"],
+        include: &["ordered_at", "purchase_id"],
     },
     Strand {
         table: "lego_purchases",
         parts: &[MONTH, ORDERED_AT],
-        include: &["builder_id", "row_no", "ordered_at"],
+        include: &["builder_id", "row_no", "ordered_at", "purchase_id"],
     },
 ];
 

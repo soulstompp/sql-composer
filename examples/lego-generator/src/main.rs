@@ -502,6 +502,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             ),
         ));
     }
+    run_rows.extend(load::roster_rows(&settings.schema));
     for (k, v) in &server {
         run_rows.push((format!("server_{k}"), v.clone()));
     }

@@ -15,7 +15,8 @@
 //! its own leaves out its descendants' rows with a `NO INHERIT` CHECK. A table with two parents is a
 //! thing of both kinds, and a query through either parent reads it once.
 //!
-//! Every class has the generated table's primary key, and the sets' classes its strand too.
+//! Every class has the generated table's primary key, and every class that holds rows each of the
+//! generated table's strands, reading time through the generated schema's `clock`.
 //!
 //! After the build, a certificate reads every class's CHECKs back from the catalogue:
 //! - each hierarchy holds exactly the generated table's rows;
@@ -30,7 +31,7 @@ use sqlx::PgConnection;
 use tracing::info;
 
 use crate::calendar::{ZONE_COUNTRIES, ZONE_NAMES};
-use crate::load::{strand_name, STRANDS};
+use crate::load::{strand_name, Strand, STRANDS};
 
 /// The root themes of licensed sets, by name.
 pub const LICENSED: [&str; 10] = [
@@ -170,6 +171,15 @@ impl Hierarchy {
         }
         out.extend(own);
         out
+    }
+
+    /// The strands class `c` carries: every strand of the generated table on a class that holds
+    /// rows, and none on a class that holds none.
+    pub fn strands(&self, c: &Class) -> Vec<&'static Strand> {
+        if !c.holds {
+            return Vec::new();
+        }
+        STRANDS.iter().filter(|s| s.table == self.table).collect()
     }
 
     fn predicate(&self, name: &str) -> String {
@@ -559,14 +569,11 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
                 &format!("ALTER TABLE {oo}.{} ADD PRIMARY KEY ({})", c.name, h.key),
             )
             .await?;
-            if let Some((_, columns)) = STRANDS.iter().find(|(t, _)| *t == h.table) {
+            for s in h.strands(c) {
+                let on = format!("{oo}.{}", c.name);
                 exec(
                     conn,
-                    &format!(
-                        "CREATE INDEX {} ON {oo}.{} ({columns})",
-                        strand_name(&c.name, columns),
-                        c.name
-                    ),
+                    &s.create_sql(&strand_name(&c.name, s.parts), &on, generated),
                 )
                 .await?;
             }
@@ -812,5 +819,40 @@ mod tests {
                 .collect();
             assert_eq!(named, vec![format!("lego_colors_{hue}").as_str()]);
         }
+    }
+
+    /// A class that holds rows carries every strand of its table, and a class that holds none carries
+    /// none. The index names are unique within each schema, and fit the server's limit.
+    #[test]
+    fn a_class_that_holds_rows_carries_every_strand_of_its_table() {
+        use crate::load::NAME_BYTES;
+        let generated: BTreeSet<String> = STRANDS
+            .iter()
+            .map(|s| strand_name(s.table, s.parts))
+            .collect();
+        assert_eq!(generated.len(), STRANDS.len());
+        assert!(generated.iter().all(|n| n.len() <= NAME_BYTES));
+        let mut names = BTreeSet::new();
+        let mut carried = 0;
+        for h in [sets(&themes()).unwrap(), colours("oo"), builders()] {
+            let of_table: Vec<&Strand> = STRANDS.iter().filter(|s| s.table == h.table).collect();
+            for c in &h.classes {
+                let want = if c.holds {
+                    of_table.clone()
+                } else {
+                    Vec::new()
+                };
+                assert_eq!(h.strands(c), want, "{}", c.name);
+                for s in want {
+                    let n = strand_name(&c.name, s.parts);
+                    assert!(n.len() <= NAME_BYTES, "{n}");
+                    assert!(names.insert(n.clone()), "{n} twice");
+                    carried += 1;
+                }
+            }
+        }
+        // The sets' table has more than one strand, so a class carrying only one shows here.
+        assert!(STRANDS.iter().filter(|s| s.table == "lego_sets").count() > 1);
+        assert!(carried > 0);
     }
 }

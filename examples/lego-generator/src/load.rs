@@ -79,22 +79,202 @@ pub const TABLES: [TableDef; 13] = [
     TableDef { name: "generator_run", columns: "key, value", typed: "key text NOT NULL, value text NOT NULL", key: Some("key") },
 ];
 
-/// The composite indexes built after the load, by table: each led by the column the join into its
+/// The zone the schema's `clock` reads an instant in.
+pub const CLOCK_ZONE: &str = "UTC";
+
+/// `<schema>.clock(timestamptz)`: an instant as the wall clock of `CLOCK_ZONE`. The strands read
+/// time through it, and so do queries that mean to use them.
+pub fn clock_function(schema: &str) -> String {
+    format!(
+        "CREATE FUNCTION {schema}.clock(timestamptz) RETURNS timestamp \
+         LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT $1 AT TIME ZONE '{CLOCK_ZONE}' $$"
+    )
+}
+
+/// One level of a strand's key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    /// A column of the table.
+    Column(&'static str),
+    /// A cycle read off the clock: its name, and its expression, in which `{clock}` stands for the
+    /// schema's `clock` function.
+    Cycle {
+        label: &'static str,
+        sql: &'static str,
+    },
+    /// A column of instants, read through the schema's `clock`.
+    Line(&'static str),
+}
+
+impl Part {
+    /// Where the part's kind stands in a key: columns first, then cycles, then the line.
+    #[cfg(test)]
+    pub fn rank(&self) -> u8 {
+        match self {
+            Part::Column(_) => 0,
+            Part::Cycle { .. } => 1,
+            Part::Line(_) => 2,
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Part::Column(c) | Part::Line(c) => c,
+            Part::Cycle { label, .. } => label,
+        }
+    }
+
+    /// The part as an index key holds it, the clock read from `schema`.
+    pub fn key_sql(&self, schema: &str) -> String {
+        match self {
+            Part::Column(c) => c.to_string(),
+            Part::Cycle { sql, .. } => {
+                format!("({})", sql.replace("{clock}", &format!("{schema}.clock")))
+            }
+            Part::Line(c) => format!("({schema}.clock({c}))"),
+        }
+    }
+}
+
+/// A composite index built after the load: its table, its key, and the columns it carries beside
+/// the key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Strand {
+    pub table: &'static str,
+    pub parts: &'static [Part],
+    pub include: &'static [&'static str],
+}
+
+impl Strand {
+    /// The key and the columns carried, as `CREATE INDEX` writes them after the table's name.
+    pub fn definition(&self, clock_schema: &str) -> String {
+        let key: Vec<String> = self.parts.iter().map(|p| p.key_sql(clock_schema)).collect();
+        match self.include {
+            [] => format!("({})", key.join(", ")),
+            carried => format!("({}) INCLUDE ({})", key.join(", "), carried.join(", ")),
+        }
+    }
+
+    /// The strand built as index `name` on table `on`, which may be another table of the same
+    /// columns, the clock read from `clock_schema`.
+    pub fn create_sql(&self, name: &str, on: &str, clock_schema: &str) -> String {
+        format!(
+            "CREATE INDEX {name} ON {on} {}",
+            self.definition(clock_schema)
+        )
+    }
+}
+
+const MONTH: Part = Part::Cycle {
+    label: "month",
+    sql: "extract(month FROM {clock}(ordered_at))",
+};
+const ORDERED_AT: Part = Part::Line("ordered_at");
+
+/// The composite indexes built after the load, by table: each led by the columns the join into its
 /// table fixes, and ending on the column the next join reads.
-pub const STRANDS: [(&str, &str); 8] = [
-    ("lego_themes", "parent_id, id"),
-    ("lego_sets", "theme_id, set_num"),
-    ("lego_inventories", "set_num, version, id"),
-    ("lego_inventory_sets", "inventory_id, set_num"),
-    ("lego_inventory_parts", "inventory_id, part_num, color_id"),
-    ("lego_parts", "part_cat_id, part_num"),
-    ("lego_purchases", "builder_id, row_no"),
-    ("lego_collection", "set_num, builder_id, row_no"),
+pub const STRANDS: &[Strand] = &[
+    Strand {
+        table: "lego_themes",
+        parts: &[Part::Column("parent_id"), Part::Column("id")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_sets",
+        parts: &[Part::Column("theme_id"), Part::Column("set_num")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_sets",
+        parts: &[Part::Column("theme_id"), Part::Column("year")],
+        include: &["set_num"],
+    },
+    Strand {
+        table: "lego_inventories",
+        parts: &[
+            Part::Column("set_num"),
+            Part::Column("version"),
+            Part::Column("id"),
+        ],
+        include: &[],
+    },
+    Strand {
+        table: "lego_inventory_sets",
+        parts: &[Part::Column("inventory_id"), Part::Column("set_num")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_inventory_parts",
+        parts: &[
+            Part::Column("inventory_id"),
+            Part::Column("part_num"),
+            Part::Column("color_id"),
+        ],
+        include: &[],
+    },
+    Strand {
+        table: "lego_parts",
+        parts: &[Part::Column("part_cat_id"), Part::Column("part_num")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_collection",
+        parts: &[
+            Part::Column("set_num"),
+            Part::Column("builder_id"),
+            Part::Column("row_no"),
+        ],
+        include: &[],
+    },
+    Strand {
+        table: "lego_purchases",
+        parts: &[
+            Part::Column("builder_id"),
+            Part::Column("row_no"),
+            MONTH,
+            ORDERED_AT,
+        ],
+        include: &[],
+    },
+    Strand {
+        table: "lego_purchases",
+        parts: &[MONTH, ORDERED_AT],
+        include: &["builder_id", "row_no"],
+    },
 ];
 
-/// The name of a strand's index on `table` over `columns`.
-pub fn strand_name(table: &str, columns: &str) -> String {
-    format!("{table}_{}_idx", columns.replace(", ", "_"))
+/// The longest name the server keeps, in bytes.
+pub const NAME_BYTES: usize = 63;
+
+/// The name of a strand's index on `table` over `parts`: the table and the parts' names, or, where
+/// that is longer than `NAME_BYTES`, its front and a digest of the whole.
+pub fn strand_name(table: &str, parts: &[Part]) -> String {
+    let labels: Vec<&str> = parts.iter().map(Part::label).collect();
+    let full = format!("{table}_{}_idx", labels.join("_"));
+    if full.len() <= NAME_BYTES {
+        return full;
+    }
+    let digest = full.bytes().fold(0x811c_9dc5_u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    });
+    let mut cut = NAME_BYTES - 9;
+    while !full.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}_{digest:08x}", &full[..cut])
+}
+
+/// What `generator_run` records of the strands: the clock's zone, and each strand's definition by
+/// its index's name.
+pub fn roster_rows(schema: &str) -> Vec<(String, String)> {
+    let mut rows = vec![("clock_zone".to_string(), CLOCK_ZONE.to_string())];
+    for s in STRANDS {
+        rows.push((
+            format!("strand_{}", strand_name(s.table, s.parts)),
+            format!("{} {}", s.table, s.definition(schema)),
+        ));
+    }
+    rows
 }
 
 pub fn table(name: &str) -> &'static TableDef {
@@ -671,8 +851,8 @@ pub async fn watch_progress(
     }
 }
 
-/// After the load: keys (when built after), autovacuum back on, the strands, statistics, the
-/// visibility map.
+/// After the load: keys (when built after), autovacuum back on, the clock and then the strands,
+/// statistics, the visibility map.
 pub async fn finish(
     conn: &mut PgConnection,
     s: &Settings,
@@ -704,19 +884,20 @@ pub async fn finish(
         .execute(&mut *conn)
         .await?;
     }
-    for (table, columns) in STRANDS {
-        let started = Instant::now();
-        sqlx::query(&format!(
-            "CREATE INDEX {} ON {}.{table} ({columns})",
-            strand_name(table, columns),
-            s.schema
-        ))
+    sqlx::query(&clock_function(&s.schema))
         .execute(&mut *conn)
         .await?;
-        steps.push((format!("strand {table}"), started.elapsed()));
+    for st in STRANDS {
+        let started = Instant::now();
+        let name = strand_name(st.table, st.parts);
+        let on = format!("{}.{}", s.schema, st.table);
+        sqlx::query(&st.create_sql(&name, &on, &s.schema))
+            .execute(&mut *conn)
+            .await?;
+        steps.push((format!("strand {name}"), started.elapsed()));
         info!(
-            table,
-            columns,
+            table = st.table,
+            index = %name,
             elapsed_ms = started.elapsed().as_millis() as u64,
             "strand built"
         );

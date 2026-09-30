@@ -49,11 +49,14 @@ waves are written at once, each on its own session.
 Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for the
 text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are built
 after the load (`--index-timing before` builds them first). So are the strands: the composite
-indexes a DBA gives the tables for the joins between them, each led by the column the join into its
-table fixes (`STRANDS` in `src/load.rs`). Autovacuum is off on the tables during
-the load and back on afterwards (`--autovacuum-during-load on` leaves it on); then the tables are
-vacuumed and analysed. `--unlogged` creates unlogged tables for scratch runs, and
-`--synchronous-commit` sets the loading sessions' commit mode (off by default).
+indexes a DBA gives the tables for the joins between them, each led by the columns the join into its
+table fixes (`STRANDS` in `src/load.rs`). A strand's key holds columns, then cycles read off the
+clock (the month), then the line, the instant itself. The clock is `<schema>.clock(timestamptz)`, an
+instant as the wall clock of UTC, which the load creates before the strands; a query that means to
+use a strand reads time through the same function. Autovacuum is off on the tables during the load
+and back on afterwards (`--autovacuum-during-load on` leaves it on); then the tables are vacuumed and
+analysed. `--unlogged` creates unlogged tables for scratch runs, and `--synchronous-commit` sets the
+loading sessions' commit mode (off by default).
 
 ## Years
 
@@ -136,7 +139,8 @@ On standard output, the lines starting `SUMMARY` hold the run's figures: the res
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
 the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the sets,
 most bought first), the WAL written and each table's final size. The same configuration is written to the table
-`generator_run`.
+`generator_run`, with the clock's zone (`clock_zone`) and each strand's definition, keyed by its
+index's name (`strand_<name>`).
 
 ## Object-oriented tables
 
@@ -164,8 +168,9 @@ table of its most specific class. Every class's CHECK reads the row's own column
 - **Builders, by the country of their home zone,** from the IANA database's `zone.tab`. A country
   with two home zones (the United States) has a class per zone under it.
 
-Each class has the generated table's primary key, and is vacuumed and analysed. Read a hierarchy
-through its root, with the generated schema behind it for the other tables:
+Each class has the generated table's primary key, and each class that holds rows every one of the
+generated table's strands. Every class is vacuumed and analysed. Read a hierarchy through its root,
+with the generated schema behind it for the other tables:
 
 ```sql
 SET search_path = lego_oo, lego;

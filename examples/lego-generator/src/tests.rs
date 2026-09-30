@@ -11,6 +11,7 @@ use crate::catalogue::{
 };
 use crate::chords;
 use crate::encode::{Enc, Format};
+use crate::load::{strand_name, Part as KeyPart, Strand, NAME_BYTES, STRANDS};
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
 use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
@@ -1427,4 +1428,106 @@ fn no_column_repeats_a_value_its_references_decide() {
     }
     assert!(compared > 0);
     assert!(repeats.is_empty(), "{repeats:#?}");
+}
+
+/// Each strand reads only its own table: every column its parts, its cycles' expressions and the
+/// columns it carries name is a column of the strand's table.
+#[test]
+fn each_strand_reads_only_its_own_table() {
+    // The words of SQL the cycles' expressions use beside column names.
+    const SQL_WORDS: [&str; 3] = ["extract", "month", "from"];
+    for s in STRANDS {
+        let columns = cols(crate::load::table(s.table).columns);
+        let mut named: Vec<String> = s.include.iter().map(|c| c.to_string()).collect();
+        for p in s.parts {
+            match p {
+                KeyPart::Column(c) | KeyPart::Line(c) => named.push(c.to_string()),
+                KeyPart::Cycle { sql, .. } => named.extend(
+                    sql.replace("{clock}", " ")
+                        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                        .filter(|w| !w.is_empty() && !w.bytes().all(|b| b.is_ascii_digit()))
+                        .map(str::to_ascii_lowercase)
+                        .filter(|w| !SQL_WORDS.contains(&w.as_str())),
+                ),
+            }
+        }
+        for n in &named {
+            assert!(
+                columns.contains(&n.as_str()),
+                "{} names {n}, which is not a column of {}",
+                strand_name(s.table, s.parts),
+                s.table
+            );
+        }
+    }
+}
+
+/// Each strand's key holds its columns first, then its cycles, then at most one line, last.
+#[test]
+fn each_strand_holds_its_columns_then_its_cycles_then_the_line() {
+    for s in STRANDS {
+        let ranks: Vec<u8> = s.parts.iter().map(KeyPart::rank).collect();
+        let name = strand_name(s.table, s.parts);
+        assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "{name}: {ranks:?}");
+        assert!(ranks.iter().filter(|&&r| r == 2).count() <= 1, "{name}");
+    }
+    assert!(STRANDS
+        .iter()
+        .any(|s| s.parts.iter().any(|p| matches!(p, KeyPart::Cycle { .. }))));
+}
+
+/// The example's migration builds on the dump's tables exactly the strands the generator builds on
+/// them, in the same order and under the same names, with no cycle or line, since it makes no clock.
+#[test]
+fn the_example_migration_builds_the_strands_of_the_dump_tables() {
+    let sql = include_str!("../../lego/migrations/20260930000000_strands.sql");
+    let text = sql
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let built: Vec<String> = text
+        .split(';')
+        .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let dump: Vec<&Strand> = STRANDS
+        .iter()
+        .filter(|s| crate::catalogue::TABLES.contains(&s.table))
+        .collect();
+    assert!(dump
+        .iter()
+        .all(|s| s.parts.iter().all(|p| matches!(p, KeyPart::Column(_)))));
+    let expected: Vec<String> = dump
+        .iter()
+        .map(|s| {
+            format!(
+                "CREATE INDEX IF NOT EXISTS {} ON {} {}",
+                strand_name(s.table, s.parts),
+                s.table,
+                s.definition("public")
+            )
+        })
+        .collect();
+    assert_eq!(built, expected);
+}
+
+/// A strand's name longer than the server keeps is cut to fit, keeps its front, and stays apart from
+/// the names of the table's other strands.
+#[test]
+fn a_strand_name_past_the_limit_is_cut_to_fit_and_stays_distinct() {
+    let long = "lego_sets_a_class_whose_name_is_long_enough_to_pass_the_limit";
+    let names: Vec<String> = STRANDS
+        .iter()
+        .filter(|s| s.table == "lego_sets")
+        .map(|s| strand_name(long, s.parts))
+        .collect();
+    assert!(names.len() > 1);
+    for n in &names {
+        assert!(
+            n.len() <= NAME_BYTES && n.starts_with("lego_sets_a_class"),
+            "{n}"
+        );
+    }
+    assert_eq!(names.iter().collect::<HashSet<_>>().len(), names.len());
 }

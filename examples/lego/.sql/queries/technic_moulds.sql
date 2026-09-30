@@ -1,8 +1,12 @@
-SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare
+SELECT DISTINCT ip.part_num
 FROM lego_inventory_parts ip
 JOIN lego_inventories i ON i.id = ip.inventory_id
 JOIN lego_sets s ON s.set_num = i.set_num
-JOIN (
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        SELECT tc.theme_id
+FROM (
     WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
     SELECT t.id, t.id, 0
     FROM lego_themes t
@@ -15,5 +19,9 @@ SELECT ancestor_id, theme_id, depth
 FROM closure
 WHERE NOT in_cycle
 
-) tc ON tc.theme_id = s.theme_id
+) tc
 WHERE tc.ancestor_id = $1
+
+    ) sc
+)
+

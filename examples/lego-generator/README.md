@@ -104,6 +104,10 @@ crosses, and each copy is bought on a day drawn from the set's timeline, in the 
 hours. The builder writes the instant down as the wall clock of their home zone, by that zone's
 offset history from the IANA time zone database bundled into the binary, from 1950 on.
 
+The row names the set it holds by its number, `set_num`, and the set's name is the sets' own. Where
+the builder typed the set's number or name their own way (traps K1, K2, K3 and K5), the row also
+keeps what they typed, in `typed_set_num` or `typed_name`; on every other row both are NULL.
+
 ## Traps
 
 Some rows are planted on purpose: key spellings, boundary years and absences, orders that depend on

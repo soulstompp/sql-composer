@@ -395,29 +395,35 @@ fn the_manifest_names_exactly_the_trapped_rows() {
             .entry(m.trap)
             .or_default()
             .insert(m.row_key.clone());
-        let ok = match m.trap {
-            Trap::K1 => {
-                let c = coll[&m.row_key];
-                let canonical = m.detail.trim_start_matches("canonical ");
-                c.set_num != canonical
-                    && c.set_num.eq_ignore_ascii_case(canonical)
-                    && sets.contains_key(canonical)
-                    && !sets.contains_key(&c.set_num)
+        // A collection row of a K trap names its set, and keeps what the builder typed beside it.
+        let typed = |m: &world::ManifestOut| -> Option<(String, String)> {
+            let c = coll[&m.row_key];
+            let canonical = m.detail.trim_start_matches("canonical ");
+            let named = c.set_num == canonical && sets.contains_key(canonical);
+            match (&c.typed_set_num, &c.typed_name) {
+                (Some(t), None) if named => Some((t.clone(), canonical.to_string())),
+                _ => None,
             }
+        };
+        let ok = match m.trap {
+            Trap::K1 => typed(m).is_some_and(|(t, canonical)| {
+                t != canonical && t.eq_ignore_ascii_case(&canonical) && !sets.contains_key(&t)
+            }),
             Trap::K2 => {
-                let c = coll[&m.row_key];
-                c.set_num.trim() != c.set_num && sets.contains_key(c.set_num.trim())
+                typed(m).is_some_and(|(t, canonical)| t != canonical && t.trim() == canonical)
             }
             Trap::K3 => {
                 let c = coll[&m.row_key];
                 c.set_num == "10182-1"
-                    && (c.set_name == "Café Corner" || c.set_name == "Cafe\u{301} Corner")
+                    && c.typed_set_num.is_none()
+                    && matches!(
+                        c.typed_name.as_deref(),
+                        Some("Café Corner" | "Cafe\u{301} Corner")
+                    )
             }
-            Trap::K5 => {
-                let c = coll[&m.row_key];
-                c.set_num.contains(['\u{2013}', '\u{2011}', '\u{00A0}'])
-                    && !sets.contains_key(&c.set_num)
-            }
+            Trap::K5 => typed(m).is_some_and(|(t, _)| {
+                t.contains(['\u{2013}', '\u{2011}', '\u{00A0}']) && !sets.contains_key(&t)
+            }),
             Trap::K4 => world::looks_round_tripped(&sets[&m.row_key].name),
             Trap::K6 => {
                 world::basic_brick_disagreement(m.row_key.split('|').nth(1).unwrap())
@@ -563,6 +569,24 @@ fn the_manifest_names_exactly_the_trapped_rows() {
             .map(|(k, _)| k.clone())
             .collect(),
     );
+    // The builder's own spelling is kept on the K traps' collection rows, and on no other.
+    let kept = |f: fn(&world::CollectionOut) -> bool| -> HashSet<String> {
+        coll.iter()
+            .filter(|(_, c)| f(c))
+            .map(|(k, _)| k.clone())
+            .collect()
+    };
+    let listed = |ts: &[Trap]| -> HashSet<String> {
+        ts.iter()
+            .flat_map(|t| manifest.get(t).cloned().unwrap_or_default())
+            .collect()
+    };
+    assert!(!listed(&[Trap::K3]).is_empty());
+    assert_eq!(
+        kept(|c| c.typed_set_num.is_some()),
+        listed(&[Trap::K1, Trap::K2, Trap::K5])
+    );
+    assert_eq!(kept(|c| c.typed_name.is_some()), listed(&[Trap::K3]));
     let twins: HashSet<String> = all_sets
         .iter()
         .filter(|s| {

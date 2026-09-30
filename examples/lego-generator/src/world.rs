@@ -111,7 +111,11 @@ pub struct CollectionOut {
     pub builder_id: i32,
     pub row_no: i32,
     pub set_num: String,
-    pub set_name: String,
+    /// The set number as the builder typed it, on the rows that keep the builder's own spelling
+    /// (traps K1, K2 and K5).
+    pub typed_set_num: Option<String>,
+    /// The set's name as the builder typed it (trap K3).
+    pub typed_name: Option<String>,
     pub quantity: i32,
 }
 
@@ -1460,15 +1464,15 @@ impl World {
         )
     }
 
-    /// The number, name and year of set `set` (see `on_sale`).
-    fn set_named(&self, set: u64) -> (String, String, Option<i32>) {
+    /// The number and year of set `set` (see `on_sale`).
+    fn set_named(&self, set: u64) -> (String, Option<i32>) {
         let reals = self.real.cat.sets.len() as u64;
         if set < reals {
             let s = &self.real.cat.sets[set as usize];
-            (s.set_num.clone(), s.name.clone(), s.year)
+            (s.set_num.clone(), s.year)
         } else {
             let h = self.head(set - reals);
-            (h.set_num, h.name, h.year)
+            (h.set_num, h.year)
         }
     }
 
@@ -1519,22 +1523,20 @@ impl World {
                     )) => u64::from(*r.pick(&self.old_sets)),
                     _ => self.bought_set(home, &mut r),
                 };
-                let (set_num, set_name, set_year) = self.set_named(set);
-                let typed = match trap {
-                    Some((Trap::K1, k)) => text::case_variant(&set_num, k),
-                    Some((Trap::K2, k)) => text::whitespace_variant(&set_num, k),
-                    Some((Trap::K5, k)) => text::dash_variant(&set_num, k),
-                    _ => set_num.clone(),
+                let (set_num, set_year) = self.set_named(set);
+                let typed_set_num = match trap {
+                    Some((Trap::K1, k)) => Some(text::case_variant(&set_num, k)),
+                    Some((Trap::K2, k)) => Some(text::whitespace_variant(&set_num, k)),
+                    Some((Trap::K5, k)) => Some(text::dash_variant(&set_num, k)),
+                    _ => None,
                 };
                 let typed_name = match trap {
-                    Some((Trap::K3, k)) => {
-                        if k % 2 == 0 {
-                            "Café Corner".to_string()
-                        } else {
-                            text::nfd_latin1("Café Corner")
-                        }
-                    }
-                    _ => set_name.clone(),
+                    Some((Trap::K3, k)) => Some(if k % 2 == 0 {
+                        "Café Corner".to_string()
+                    } else {
+                        text::nfd_latin1("Café Corner")
+                    }),
+                    _ => None,
                 };
                 let quantity: i32 = match trap {
                     Some((Trap::D1, _)) => 2,
@@ -1548,8 +1550,9 @@ impl World {
                 out.collection.push(CollectionOut {
                     builder_id,
                     row_no,
-                    set_num: typed.clone(),
-                    set_name: typed_name,
+                    set_num: set_num.clone(),
+                    typed_set_num,
+                    typed_name,
                     quantity,
                 });
                 let row_key = format!("{builder_id}|{row_no}");

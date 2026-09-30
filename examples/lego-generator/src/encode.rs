@@ -224,11 +224,12 @@ impl Enc {
     }
 
     pub fn collection(&mut self, r: &CollectionOut) {
-        self.begin(5);
+        self.begin(6);
         self.i32(r.builder_id);
         self.i32(r.row_no);
         self.str(&r.set_num);
-        self.str(&r.set_name);
+        self.opt_str(r.typed_set_num.as_deref());
+        self.opt_str(r.typed_name.as_deref());
         self.i32(r.quantity);
         self.end();
     }

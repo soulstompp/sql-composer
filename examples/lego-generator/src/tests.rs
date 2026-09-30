@@ -1462,6 +1462,44 @@ fn each_strand_reads_only_its_own_table() {
     }
 }
 
+/// A column a strand's key reads only through an expression (a cycle, or a line through the clock)
+/// is also carried as the column itself, so the index returns what a query on that column reads.
+#[test]
+fn each_strand_carries_the_columns_its_expressions_read() {
+    const SQL_WORDS: [&str; 3] = ["extract", "month", "from"];
+    for s in STRANDS {
+        let plain: Vec<&str> = s
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                KeyPart::Column(c) => Some(*c),
+                _ => None,
+            })
+            .chain(s.include.iter().copied())
+            .collect();
+        for p in s.parts {
+            let read: Vec<String> = match p {
+                KeyPart::Column(_) => Vec::new(),
+                KeyPart::Line(c) => vec![c.to_string()],
+                KeyPart::Cycle { sql, .. } => sql
+                    .replace("{clock}", " ")
+                    .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                    .filter(|w| !w.is_empty() && !w.bytes().all(|b| b.is_ascii_digit()))
+                    .map(str::to_ascii_lowercase)
+                    .filter(|w| !SQL_WORDS.contains(&w.as_str()))
+                    .collect(),
+            };
+            for c in read {
+                assert!(
+                    plain.contains(&c.as_str()),
+                    "{} reads {c} through an expression and does not carry it",
+                    strand_name(s.table, s.parts)
+                );
+            }
+        }
+    }
+}
+
 /// Each strand's key holds its columns first, then its cycles, then at most one line, last.
 #[test]
 fn each_strand_holds_its_columns_then_its_cycles_then_the_line() {

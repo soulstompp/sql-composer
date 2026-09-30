@@ -234,12 +234,12 @@ pub const STRANDS: &[Strand] = &[
             MONTH,
             ORDERED_AT,
         ],
-        include: &[],
+        include: &["ordered_at"],
     },
     Strand {
         table: "lego_purchases",
         parts: &[MONTH, ORDERED_AT],
-        include: &["builder_id", "row_no"],
+        include: &["builder_id", "row_no", "ordered_at"],
     },
 ];
 

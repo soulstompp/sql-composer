@@ -1435,7 +1435,7 @@ fn no_column_repeats_a_value_its_references_decide() {
 #[test]
 fn each_strand_reads_only_its_own_table() {
     // The words of SQL the cycles' expressions use beside column names.
-    const SQL_WORDS: [&str; 3] = ["extract", "month", "from"];
+    const SQL_WORDS: [&str; 4] = ["extract", "month", "from", "smallint"];
     for s in STRANDS {
         let columns = cols(crate::load::table(s.table).columns);
         let mut named: Vec<String> = s.include.iter().map(|c| c.to_string()).collect();
@@ -1466,7 +1466,7 @@ fn each_strand_reads_only_its_own_table() {
 /// is also carried as the column itself, so the index returns what a query on that column reads.
 #[test]
 fn each_strand_carries_the_columns_its_expressions_read() {
-    const SQL_WORDS: [&str; 3] = ["extract", "month", "from"];
+    const SQL_WORDS: [&str; 4] = ["extract", "month", "from", "smallint"];
     for s in STRANDS {
         let plain: Vec<&str> = s
             .parts

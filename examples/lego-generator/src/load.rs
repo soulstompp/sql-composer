@@ -167,7 +167,7 @@ impl Strand {
 
 const MONTH: Part = Part::Cycle {
     label: "month",
-    sql: "extract(month FROM {clock}(ordered_at))",
+    sql: "extract(month FROM {clock}(ordered_at))::smallint",
 };
 const ORDERED_AT: Part = Part::Line("ordered_at");
 

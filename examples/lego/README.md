@@ -14,7 +14,8 @@ This single command will:
 1. Download the [lego SQL dump](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql) to `~/.cache/sql-composer/` (cached for future runs)
 2. Create the `sqlc_lego` database via `createdb`
 3. Load the lego data via `psql`
-4. Run migrations to create the extra tables (`set_category_summary`, `inventory_tracking`)
+4. Run migrations to create the extra tables (`set_category_summary`, `inventory_tracking`) and the
+   composite indexes for the joins between the dump's tables
 
 `setup` drops and recreates the database the URL names, after disconnecting its sessions: point it
 only at a database the example owns. The load stops at the first failed statement.

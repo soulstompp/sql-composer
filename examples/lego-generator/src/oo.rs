@@ -15,6 +15,8 @@
 //! its own leaves out its descendants' rows with a `NO INHERIT` CHECK. A table with two parents is a
 //! thing of both kinds, and a query through either parent reads it once.
 //!
+//! Every class has the generated table's primary key, and the sets' classes its strand too.
+//!
 //! After the build, a certificate reads every class's CHECKs back from the catalogue:
 //! - each hierarchy holds exactly the generated table's rows;
 //! - every row satisfying a class's CHECKs lies in that class or below it;
@@ -28,6 +30,7 @@ use sqlx::PgConnection;
 use tracing::info;
 
 use crate::calendar::{ZONE_COUNTRIES, ZONE_NAMES};
+use crate::load::{strand_name, STRANDS};
 
 /// The root themes of licensed sets, by name.
 pub const LICENSED: [&str; 10] = [
@@ -556,6 +559,17 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
                 &format!("ALTER TABLE {oo}.{} ADD PRIMARY KEY ({})", c.name, h.key),
             )
             .await?;
+            if let Some((_, columns)) = STRANDS.iter().find(|(t, _)| *t == h.table) {
+                exec(
+                    conn,
+                    &format!(
+                        "CREATE INDEX {} ON {oo}.{} ({columns})",
+                        strand_name(&c.name, columns),
+                        c.name
+                    ),
+                )
+                .await?;
+            }
             exec(conn, &format!("VACUUM (ANALYZE) {oo}.{}", c.name)).await?;
         }
     }

@@ -79,6 +79,24 @@ pub const TABLES: [TableDef; 13] = [
     TableDef { name: "generator_run", columns: "key, value", typed: "key text NOT NULL, value text NOT NULL", key: Some("key") },
 ];
 
+/// The composite indexes built after the load, by table: each led by the column the join into its
+/// table fixes, and ending on the column the next join reads.
+pub const STRANDS: [(&str, &str); 8] = [
+    ("lego_themes", "parent_id, id"),
+    ("lego_sets", "theme_id, set_num"),
+    ("lego_inventories", "set_num, version, id"),
+    ("lego_inventory_sets", "inventory_id, set_num"),
+    ("lego_inventory_parts", "inventory_id, part_num, color_id"),
+    ("lego_parts", "part_cat_id, part_num"),
+    ("lego_purchases", "set_num, builder_id"),
+    ("lego_collection", "set_num, builder_id"),
+];
+
+/// The name of a strand's index on `table` over `columns`.
+pub fn strand_name(table: &str, columns: &str) -> String {
+    format!("{table}_{}_idx", columns.replace(", ", "_"))
+}
+
 pub fn table(name: &str) -> &'static TableDef {
     TABLES
         .iter()
@@ -641,7 +659,8 @@ pub async fn watch_progress(
     }
 }
 
-/// After the load: keys (when built after), autovacuum back on, statistics, the visibility map.
+/// After the load: keys (when built after), autovacuum back on, the strands, statistics, the
+/// visibility map.
 pub async fn finish(
     conn: &mut PgConnection,
     s: &Settings,
@@ -672,6 +691,23 @@ pub async fn finish(
         ))
         .execute(&mut *conn)
         .await?;
+    }
+    for (table, columns) in STRANDS {
+        let started = Instant::now();
+        sqlx::query(&format!(
+            "CREATE INDEX {} ON {}.{table} ({columns})",
+            strand_name(table, columns),
+            s.schema
+        ))
+        .execute(&mut *conn)
+        .await?;
+        steps.push((format!("strand {table}"), started.elapsed()));
+        info!(
+            table,
+            columns,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "strand built"
+        );
     }
     if s.vacuum {
         for t in &TABLES {

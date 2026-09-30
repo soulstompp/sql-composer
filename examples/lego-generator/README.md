@@ -48,7 +48,9 @@ waves are written at once, each on its own session.
 
 Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for the
 text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are built
-after the load (`--index-timing before` builds them first). Autovacuum is off on the tables during
+after the load (`--index-timing before` builds them first). So are the strands: the composite
+indexes a DBA gives the tables for the joins between them, each led by the column the join into its
+table fixes (`STRANDS` in `src/load.rs`). Autovacuum is off on the tables during
 the load and back on afterwards (`--autovacuum-during-load on` leaves it on); then the tables are
 vacuumed and analysed. `--unlogged` creates unlogged tables for scratch runs, and
 `--synchronous-commit` sets the loading sessions' commit mode (off by default).

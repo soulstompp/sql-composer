@@ -5,11 +5,12 @@ use sqlx::{Postgres, Transaction};
 
 use crate::calendar;
 use crate::load::{table, Level};
+use crate::places;
 use crate::world::Stamp;
 
 fn stamp_text(s: &Stamp) -> String {
     match s {
-        Stamp::At { t, offset_min } => calendar::render_with_offset(*t, *offset_min),
+        Stamp::At { t, ms, offset_min } => calendar::render_with_offset(*t, *ms, *offset_min),
         Stamp::Infinity => "infinity".into(),
     }
 }
@@ -114,18 +115,30 @@ pub async fn insert(
         Level::Builders(w) => {
             let a: Vec<i32> = w.builders.iter().map(|r| r.builder_id).collect();
             let b: Vec<&str> = w.builders.iter().map(|r| r.name.as_str()).collect();
-            let c: Vec<&str> = w.builders.iter().map(|r| r.home_zone).collect();
-            let bytes = b
+            let c: Vec<i32> = w.builders.iter().map(|r| r.street_id).collect();
+            let d: Vec<i32> = w.builders.iter().map(|r| r.house_number).collect();
+            let e: Vec<f64> = w
+                .builders
                 .iter()
-                .chain(c.iter())
-                .map(|s| s.len() as u64)
-                .sum::<u64>()
-                + 4 * a.len() as u64;
-            let sql = q("lego_builders", "int4[], text[], text[]");
+                .map(|r| places::degrees(r.latitude))
+                .collect();
+            let f: Vec<f64> = w
+                .builders
+                .iter()
+                .map(|r| places::degrees(r.longitude))
+                .collect();
+            let bytes = b.iter().map(|s| s.len() as u64).sum::<u64>() + 28 * a.len() as u64;
+            let sql = q(
+                "lego_builders",
+                "int4[], text[], int4[], int4[], float8[], float8[]",
+            );
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
                 .bind(c)
+                .bind(d)
+                .bind(e)
+                .bind(f)
                 .execute(&mut **tx)
                 .await;
             (sql, bytes, r)
@@ -134,15 +147,23 @@ pub async fn insert(
             let a: Vec<i32> = w.collection.iter().map(|r| r.builder_id).collect();
             let b: Vec<i32> = w.collection.iter().map(|r| r.row_no).collect();
             let c: Vec<&str> = w.collection.iter().map(|r| r.set_num.as_str()).collect();
-            let d: Vec<&str> = w.collection.iter().map(|r| r.set_name.as_str()).collect();
-            let e: Vec<i32> = w.collection.iter().map(|r| r.quantity).collect();
+            let d: Vec<Option<&str>> = w
+                .collection
+                .iter()
+                .map(|r| r.typed_set_num.as_deref())
+                .collect();
+            let e: Vec<Option<&str>> = w
+                .collection
+                .iter()
+                .map(|r| r.typed_name.as_deref())
+                .collect();
             let bytes = c
                 .iter()
-                .chain(d.iter())
+                .chain(d.iter().chain(e.iter()).flatten())
                 .map(|s| s.len() as u64)
                 .sum::<u64>()
-                + 12 * a.len() as u64;
-            let sql = q("lego_collection", "int4[], int4[], text[], text[], int4[]");
+                + 8 * a.len() as u64;
+            let sql = q("lego_collection", "int4[], int4[], text[], text[], text[]");
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
@@ -157,7 +178,6 @@ pub async fn insert(
             let a: Vec<i64> = w.purchases.iter().map(|r| r.purchase_id).collect();
             let b: Vec<i32> = w.purchases.iter().map(|r| r.builder_id).collect();
             let c: Vec<i32> = w.purchases.iter().map(|r| r.row_no).collect();
-            let d: Vec<&str> = w.purchases.iter().map(|r| r.set_num.as_str()).collect();
             let e: Vec<&str> = w.purchases.iter().map(|r| r.store).collect();
             let f: Vec<String> = w
                 .purchases
@@ -174,22 +194,20 @@ pub async fn insert(
                 .iter()
                 .map(|r| stamp_text(&r.delivered_at))
                 .collect();
-            let bytes = d
+            let bytes = e
                 .iter()
-                .chain(e.iter())
                 .chain(g.iter())
                 .map(|s| s.len() as u64)
                 .sum::<u64>()
                 + 32 * a.len() as u64;
             let sql = q(
                 "lego_purchases",
-                "int8[], int4[], int4[], text[], text[], timestamptz[], text[], timestamptz[]",
+                "int8[], int4[], int4[], text[], timestamptz[], text[], timestamptz[]",
             );
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
                 .bind(c)
-                .bind(d)
                 .bind(e)
                 .bind(f)
                 .bind(g)

@@ -17,24 +17,10 @@ JOIN lego_inventories i ON i.id = ip.inventory_id
 LEFT JOIN lego_parts p ON p.part_num = ip.part_num
 LEFT JOIN lego_part_categories pc ON pc.id = p.part_cat_id
 LEFT JOIN lego_colors c ON c.id = ip.color_id
-WHERE i.set_num = $2
-
-),
-filter AS (
-    SELECT DISTINCT
-    p.part_num,
-    NULL::integer AS color_id
-FROM lego_parts p
-JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-WHERE pc.name = $1
+WHERE i.set_num = $1
 
 )
-SELECT p.*
-FROM set_part_details p
-WHERE EXISTS (
-    SELECT 1
-    FROM filter f
-    WHERE (f.part_num IS NULL OR f.part_num = p.part_num)
-      AND (f.color_id IS NULL OR f.color_id = p.color_id)
-)
-
+INSERT INTO inventory_tracking (set_num, version, part_num)
+SELECT DISTINCT $1, version, part_num
+FROM set_part_details
+ON CONFLICT (set_num, version, part_num) DO NOTHING

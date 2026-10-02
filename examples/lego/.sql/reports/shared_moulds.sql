@@ -1,6 +1,9 @@
-SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
-FROM lego_sets s
-JOIN lego_themes scope ON scope.id = $3
+SELECT * FROM (
+SELECT * FROM (
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
 WHERE s.theme_id IN (
     SELECT sc.theme_id
     FROM (
@@ -19,15 +22,17 @@ FROM closure
 WHERE NOT in_cycle
 
 ) tc
-WHERE tc.ancestor_id = $3
+WHERE tc.ancestor_id = $2
 
     ) sc
 )
-  AND s.year >= $2
-UNION
-SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
-FROM lego_sets s
-JOIN lego_themes scope ON scope.id = $1
+) AS _intersect_1
+INTERSECT
+SELECT * FROM (
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
 WHERE s.theme_id IN (
     SELECT sc.theme_id
     FROM (
@@ -50,5 +55,5 @@ WHERE tc.ancestor_id = $1
 
     ) sc
 )
-  AND s.year >= $2
-
+) AS _intersect_2
+) AS _intersect

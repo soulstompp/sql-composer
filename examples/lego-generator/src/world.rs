@@ -4,11 +4,13 @@
 //! Every row is a function of the wiring (seed, sizes, patch, dials) and of the row's own index,
 //! except that a wave's rows are written in a shuffled physical order.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::calendar::{self, LocalTime, Shift, Zone};
-use crate::catalogue::{decade_of, is_release_year, split_version, Real, DECADE_LO};
+use crate::catalogue::{decade_of, is_release_year, split_version, Real, Theme, DECADE_LO};
+use crate::chords::{self, Z_PAIRS};
 use crate::demand::{self, Alias, Spike, Timeline};
+use crate::places::Places;
 use crate::rng::{Purpose, Rng};
 use crate::switchboard::{Pattern, Switchboard};
 use crate::text;
@@ -98,11 +100,15 @@ pub struct NestOut {
     pub quantity: i32,
 }
 
+/// A builder, and where they live: a house on a street, and the home's point in microdegrees.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuilderOut {
     pub builder_id: i32,
     pub name: String,
-    pub home_zone: &'static str,
+    pub street_id: i32,
+    pub house_number: i32,
+    pub latitude: i32,
+    pub longitude: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,23 +116,27 @@ pub struct CollectionOut {
     pub builder_id: i32,
     pub row_no: i32,
     pub set_num: String,
-    pub set_name: String,
-    pub quantity: i32,
+    /// The set number as the builder typed it, on the rows that keep the builder's own spelling
+    /// (traps K1, K2 and K5).
+    pub typed_set_num: Option<String>,
+    /// The set's name as the builder typed it (trap K3).
+    pub typed_name: Option<String>,
 }
 
-/// An instant with the offset it is written in, or the open end of time.
+/// An instant with the offset it is written in, or the open end of time: `t` whole seconds since
+/// 1970-01-01 UTC, and `ms` the milliseconds past them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stamp {
-    At { t: i64, offset_min: i32 },
+    At { t: i64, ms: u16, offset_min: i32 },
     Infinity,
 }
 
+/// One copy a collection row holds, bought: the row is `(builder_id, row_no)`, and names the set.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PurchaseOut {
     pub purchase_id: i64,
     pub builder_id: i32,
     pub row_no: i32,
-    pub set_num: String,
     pub store: &'static str,
     pub ordered_at: Stamp,
     pub ordered_local: String,
@@ -170,6 +180,17 @@ pub struct BuilderWave {
     pub bought: Vec<(u64, u32)>,
 }
 
+/// A pack of the `zchord` phase: one of a pair.
+#[derive(Clone, Debug)]
+pub struct ZRole {
+    pub pair: u64,
+    pub first: bool,
+    pub class: [i32; 5],
+    pub partner: [i32; 5],
+    pub window: i32,
+    pub mirrored: bool,
+}
+
 /// What a synthesized set is, before its lines are drawn.
 #[derive(Clone, Debug)]
 pub struct Head {
@@ -181,6 +202,7 @@ pub struct Head {
     pub template: u32,
     pub socket: Option<u16>,
     pub trap: Option<(Trap, u64)>,
+    pub zchord: Option<ZRole>,
     /// For a pack of the wavy pattern: the year its children's offsets are measured from, and
     /// whether the offsets are mirrored.
     pub chord_shift: Option<(i32, bool)>,
@@ -205,12 +227,16 @@ pub struct World {
     pub real: Real,
     pub wiring: Wiring,
     pub board: Switchboard,
+    /// The cities, postcodes and streets the builders live in.
+    pub places: Places,
     pub set_traps: HashMap<u64, (Trap, u64)>,
     pub row_traps: HashMap<u64, (Trap, u64)>,
     pub planted: Vec<(Trap, u64)>,
     /// Synthesized unreleased or announced sets, which pre-orders name.
     pub unreleased: Vec<u64>,
     pub real_waves: u64,
+    /// Real sets with an inventory, by release year.
+    templates_by_year: HashMap<i32, Vec<u32>>,
     /// Real sets by (root theme, year), and by year: where a pack's children are drawn from.
     children_by_root_year: HashMap<(i32, i32), Vec<u32>>,
     children_by_year: HashMap<i32, Vec<u32>>,
@@ -221,6 +247,7 @@ pub struct World {
     folds: Vec<Vec<Shift>>,
     gaps: Vec<Vec<Shift>>,
     /// Window starts whose ten years all have real sets.
+    chord_windows: Vec<i32>,
     /// Per real pack, its children's year offsets from its own year, one per nesting row.
     pack_offsets: HashMap<u32, Vec<i32>>,
     /// Per set (a real set by its index, synthesized set `i` at the real sets' count plus `i`), its
@@ -261,8 +288,35 @@ fn day_begun_twice(fold: &Shift) -> Option<i64> {
     (fold.is_fold() && repeated.contains(&(day * 86_400))).then_some(day)
 }
 
+/// The first synthesized inventory id: past the real ones, on a round hundred thousand.
+fn inventory_base(real: &Real) -> i64 {
+    (i64::from(real.max_inventory_id) / 100_000 + 1) * 100_000
+}
+
+/// The id past every inventory `sets` synthesized sets number.
+pub fn inventory_ceiling(real: &Real, sets: u64) -> i64 {
+    inventory_base(real) + 2 * sets as i64
+}
+
 impl World {
     pub fn new(real: Real, wiring: Wiring, board: Switchboard) -> Result<World, String> {
+        let last_inventory = inventory_ceiling(&real, wiring.sets);
+        if last_inventory > i64::from(i32::MAX) {
+            return Err(format!(
+                "{} sets number their inventories up to {last_inventory}, past {}, the largest integer \
+                 the tables hold",
+                wiring.sets,
+                i32::MAX
+            ));
+        }
+        let mut templates_by_year: HashMap<i32, Vec<u32>> = HashMap::new();
+        for &t in &real.templates {
+            if let (Some(y), Some(_)) =
+                (real.cat.sets[t as usize].year, real.set_socket[t as usize])
+            {
+                templates_by_year.entry(y).or_default().push(t);
+            }
+        }
         let mut children_by_root_year: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
         let mut children_by_year: HashMap<i32, Vec<u32>> = HashMap::new();
         for (i, s) in real.cat.sets.iter().enumerate() {
@@ -302,6 +356,11 @@ impl World {
                     .partition(|s| s.is_fold())
             })
             .unzip();
+        let chord_windows: Vec<i32> = (DECADE_LO..=LAST_REAL_YEAR - 7)
+            .filter(|w| {
+                (*w..*w + 8).all(|y| children_by_year.get(&y).is_some_and(|v| v.len() >= 5))
+            })
+            .collect();
         let mut pack_offsets: HashMap<u32, Vec<i32>> = HashMap::new();
         for &t in &real.templates {
             let Some(inv) = real.first_inventory(t) else {
@@ -323,20 +382,24 @@ impl World {
             }
         }
         let real_waves = (real.cat.sets.len() as u64).div_ceil(wiring.chunk.max(1));
+        let places = Places::new(wiring.seed, wiring.builders);
         let mut w = World {
             real,
             wiring,
             board,
+            places,
             set_traps: HashMap::new(),
             row_traps: HashMap::new(),
             planted: Vec::new(),
             unreleased: Vec::new(),
             real_waves,
+            templates_by_year,
             children_by_root_year,
             children_by_year,
             old_sets,
             folds,
             gaps,
+            chord_windows,
             pack_offsets,
             on_sale: Vec::new(),
             buyable: Vec::new(),
@@ -353,13 +416,37 @@ impl World {
         self.wiring.builders * self.wiring.rows_per_builder
     }
 
+    /// The theme a set of trap B3 carries: none for an even ordinal, else a root theme the real
+    /// catalogue does not hold, which the generated theme list adds (`added_themes`).
+    fn unlisted_theme(&self, k: u64) -> Option<i32> {
+        (!k.is_multiple_of(2)).then(|| self.real.max_theme_id + 1 + (k % 7) as i32)
+    }
+
+    /// The root themes the generated theme list holds beside the real catalogue's: the ones the
+    /// sets of trap B3 carry, each named by its id.
+    pub fn added_themes(&self) -> Vec<Theme> {
+        let ids: BTreeSet<i32> = self
+            .set_traps
+            .values()
+            .filter(|(t, _)| *t == Trap::B3)
+            .filter_map(|&(_, k)| self.unlisted_theme(k))
+            .collect();
+        ids.into_iter()
+            .map(|id| Theme {
+                id,
+                name: format!("Unlisted theme {id}"),
+                parent_id: None,
+            })
+            .collect()
+    }
+
     fn assign_traps(&mut self) -> Result<(), String> {
         let seed = self.wiring.seed;
         for d in DECLS {
             let (population, map_is_sets) = match d.population {
                 Population::Sets => (self.wiring.sets, true),
                 Population::CollectionRows => (self.collection_rows(), false),
-                Population::Natural => continue,
+                Population::Natural | Population::Phase => continue,
             };
             let want = d.planted(population);
             let mut r = Rng::stream(seed, Purpose::TrapPick, d.trap as u64);
@@ -408,6 +495,7 @@ impl World {
                 let (base, v) = self.plain_number(k);
                 !lettered
                     && !rerelease
+                    && !self.in_zchord(k)
                     && v == 1
                     && !self.real.keys.contains(&base)
                     && (trap != Trap::K4 || !self.real.non_ascii.is_empty())
@@ -425,7 +513,7 @@ impl World {
                     _ => true,
                 }
             }
-            Population::Natural => false,
+            Population::Natural | Population::Phase => false,
         }
     }
 
@@ -437,15 +525,19 @@ impl World {
         (lettered, rerelease)
     }
 
+    fn in_zchord(&self, i: u64) -> bool {
+        self.board.phase_of(i).pattern == zchord_pattern()
+    }
+
     /// Whether synthesized set `i` is the `-2` record of set `i - 1`'s number.
     fn is_rerelease(&self, i: u64) -> bool {
         let (lettered, rerelease) = self.kind_raw(i);
-        if lettered || !rerelease || i == 0 || self.set_traps.contains_key(&i)
+        if lettered || !rerelease || i == 0 || self.in_zchord(i) || self.set_traps.contains_key(&i)
         {
             return false;
         }
         let (pl, pr) = self.kind_raw(i - 1);
-        !pl && !pr && !self.set_traps.contains_key(&(i - 1))
+        !pl && !pr && !self.in_zchord(i - 1) && !self.set_traps.contains_key(&(i - 1))
     }
 
     /// The number a plain synthesized set carries, with its version bumped past any real record. A
@@ -472,6 +564,10 @@ impl World {
         let rerelease = self.is_rerelease(i);
         let phase = self.board.phase_of(i);
 
+        if phase.pattern == zchord_pattern() {
+            return self.zchord_head(i);
+        }
+
         // The socket, and the real set this one is modelled on.
         let mut rs = Rng::stream(seed, Purpose::SetSocket, i);
         let mut cord = Rng::stream(seed, Purpose::SetCord, i);
@@ -491,10 +587,11 @@ impl World {
             Some((Trap::K8, _)) => {
                 let mut pick = self.slot(socket, &mut rt);
                 for _ in 0..64 {
-                    if real
-                        .first_inventory(pick.0)
-                        .is_some_and(|inv| !real.lines(inv.id).is_empty())
-                    {
+                    if real.first_inventory(pick.0).is_some_and(|inv| {
+                        real.lines(inv.id)
+                            .iter()
+                            .any(|l| real.cat.lists_part(l.part))
+                    }) {
                         break;
                     }
                     pick = self.slot(socket, &mut rt);
@@ -585,13 +682,7 @@ impl World {
         match trap {
             Some((Trap::K4, _)) => name = text::latin1_round_trip(&name),
             Some((Trap::B2, _)) => year = None,
-            Some((Trap::B3, k)) => {
-                theme_id = if k.is_multiple_of(2) {
-                    None
-                } else {
-                    Some(real.max_theme_id + 1 + (k % 7) as i32)
-                };
-            }
+            Some((Trap::B3, k)) => theme_id = self.unlisted_theme(k),
             Some((Trap::B4, _)) => year = Some(1949),
             Some((Trap::B5, _)) => year = Some(2031),
             _ => {}
@@ -648,7 +739,84 @@ impl World {
             template,
             socket: socket_final,
             trap,
+            zchord: None,
             chord_shift,
+        }
+    }
+
+    fn zchord_head(&self, i: u64) -> Head {
+        let seed = self.wiring.seed;
+        let real = &self.real;
+        let phase = self.board.phase_of(i);
+        let k = i - phase.start;
+        let pair = k / 2;
+        let first = k.is_multiple_of(2);
+        let (a, b) = Z_PAIRS[(pair % 3) as usize];
+        let (class, partner) = if first { (a, b) } else { (b, a) };
+        let wave = (pair * 2) / self.board.chunk;
+        let period = self.board.dials.wavy_period.max(1);
+        let pos = (wave % (2 * period)) as f64 / period as f64;
+        let (centre, mirrored) = if pos < 1.0 {
+            (pos, false)
+        } else {
+            (2.0 - pos, true)
+        };
+        let window = if self.chord_windows.is_empty() {
+            DECADE_LO
+        } else {
+            let n = self.chord_windows.len();
+            self.chord_windows[((centre * n as f64) as usize).min(n - 1)]
+        };
+        let notes = chords::placed(&class, mirrored);
+        let pack_year = window + notes.iter().copied().max().unwrap_or(0);
+        let mut rt = Rng::stream(seed, Purpose::SetTemplate, i);
+        let pool = self
+            .templates_by_year
+            .get(&pack_year)
+            .map(|v| v.as_slice())
+            .filter(|v| !v.is_empty())
+            .unwrap_or(&real.templates);
+        let packs: Vec<u32> = pool
+            .iter()
+            .copied()
+            .filter(|t| self.pack_offsets.contains_key(t))
+            .collect();
+        let template = if packs.is_empty() {
+            *rt.pick(pool)
+        } else {
+            *rt.pick(&packs)
+        };
+        let t = &real.cat.sets[template as usize];
+        let (base, v) = self.plain_number(i);
+        let socket = match (
+            t.theme_id.and_then(|th| real.root_of_theme.get(&th)),
+            decade_of(pack_year),
+        ) {
+            (Some(&root), Some(dec)) => real
+                .sockets
+                .iter()
+                .position(|s| s.root == root && s.decade == dec)
+                .map(|p| p as u16),
+            _ => None,
+        };
+        Head {
+            set_num: format!("{base}-{v}"),
+            base,
+            name: t.name.clone(),
+            year: Some(pack_year),
+            theme_id: t.theme_id,
+            template,
+            socket,
+            trap: None,
+            zchord: Some(ZRole {
+                pair,
+                first,
+                class,
+                partner,
+                window,
+                mirrored,
+            }),
+            chord_shift: None,
         }
     }
 
@@ -877,7 +1045,7 @@ impl World {
     }
 
     /// Natural traps a line carries: a sentinel colour, a part number whose text and number readings
-    /// disagree about the basic bricks 3001 to 3010.
+    /// disagree about the basic bricks 3001 to 3010, a part number the parts list does not hold.
     #[allow(clippy::too_many_arguments)]
     fn classify_line(
         &self,
@@ -917,6 +1085,18 @@ impl World {
                 String::new(),
             ));
         }
+        if !self.real.cat.lists_part(part) {
+            m.push(manifest(
+                Trap::B10,
+                origin,
+                "lego_inventory_parts",
+                &key(),
+                phase,
+                wave,
+                self.socket_label(*sock),
+                String::new(),
+            ));
+        }
     }
 
     /// Synthesized sets `lo..hi` as one wave.
@@ -925,7 +1105,7 @@ impl World {
         let seed = self.wiring.seed;
         let mut out = SetWave::default();
         let wave_no = w as i64;
-        let inv_base = (real.max_inventory_id as i64 / 100_000 + 1) * 100_000;
+        let inv_base = inventory_base(real);
         let mut scratch: Vec<(u32, i32, bool, i32)> = Vec::new();
         for i in lo..hi {
             let h = self.head(i);
@@ -937,10 +1117,14 @@ impl World {
             let mut rl = Rng::stream(seed, Purpose::SetLines, i);
 
             // Lines: the model's lowest-version inventory, a share recoloured into a colour the part
-            // is known in, merged back onto the line key.
+            // is known in, merged back onto the line key. A line naming a part number the parts
+            // list does not hold is the real catalogue's own, and is not copied.
             scratch.clear();
             if let Some(inv) = tinv {
                 for l in real.lines(inv.id) {
+                    if !real.cat.lists_part(l.part) {
+                        continue;
+                    }
                     let mut colour = l.color_id;
                     if rl.chance_ppm(self.wiring.recolour_ppm) {
                         if let Some(cs) = real.part_colours.get(&l.part) {
@@ -975,7 +1159,18 @@ impl World {
             let mut nests: Vec<NestOut> = Vec::new();
             let mut rc = Rng::stream(seed, Purpose::SetCord, i ^ 0x5eed);
             let mut taken: HashSet<u32> = HashSet::new();
-            if let Some(inv) = tinv {
+            if let Some(z) = &h.zchord {
+                for note in chords::placed(&z.class, z.mirrored) {
+                    if let Some(c) = self.child_for(root, z.window + note, &mut rc, &taken) {
+                        taken.insert(c);
+                        nests.push(NestOut {
+                            inventory_id: inv_id,
+                            set_num: real.cat.sets[c as usize].set_num.clone(),
+                            quantity: 1,
+                        });
+                    }
+                }
+            } else if let Some(inv) = tinv {
                 let offsets = self.pack_offsets.get(&t);
                 for (k, n) in real.nests(inv.id).iter().enumerate() {
                     let d = offsets.map_or(0, |o| o[k]);
@@ -1052,6 +1247,7 @@ impl World {
             let mut lines = merged.len() as u64;
             // A second, revised inventory: one line's count corrected.
             if h.trap.is_none()
+                && h.zchord.is_none()
                 && rl.chance_ppm(self.wiring.second_version_ppm)
                 && !merged.is_empty()
             {
@@ -1149,32 +1345,69 @@ impl World {
                     ));
                 }
             }
+            if let Some(z) = &h.zchord {
+                out.manifest.push(manifest(
+                    Trap::O5,
+                    Origin::Synthetic,
+                    "lego_sets",
+                    &h.set_num,
+                    &phase,
+                    wave_no,
+                    sock_label.clone(),
+                    format!(
+                        "pair={} member={} class={} partner={} window={} mirrored={} gaps={} consecutive={}",
+                        z.pair,
+                        if z.first { "first" } else { "second" },
+                        chords::class_label(&z.class),
+                        chords::class_label(&z.partner),
+                        z.window,
+                        z.mirrored,
+                        chords::class_label(&chords::gap_counts(&chords::placed(&z.class, z.mirrored)).map(|g| g as i32)),
+                        chords::consecutive_triples(&chords::placed(&z.class, z.mirrored))
+                    ),
+                ));
+            }
             out.sets.push(set);
-            // A bare record beside the -1: the number on the box, filed as a set of its own.
-            if matches!(h.trap, Some((Trap::K7, _))) {
-                let mut rtw = Rng::stream(seed, Purpose::SetCord, i ^ 0x7719);
-                let crosses = rtw.unit() < self.wiring.cross_twins;
-                let theme = match (crosses, h.theme_id) {
-                    (false, Some(th)) => real
-                        .parent_of_theme
-                        .get(&th)
-                        .copied()
-                        .flatten()
-                        .or(Some(th)),
-                    (true, _) => real.cat.sets[*rtw.pick(&real.templates) as usize].theme_id,
-                    (false, None) => None,
-                };
-                let k = h.trap.map_or(0, |t| t.1);
+            // A bare record beside the -1: the number on the box, filed as a set of its own. A K8
+            // set's inventory is filed under it, with the set's own theme and part count.
+            let twin = match h.trap {
+                Some((Trap::K7, k)) => {
+                    let mut rtw = Rng::stream(seed, Purpose::SetCord, i ^ 0x7719);
+                    let crosses = rtw.unit() < self.wiring.cross_twins;
+                    let theme = match (crosses, h.theme_id) {
+                        (false, Some(th)) => real
+                            .parent_of_theme
+                            .get(&th)
+                            .copied()
+                            .flatten()
+                            .or(Some(th)),
+                        (true, _) => real.cat.sets[*rtw.pick(&real.templates) as usize].theme_id,
+                        (false, None) => None,
+                    };
+                    Some((
+                        theme,
+                        if k.is_multiple_of(2) {
+                            Some(0)
+                        } else {
+                            num_parts.map(|n| (n - 1).max(0))
+                        },
+                        format!("twin of {}", h.set_num),
+                    ))
+                }
+                Some((Trap::K8, _)) => Some((
+                    h.theme_id,
+                    num_parts,
+                    format!("twin of {}, holding its inventory", h.set_num),
+                )),
+                _ => None,
+            };
+            if let Some((theme, twin_parts, detail)) = twin {
                 let twin = crate::catalogue::SetRec {
                     set_num: h.base.clone(),
                     name: h.name.clone(),
                     year: h.year,
                     theme_id: theme,
-                    num_parts: if k.is_multiple_of(2) {
-                        Some(0)
-                    } else {
-                        num_parts.map(|n| (n - 1).max(0))
-                    },
+                    num_parts: twin_parts,
                 };
                 // The bare record is a set row of its own: it carries the traps its year and
                 // number carry, and counts in its phase and socket.
@@ -1217,7 +1450,7 @@ impl World {
                     &phase,
                     wave_no,
                     sock_label,
-                    format!("twin of {}", h.set_num),
+                    detail,
                 ));
             }
         }
@@ -1309,15 +1542,15 @@ impl World {
         )
     }
 
-    /// The number, name and year of set `set` (see `on_sale`).
-    fn set_named(&self, set: u64) -> (String, String, Option<i32>) {
+    /// The number and year of set `set` (see `on_sale`).
+    fn set_named(&self, set: u64) -> (String, Option<i32>) {
         let reals = self.real.cat.sets.len() as u64;
         if set < reals {
             let s = &self.real.cat.sets[set as usize];
-            (s.set_num.clone(), s.name.clone(), s.year)
+            (s.set_num.clone(), s.year)
         } else {
             let h = self.head(set - reals);
-            (h.set_num, h.name, h.year)
+            (h.set_num, h.year)
         }
     }
 
@@ -1348,10 +1581,16 @@ impl World {
                 FIRST_NAMES[(j % 32) as usize],
                 char::from(b'A' + ((j / 32) % 26) as u8)
             );
+            let lives = self
+                .places
+                .home(zone_index(j), &mut Rng::stream(seed, Purpose::Address, j));
             out.builders.push(BuilderOut {
                 builder_id,
                 name,
-                home_zone: zone.name,
+                street_id: lives.street_id,
+                house_number: lives.house_number,
+                latitude: lives.latitude,
+                longitude: lives.longitude,
             });
             for row in 0..rpb {
                 let c = j * rpb + row;
@@ -1368,24 +1607,23 @@ impl World {
                     )) => u64::from(*r.pick(&self.old_sets)),
                     _ => self.bought_set(home, &mut r),
                 };
-                let (set_num, set_name, set_year) = self.set_named(set);
-                let typed = match trap {
-                    Some((Trap::K1, k)) => text::case_variant(&set_num, k),
-                    Some((Trap::K2, k)) => text::whitespace_variant(&set_num, k),
-                    Some((Trap::K5, k)) => text::dash_variant(&set_num, k),
-                    _ => set_num.clone(),
+                let (set_num, set_year) = self.set_named(set);
+                let typed_set_num = match trap {
+                    Some((Trap::K1, k)) => Some(text::case_variant(&set_num, k)),
+                    Some((Trap::K2, k)) => Some(text::whitespace_variant(&set_num, k)),
+                    Some((Trap::K5, k)) => Some(text::dash_variant(&set_num, k)),
+                    _ => None,
                 };
                 let typed_name = match trap {
-                    Some((Trap::K3, k)) => {
-                        if k % 2 == 0 {
-                            "Café Corner".to_string()
-                        } else {
-                            text::nfd_latin1("Café Corner")
-                        }
-                    }
-                    _ => set_name.clone(),
+                    Some((Trap::K3, k)) => Some(if k % 2 == 0 {
+                        "Café Corner".to_string()
+                    } else {
+                        text::nfd_latin1("Café Corner")
+                    }),
+                    _ => None,
                 };
-                let quantity: i32 = match trap {
+                // The copies the row holds, each one a purchase.
+                let copies: u64 = match trap {
                     Some((Trap::D1, _)) => 2,
                     Some((Trap::D5, _)) => 1,
                     _ => match r.below(100) {
@@ -1397,9 +1635,9 @@ impl World {
                 out.collection.push(CollectionOut {
                     builder_id,
                     row_no,
-                    set_num: typed.clone(),
-                    set_name: typed_name,
-                    quantity,
+                    set_num: set_num.clone(),
+                    typed_set_num,
+                    typed_name,
                 });
                 let row_key = format!("{builder_id}|{row_no}");
                 if let Some((t @ (Trap::K1 | Trap::K2 | Trap::K3 | Trap::K5), _)) = trap {
@@ -1415,6 +1653,7 @@ impl World {
                     ));
                 }
                 let mut rp = Rng::stream(seed, Purpose::Purchase, c);
+                let mut rs = Rng::stream(seed, Purpose::Seconds, c);
                 let first_year = set_year.map_or(FIRST_PURCHASE_YEAR, |y| {
                     i64::from(y).max(FIRST_PURCHASE_YEAR)
                 });
@@ -1423,8 +1662,9 @@ impl World {
                     trap,
                     set,
                     first_year,
-                    quantity as u64,
+                    copies,
                     &mut rp,
+                    &mut rs,
                 );
                 out.bought.push((set, stamps.len() as u32));
                 for (k, (store, ordered, local, delivered)) in stamps.into_iter().enumerate() {
@@ -1433,7 +1673,6 @@ impl World {
                         purchase_id,
                         builder_id,
                         row_no,
-                        set_num: set_num.clone(),
                         store,
                         ordered_at: ordered,
                         ordered_local: local,
@@ -1454,7 +1693,7 @@ impl World {
                             ));
                         }
                     }
-                    if let Stamp::At { t, offset_min } = p.ordered_at {
+                    if let Stamp::At { t, offset_min, .. } = p.ordered_at {
                         let local_days = (t + i64::from(offset_min) * 60).div_euclid(86_400);
                         let (ly, lm, ld) = calendar::civil_from_days(local_days);
                         let (uy, um, _) = calendar::civil_from_days(t.div_euclid(86_400));
@@ -1519,7 +1758,8 @@ impl World {
         out
     }
 
-    /// Traps that belong to a whole table or to an absence rather than to a row.
+    /// Traps that belong to a whole table or to an absence rather than to a row, and the root themes
+    /// the generated theme list adds.
     pub fn plan_manifest(&self) -> Vec<ManifestOut> {
         let mut m = Vec::new();
         for table in [
@@ -1573,6 +1813,18 @@ impl World {
             None,
             "synthesized sets modelled on one real set tie on their brick count".into(),
         ));
+        for t in self.added_themes() {
+            m.push(manifest(
+                Trap::B3,
+                Origin::Synthetic,
+                "lego_themes",
+                &t.id.to_string(),
+                "plan",
+                -1,
+                None,
+                "a root theme the real catalogue does not hold".into(),
+            ));
+        }
         m
     }
 
@@ -1582,8 +1834,10 @@ impl World {
     }
 
     /// The purchases of one collection row: store, when ordered, the wall clock the builder wrote,
-    /// and when delivered.
-    fn purchase_times(
+    /// and when delivered. `r` draws each reading's minute, and `rs` where in its minute it falls,
+    /// so the minutes are the same whether or not a reading carries its seconds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn purchase_times(
         &self,
         zi: usize,
         trap: Option<(Trap, u64)>,
@@ -1591,6 +1845,7 @@ impl World {
         first_year: i64,
         copies: u64,
         r: &mut Rng,
+        rs: &mut Rng,
     ) -> Vec<(&'static str, Stamp, String, Stamp)> {
         let zone = &calendar::zones()[zi];
         let today = calendar::days_from_civil(TODAY.0, TODAY.1, TODAY.2);
@@ -1601,35 +1856,34 @@ impl World {
                 .filter(|s| s.at >= year_start(first_year))
                 .collect()
         };
-        let at = |t: i64| Stamp::At {
-            t,
-            offset_min: zone.offset_min_at(t),
-        };
+        // Milliseconds into a minute.
+        let mut within = || rs.below(60_000) as i64;
+        let at = |t: i64, into: i64| into_minute(t, into, zone.offset_min_at(t));
         let mut out = Vec::new();
         let online = STORES[1].0;
-        let deliver = |ordered: i64, r: &mut Rng| -> Stamp {
+        let deliver = |ordered: i64, r: &mut Rng, into: i64| -> Stamp {
             let local_days = (ordered + i64::from(zone.offset_min_at(ordered)) * 60)
                 .div_euclid(86_400)
                 + r.range_i64(2, 9);
             let hour = r.range_i64(10, 17) as u32;
             let minute = r.below(60) as u32;
-            let t = zone.instant_of(calendar::local_secs(local_days, hour, minute));
-            Stamp::At {
-                t,
-                offset_min: zone.offset_min_at(t),
-            }
+            at(
+                zone.instant_of(calendar::local_secs(local_days, hour, minute)),
+                into,
+            )
         };
         match trap {
             Some((Trap::D1, _)) => {
-                // Both readings of one minute in the hour a fold reads twice.
+                // Both readings of one clock time in the hour a fold reads twice.
                 let folds = since(&self.folds[zi]);
                 let fold = *r.pick(&folds);
                 let len = fold.len_secs();
                 let a = fold.at - len + 60 * r.below((len / 60) as u64) as i64;
                 let b = a + len;
-                let local = calendar::render_local_minute(a + i64::from(fold.before_min) * 60);
-                out.push((online, at(a), local.clone(), deliver(a, r)));
-                out.push((online, at(b), local, deliver(b, r)));
+                let into = within();
+                let local = reading(a + i64::from(fold.before_min) * 60, into);
+                out.push((online, at(a, into), local.clone(), deliver(a, r, within())));
+                out.push((online, at(b, into), local, deliver(b, r, within())));
                 return out;
             }
             Some((Trap::D2, _)) => {
@@ -1638,15 +1892,12 @@ impl World {
                 let gap = *r.pick(&gaps);
                 let t = gap.at + 60 * r.below((gap.len_secs() / 60) as u64) as i64;
                 let before = gap.before_min;
-                let local = calendar::render_local_minute(t + i64::from(before) * 60);
+                let into = within();
                 out.push((
                     online,
-                    Stamp::At {
-                        t,
-                        offset_min: before,
-                    },
-                    local,
-                    deliver(t, r),
+                    into_minute(t, into, before),
+                    reading(t + i64::from(before) * 60, into),
+                    deliver(t, r, within()),
                 ));
             }
             Some((Trap::D8, _)) => {
@@ -1661,11 +1912,12 @@ impl World {
                 let local =
                     midnight + 60 * r.below(((repeated_until - midnight) / 60) as u64) as i64;
                 let t = local - i64::from(fold.before_min) * 60;
+                let into = within();
                 out.push((
                     online,
-                    at(t),
-                    calendar::render_local_minute(local),
-                    deliver(t, r),
+                    at(t, into),
+                    reading(local, into),
+                    deliver(t, r, within()),
                 ));
             }
             Some((Trap::D3, _)) => {
@@ -1695,17 +1947,17 @@ impl World {
                         let (ly, lm, _) = calendar::civil_from_days(local_days);
                         let (uy, um, _) = calendar::civil_from_days(t.div_euclid(86_400));
                         if (ly, lm) != (uy, um) {
-                            let local = calendar::render_local_minute(calendar::local_secs(
-                                days, hour, minute,
-                            ));
-                            out.push((online, at(t), local, deliver(t, r)));
+                            let into = within();
+                            let local = reading(calendar::local_secs(days, hour, minute), into);
+                            out.push((online, at(t, into), local, deliver(t, r, within())));
                             break;
                         }
                     }
                 }
             }
             Some((Trap::D4, _)) => loop {
-                // A midnight the clock skipped has no instant to write as 24:00 of the eve.
+                // A midnight the clock skipped has no instant to write as 24:00 of the eve. The
+                // reading is the midnight itself, so nothing falls past it.
                 let eve = r.range_i64(calendar::days_from_civil(first_year, 1, 1), today - 1);
                 if let LocalTime::Unique(t) | LocalTime::Twice(t, _) =
                     zone.instants_of(calendar::local_secs(eve + 1, 0, 0))
@@ -1713,9 +1965,9 @@ impl World {
                     let (y, m, d) = calendar::civil_from_days(eve);
                     out.push((
                         STORES[0].0,
-                        at(t),
-                        format!("{y:04}-{m:02}-{d:02} 24:00"),
-                        at(t),
+                        at(t, 0),
+                        format!("{y:04}-{m:02}-{d:02} 24:00:00.000"),
+                        at(t, 0),
                     ));
                     break;
                 }
@@ -1727,10 +1979,11 @@ impl World {
                 if let LocalTime::Unique(t) | LocalTime::Twice(t, _) =
                     zone.instants_of(calendar::local_secs(day, hour, minute))
                 {
+                    let into = within();
                     out.push((
                         online,
-                        at(t),
-                        calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
+                        at(t, into),
+                        reading(calendar::local_secs(day, hour, minute), into),
                         Stamp::Infinity,
                     ));
                     break;
@@ -1750,11 +2003,12 @@ impl World {
                 if let LocalTime::Unique(t) =
                     zone.instants_of(calendar::local_secs(day, hour, minute))
                 {
+                    let into = within();
                     out.push((
                         STORES[0].0,
-                        at(t),
-                        calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
-                        at(t),
+                        at(t, into),
+                        reading(calendar::local_secs(day, hour, minute), into),
+                        at(t, into),
                     ));
                     break;
                 }
@@ -1782,11 +2036,12 @@ impl World {
                     if let LocalTime::Unique(t) =
                         zone.instants_of(calendar::local_secs(day, hour, minute))
                     {
+                        let into = within();
                         out.push((
                             STORES[0].0,
-                            at(t),
-                            calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
-                            at(t),
+                            at(t, into),
+                            reading(calendar::local_secs(day, hour, minute), into),
+                            at(t, into),
                         ));
                         break;
                     }
@@ -1816,11 +2071,16 @@ impl World {
             let minute = r.below(60) as u32;
             // The clock the builder saw: a reading the clock skipped is read on past the gap.
             let t = zone.instant_of(calendar::local_secs(day, hour, minute));
-            let delivered = if store.4 { deliver(t, r) } else { at(t) };
+            let into = within();
+            let delivered = if store.4 {
+                deliver(t, r, within())
+            } else {
+                at(t, into)
+            };
             out.push((
                 store.0,
-                at(t),
-                calendar::render_local_minute(t + i64::from(zone.offset_min_at(t)) * 60),
+                at(t, into),
+                reading(t + i64::from(zone.offset_min_at(t)) * 60, into),
                 delivered,
             ));
         }
@@ -1828,12 +2088,32 @@ impl World {
     }
 }
 
+/// The instant `into` milliseconds past the whole minute `t`, written at `offset_min`.
+fn into_minute(t: i64, into: i64, offset_min: i32) -> Stamp {
+    Stamp::At {
+        t: t + into / 1000,
+        ms: (into % 1000) as u16,
+        offset_min,
+    }
+}
 
-/// A synthesized set's number: seven digits, distinct for every index below nine million.
+/// The wall clock `into` milliseconds past the whole minute `local`.
+fn reading(local: i64, into: i64) -> String {
+    calendar::render_local(local + into / 1000, (into % 1000) as u16)
+}
+
+/// The `zchord` phase's pattern.
+pub fn zchord_pattern() -> Pattern {
+    Pattern::Zchord
+}
+
+/// A synthesized set's number: seven digits for the first nine million sets, then each further
+/// nine million in a band of its own, above the numbers the band before moves to when its bare
+/// form is a real record.
 pub fn base_number(seed: u64, i: u64) -> u64 {
     const SPAN: u64 = 9_000_000;
     const MULT: u64 = 7_654_321;
-    1_000_000 + (i.wrapping_mul(MULT) + seed % SPAN) % SPAN
+    1_000_000 + i / SPAN * 2 * SPAN + (i.wrapping_mul(MULT) + seed % SPAN) % SPAN
 }
 
 /// A name whose UTF-8 was read back as Latin-1: a lead byte of a two-byte sequence (`Ã`, `Â`,

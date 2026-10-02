@@ -1,4 +1,5 @@
-SELECT part_num
-FROM lego_inventory_parts ip
-JOIN lego_colors c ON c.id = ip.color_id
+SELECT DISTINCT
+    NULL::varchar AS part_num,
+    c.id AS color_id
+FROM lego_colors c
 WHERE c.name = $1

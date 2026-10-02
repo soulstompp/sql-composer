@@ -1,0 +1,716 @@
+# The real cities in the builders' home zones: Natural Earth's 1:10m populated places (public domain,
+# https://www.naturalearthdata.com), from nvkelso/natural-earth-vector at ca96624a, geojson/ne_10m_populated_places.geojson:
+# each place whose TIMEZONE is a home zone and whose ISO_A2 is that zone's country. Where TIMEZONE is empty the zone
+# is the one the place's country or state keeps (New South Wales but Goondiwindi, which is in Queensland; California and
+# Idaho's Wallace; Connecticut, Pennsylvania, North Carolina and Florida's Jacksonville; all of GB, IN and JP).
+# population is POP_MAX, and area_km2 MIN_AREAKM, the urban core's area (0 where the source gives none).
+country	zone	name	region	latitude	longitude	population	area_km2
+AU	Australia/Sydney	Sydney	New South Wales	-33.918065	151.183234	4630000	1078
+AU	Australia/Sydney	Newcastle	New South Wales	-32.845348	151.815012	540796	179
+AU	Australia/Sydney	Canberra	Australian Capital Territory	-35.283029	149.129026	327700	226
+AU	Australia/Sydney	Wollongong	New South Wales	-34.415381	150.890004	260914	98
+AU	Australia/Sydney	Albury	New South Wales	-36.060035	146.920014	104258	34
+AU	Australia/Sydney	Nowra	New South Wales	-34.882846	150.600048	94781	30
+AU	Australia/Sydney	Wagga Wagga	New South Wales	-35.12216	147.339988	55381	49
+AU	Australia/Sydney	Port Macquarie	New South Wales	-31.44502	152.918666	48547	31
+AU	Australia/Sydney	Taree	New South Wales	-31.897602	152.461846	44182	15
+AU	Australia/Sydney	Orange	New South Wales	-33.279998	149.099984	39329	35
+AU	Australia/Sydney	Tamworth	New South Wales	-31.102612	150.917134	38551	30
+AU	Australia/Sydney	Tweed Heads	New South Wales	-28.182583	153.546638	33065	29
+AU	Australia/Sydney	Queanbeyan	Australian Capital Territory	-35.3546	149.211347	32602	25
+AU	Australia/Sydney	Dubbo	New South Wales	-32.259957	148.597327	31574	41
+AU	Australia/Sydney	Lismore	New South Wales	-28.816653	153.293113	31430	26
+AU	Australia/Sydney	Armidale	New South Wales	-30.512312	151.667476	22673	21
+AU	Australia/Sydney	Katoomba	New South Wales	-33.706949	150.320013	22076	25
+AU	Australia/Sydney	Goulburn	New South Wales	-34.749573	149.710179	20940	18
+AU	Australia/Sydney	Echuca	New South Wales	-36.129592	144.750017	19457	12
+AU	Australia/Sydney	Maitland	New South Wales	-32.720963	151.555028	18625	17
+AU	Australia/Sydney	Forster-Tuncurry	New South Wales	-32.19314	152.526648	17591	9
+AU	Australia/Sydney	Griffith	New South Wales	-34.290014	146.040016	15455	10
+AU	Australia/Sydney	Ballina	New South Wales	-28.861353	153.56798	14242	17
+AU	Australia/Sydney	Richmond	New South Wales	-33.599514	150.739987	13880	13
+AU	Australia/Sydney	Singleton	New South Wales	-32.569499	151.160013	13813	5
+AU	Australia/Sydney	Kempsey	New South Wales	-31.087367	152.822031	11840	15
+AU	Australia/Sydney	Muswellbrook	New South Wales	-32.269569	150.890004	11630	11
+AU	Australia/Sydney	Parkes	New South Wales	-33.129568	148.170015	11137	10
+AU	Australia/Sydney	Lithgow	New South Wales	-33.496109	150.152788	11128	14
+AU	Australia/Sydney	Batemans Bay	New South Wales	-35.689619	150.207307	10557	1
+AU	Australia/Sydney	Kiama	New South Wales	-34.709575	150.840033	10379	0
+AU	Australia/Sydney	Grafton	New South Wales	-29.711999	152.937683	9955	7
+AU	Australia/Sydney	Ulladulla	New South Wales	-35.349536	150.47003	9250	6
+AU	Australia/Sydney	Inverell	New South Wales	-29.766776	151.112574	8561	7
+AU	Australia/Sydney	Moree	New South Wales	-29.469895	149.830069	8203	15
+AU	Australia/Sydney	Deniliquin	New South Wales	-35.529577	144.950005	8024	5
+AU	Australia/Sydney	Young	New South Wales	-34.3096	148.290008	7501	8
+AU	Australia/Sydney	Leeton	New South Wales	-34.544934	146.397307	7299	6
+AU	Australia/Sydney	Gunnedah	New South Wales	-30.987012	150.26229	7148	10
+AU	Australia/Sydney	Narrabri	New South Wales	-30.33191	149.787436	7082	11
+AU	Australia/Sydney	Cowra	New South Wales	-33.829629	148.68001	6795	9
+AU	Australia/Sydney	Byron Bay	New South Wales	-28.656508	153.612887	6764	5
+AU	Australia/Sydney	Tumut	New South Wales	-35.30959	148.220038	6526	6
+AU	Australia/Sydney	Cooma	New South Wales	-36.239559	149.120035	6520	6
+AU	Australia/Sydney	Merimbula	New South Wales	-36.899622	149.900039	6367	1
+AU	Australia/Sydney	Bathurst	New South Wales	-33.419628	149.570033	6111	9
+AU	Australia/Sydney	Mudgee	New South Wales	-32.589601	149.58011	5391	12
+AU	Australia/Sydney	Forbes	New South Wales	-33.389604	148.019998	4838	6
+AU	Australia/Sydney	Scone	New South Wales	-32.079607	150.85011	4624	0
+AU	Australia/Sydney	Central Coast	New South Wales	-33.420042	151.300005	3026	4
+AU	Australia/Sydney	Bourke	New South Wales	-30.1	145.933333	2475	0
+AU	Australia/Sydney	Yamba	New South Wales	-29.422991	153.353312	1806	3
+AU	Australia/Sydney	Wilcannia	New South Wales	-31.566201	143.38333	442	1
+AU	Australia/Sydney	Ivanhoe	New South Wales	-32.899608	144.300019	265	0
+DK	Europe/Copenhagen	København	Hovedstaden	55.68051	12.56154	1085000	438
+DK	Europe/Copenhagen	Århus	Midtjylland	56.157204	10.210684	237551	131
+DK	Europe/Copenhagen	Odense	Syddanmark	55.400377	10.383335	158222	100
+DK	Europe/Copenhagen	Aalborg	Nordjylland	57.033714	9.916593	122219	76
+DK	Europe/Copenhagen	Esbjerg	Syddanmark	55.467039	8.450016	72205	46
+DK	Europe/Copenhagen	Vejle	Syddanmark	55.709001	9.534997	51177	0
+DK	Europe/Copenhagen	Roskilde	Sjaælland	55.649974	12.083335	44285	27
+DK	Europe/Copenhagen	Viborg	Midtjylland	56.433337	9.399984	34831	24
+DK	Europe/Copenhagen	Svendborg	Syddanmark	55.070423	10.616654	29180	27
+DK	Europe/Copenhagen	Hillerød	Hovedstaden	55.933299	12.316699	28313	0
+DK	Europe/Copenhagen	Frederikshavn	Nordjylland	57.433689	10.5333	24103	17
+DK	Europe/Copenhagen	Sorø	Sjaælland	55.432998	11.566702	7167	0
+GB	Europe/London	London	Westminster	51.501941	-0.118668	8567000	1914
+GB	Europe/London	Birmingham	West Midlands	52.47692	-1.921943	2285000	838
+GB	Europe/London	Manchester	Manchester	53.502361	-2.249933	2230000	1052
+GB	Europe/London	Leeds	West Yorkshire	53.831953	-1.581963	1529000	293
+GB	Europe/London	Sheffield	South Yorkshire	53.366677	-1.499997	1292900	624
+GB	Europe/London	Glasgow	Glasgow	55.876351	-4.252653	1160000	468
+GB	Europe/London	Newcastle	Tyne and Wear	55.002321	-1.601936	882000	179
+GB	Europe/London	Nottingham	Nottingham	52.970344	-1.170017	825600	395
+GB	Europe/London	Liverpool	Merseyside	53.417948	-2.919944	811000	535
+GB	Europe/London	Southend-on-Sea	Southend-on-Sea	51.550018	0.719997	618386	298
+GB	Europe/London	Bristol	Bristol	51.449998	-2.583316	553528	218
+GB	Europe/London	Edinburgh	Edinburgh	55.948328	-3.219091	504966	175
+GB	Europe/London	Brighton	Brighton and Hove	50.830346	-0.169974	503008	169
+GB	Europe/London	Bradford	West Yorkshire	53.800035	-1.749981	501700	387
+GB	Europe/London	Leicester	Leicester	52.629977	-1.133249	457983	199
+GB	Europe/London	Sunderland	Tyne and Wear	54.920019	-1.38003	452934	170
+GB	Europe/London	Belfast	Belfast	54.600012	-5.960034	450406	192
+GB	Europe/London	Portsmouth	Portsmouth	50.800348	-1.080022	442252	172
+GB	Europe/London	Bournemouth	Bournemouth	50.72999	-1.90005	426945	194
+GB	Europe/London	Middlesbrough	Stockton-on-Tees	54.580375	-1.230013	416042	214
+GB	Europe/London	Stoke	Stoke-on-Trent	53.000368	-2.180007	390801	188
+GB	Europe/London	Coventry	West Midlands	52.420404	-1.499997	388271	167
+GB	Europe/London	Southampton	Southampton	50.900031	-1.399977	384417	158
+GB	Europe/London	Reading	Oxfordshire	51.469971	-0.980028	369804	466
+GB	Europe/London	Kingston upon Hull	Kingston upon Hull	53.750426	-0.329991	302296	120
+GB	Europe/London	Swansea	Swansea	51.629987	-3.950002	294339	179
+GB	Europe/London	Blackpool	Lancashire	53.830395	-3.050005	272792	94
+GB	Europe/London	Plymouth	Plymouth	50.385386	-4.159989	247297	86
+GB	Europe/London	Luton	Luton	51.880359	-0.420011	235958	76
+GB	Europe/London	Oxford	Oxfordshire	51.770418	-1.249986	192796	94
+GB	Europe/London	Norwich	Norfolk	52.630365	1.300013	190756	78
+GB	Europe/London	Aberdeen	Aberdeen	57.170398	-2.079987	189364	76
+GB	Europe/London	York	York	53.970387	-1.080022	158947	64
+GB	Europe/London	Dundee	Dundee	56.470389	-3.000008	151592	59
+GB	Europe/London	Ipswich	Suffolk	52.070348	1.169996	143767	66
+GB	Europe/London	Peterborough	Peterborough	52.58042	-0.249995	140141	0
+GB	Europe/London	Cambridge	Cambridgeshire	52.200391	0.116623	128488	0
+GB	Europe/London	Exeter	Devon	50.700405	-3.52995	113118	50
+GB	Europe/London	Bath	Bath and North East Somerset	51.383749	-2.350022	93238	42
+GB	Europe/London	Chester	Cheshire	53.20002	-2.919987	89531	47
+GB	Europe/London	Londonderry/Derry	Derry	55.000375	-7.333284	83652	36
+GB	Europe/London	Greenock	Inverclyde	55.93329	-4.750031	74635	37
+GB	Europe/London	Carlisle	Cumbria	54.879995	-2.929987	72633	42
+GB	Europe/London	Scarborough	North Yorkshire	54.280394	-0.429984	70571	32
+GB	Europe/London	Ayr	South Ayrshire	55.4504	-4.61668	69042	27
+GB	Europe/London	Inverness	Highland	57.467124	-4.233266	45158	25
+GB	Europe/London	Perth	Perthshire and Kinross	56.400342	-3.46998	39654	22
+GB	Europe/London	Dover	Kent	51.133712	1.300013	36384	24
+GB	Europe/London	Dumfries	Dumfries and Galloway	55.06709	-3.550001	31044	23
+GB	Europe/London	Omagh	Omagh	54.600012	-7.300004	21056	14
+GB	Europe/London	Penzance	Cornwall	50.133722	-5.550034	20812	14
+GB	Europe/London	Lisburn	Dungannon	54.520379	-6.670017	12899	13
+GB	Europe/London	Fort William	Highland	56.816478	-5.112076	9652	0
+GB	Europe/London	Kirkwall	Moray	58.966981	-2.950011	8500	5
+GB	Europe/London	Wick	Highland	58.433293	-3.083363	7147	0
+GB	Europe/London	Lerwick	Aberdeen	60.150035	-1.149992	6594	6
+IN	Asia/Kolkata	Mumbai	Maharashtra	19.018936	72.855043	18978000	442
+IN	Asia/Kolkata	Delhi	Delhi	28.671939	77.228058	15926000	669
+IN	Asia/Kolkata	Kolkata	West Bengal	22.496915	88.32273	14787000	2490
+IN	Asia/Kolkata	Chennai	Tamil Nadu	13.091934	80.278053	7163000	1920
+IN	Asia/Kolkata	Bengaluru	Karnataka	12.971941	77.558064	6787000	2443
+IN	Asia/Kolkata	Hyderabad	Telangana	17.401929	78.478008	6376000	824
+IN	Asia/Kolkata	Amaravati	Andhra Pradesh	16.533658	80.52432	5800000	0
+IN	Asia/Kolkata	Ahmedabad	Dadra and Nagar Haveli	23.031999	72.578058	5375000	2231
+IN	Asia/Kolkata	Haora	West Bengal	22.58039	88.329947	4841638	2100
+IN	Asia/Kolkata	Pune	Maharashtra	18.531963	73.848058	4672000	981
+IN	Asia/Kolkata	Surat	Dadra and Nagar Haveli	21.20193	72.838094	3842000	1589
+IN	Asia/Kolkata	Kanpur	Uttar Pradesh	26.461945	80.31805	3162000	4605
+IN	Asia/Kolkata	Jaipur	Rajasthan	26.923079	75.808042	2917000	1772
+IN	Asia/Kolkata	Lucknow	Uttar Pradesh	26.856985	80.913053	2695000	5536
+IN	Asia/Kolkata	Nagpur	Maharashtra	21.171906	79.088048	2454000	550
+IN	Asia/Kolkata	Patna	Bihar	25.626905	85.128093	2158000	4765
+IN	Asia/Kolkata	Indore	Madhya Pradesh	22.717005	75.863077	2026000	813
+IN	Asia/Kolkata	Vadodara	Dadra and Nagar Haveli	22.311965	73.178073	1756000	2073
+IN	Asia/Kolkata	Bhopal	Madhya Pradesh	23.251934	77.408047	1727000	338
+IN	Asia/Kolkata	Coimbatore	Tamil Nadu	11.001906	76.948075	1696000	439
+IN	Asia/Kolkata	Ludhiana	Punjab	30.929708	75.870312	1649000	4013
+IN	Asia/Kolkata	Agra	Uttar Pradesh	27.172366	78.013075	1592000	1626
+IN	Asia/Kolkata	Kalyan	Maharashtra	19.250232	73.160175	1576614	456
+IN	Asia/Kolkata	Vishakhapatnam	Andhra Pradesh	17.731961	83.303036	1529000	1100
+IN	Asia/Kolkata	Kochi	Kerala	10.016953	76.22197	1519000	2246
+IN	Asia/Kolkata	Nasik	Maharashtra	20.002365	73.778036	1473000	1047
+IN	Asia/Kolkata	Meerut	Uttar Pradesh	29.002358	77.698055	1398000	2242
+IN	Asia/Kolkata	Faridabad	Haryana	28.435279	77.314721	1394000	0
+IN	Asia/Kolkata	Varanasi	Uttar Pradesh	25.331936	82.998094	1352000	7625
+IN	Asia/Kolkata	Ghaziabad	Uttar Pradesh	28.662327	77.406445	1341000	1360
+IN	Asia/Kolkata	Asansol	West Bengal	23.685279	86.981387	1328000	0
+IN	Asia/Kolkata	Jamshedpur	Jharkhand	22.789481	86.195573	1300000	493
+IN	Asia/Kolkata	Madurai	Tamil Nadu	9.921972	78.118081	1294000	2506
+IN	Asia/Kolkata	Jabalpur	Madhya Pradesh	23.177003	79.953112	1285000	265
+IN	Asia/Kolkata	Rajkot	Dadra and Nagar Haveli	22.311965	70.798063	1260000	145
+IN	Asia/Kolkata	Dhanbad	Jharkhand	23.802339	86.41804	1246000	8196
+IN	Asia/Kolkata	Amritsar	Punjab	31.641938	74.868047	1212000	3481
+IN	Asia/Kolkata	Warangal	Telangana	18.009998	79.57999	1203853	691
+IN	Asia/Kolkata	Allahabad	Uttar Pradesh	25.456941	81.838061	1201000	7478
+IN	Asia/Kolkata	Srinagar	Jammu and Kashmir	34.101917	74.813064	1140000	2278
+IN	Asia/Kolkata	Vijayawada	Andhra Pradesh	16.521905	80.628057	1137000	1287
+IN	Asia/Kolkata	Aurangabad	Maharashtra	19.897642	75.318356	1113000	359
+IN	Asia/Kolkata	Bhilai	Chhattisgarh	21.218613	81.431387	1097000	0
+IN	Asia/Kolkata	Sholapur	Maharashtra	17.672352	75.898062	1057000	117
+IN	Asia/Kolkata	Ranchi	Jharkhand	23.371952	85.328081	1044000	939
+IN	Asia/Kolkata	Jodhpur	Rajasthan	26.293712	73.014827	995000	441
+IN	Asia/Kolkata	Guwahati	Assam	26.161963	91.768049	983000	434
+IN	Asia/Kolkata	Chandigarh	Chandigarh	30.721943	76.77806	979000	1789
+IN	Asia/Kolkata	Gwalior	Madhya Pradesh	26.231933	78.178129	978000	279
+IN	Asia/Kolkata	Thiruvananthapuram	Kerala	8.50193	76.948075	954000	1024
+IN	Asia/Kolkata	Kozhikode	Kerala	11.252382	75.768044	953000	5027
+IN	Asia/Kolkata	Tiruchirappalli	Tamil Nadu	10.811944	78.688021	951000	2011
+IN	Asia/Kolkata	Hubballi	Karnataka	15.361924	75.12307	890000	181
+IN	Asia/Kolkata	Mysuru	Karnataka	12.31193	76.658067	887000	281
+IN	Asia/Kolkata	Raipur	Chhattisgarh	21.23694	81.633061	875000	752
+IN	Asia/Kolkata	Salem	Tamil Nadu	11.671943	78.178129	873000	2232
+IN	Asia/Kolkata	Jullundur	Punjab	31.336867	75.567074	855000	2236
+IN	Asia/Kolkata	Bhubaneswar	Orissa	20.272374	85.825415	844000	2327
+IN	Asia/Kolkata	Kota	Rajasthan	25.181945	75.833053	827000	173
+IN	Asia/Kolkata	Jhansi	Uttar Pradesh	25.452954	78.557468	826494	490
+IN	Asia/Kolkata	Bareilly	Uttar Pradesh	28.347333	79.418054	817000	1827
+IN	Asia/Kolkata	Aligarh	Uttar Pradesh	27.894157	78.059842	805000	2916
+IN	Asia/Kolkata	Bhiwandi	Maharashtra	19.351965	73.12805	795000	230
+IN	Asia/Kolkata	Jammu	Jammu and Kashmir	32.713733	74.844793	791000	2473
+IN	Asia/Kolkata	Moradabad	Uttar Pradesh	28.843737	78.754838	787000	3668
+IN	Asia/Kolkata	Mangaluru	Karnataka	12.900025	74.849994	776632	230
+IN	Asia/Kolkata	Kolhapur	Maharashtra	16.7	74.220007	750000	453
+IN	Asia/Kolkata	Amravati	Maharashtra	20.949973	77.770023	734451	146
+IN	Asia/Kolkata	Dehra Dun	Uttaranchal	30.320409	78.050006	714223	497
+IN	Asia/Kolkata	Malegaon	Maharashtra	20.560359	74.525001	690844	386
+IN	Asia/Kolkata	Nellore	Andhra Pradesh	14.439983	79.989939	678004	586
+IN	Asia/Kolkata	Gorakhpur	Uttar Pradesh	26.750394	83.380016	674246	19904
+IN	Asia/Kolkata	Shivamogga	Karnataka	13.930376	75.560028	654055	250
+IN	Asia/Kolkata	Tiruppur	Tamil Nadu	11.080421	77.329998	650000	410
+IN	Asia/Kolkata	Raurkela	Orissa	22.230412	84.829954	625831	174
+IN	Asia/Kolkata	Nanded	Maharashtra	19.169979	77.300026	623708	233
+IN	Asia/Kolkata	Belagavi	Karnataka	15.865012	74.505002	608756	258
+IN	Asia/Kolkata	Sangli	Maharashtra	16.860404	74.575024	601214	613
+IN	Asia/Kolkata	Chandrapur	Maharashtra	19.969981	79.300007	595118	205
+IN	Asia/Kolkata	Ajmer	Rajasthan	26.449999	74.639981	589985	159
+IN	Asia/Kolkata	Cuttack	Orissa	20.470003	85.889941	580000	3428
+IN	Asia/Kolkata	Bikaner	Rajasthan	28.030394	73.329932	576015	86
+IN	Asia/Kolkata	Bhavnagar	Dadra and Nagar Haveli	21.778424	72.129954	554978	150
+IN	Asia/Kolkata	Hisar	Haryana	29.169988	75.725031	544829	443
+IN	Asia/Kolkata	Bilaspur	Chhattisgarh	22.09042	82.159987	543454	375
+IN	Asia/Kolkata	Tirunelveli	Tamil Nadu	8.730409	77.689976	542200	282
+IN	Asia/Kolkata	Guntur	Andhra Pradesh	16.329997	80.450014	530577	1286
+IN	Asia/Kolkata	Siliguri	West Bengal	26.720422	88.455004	515574	5151
+IN	Asia/Kolkata	Ujjain	Madhya Pradesh	23.190405	75.79004	513350	191
+IN	Asia/Kolkata	Davangere	Karnataka	14.470007	75.920007	503564	78
+IN	Asia/Kolkata	Akola	Maharashtra	20.709988	77.010018	503502	172
+IN	Asia/Kolkata	Saharanpur	Uttar Pradesh	29.970017	77.550036	484873	2717
+IN	Asia/Kolkata	Kalaburagi	Karnataka	17.34996	76.820003	483615	113
+IN	Asia/Kolkata	Bhatpara	West Bengal	22.850426	88.520013	483129	3224
+IN	Asia/Kolkata	Dhule	Maharashtra	20.899976	74.769999	479073	150
+IN	Asia/Kolkata	Udaipur	Rajasthan	24.599983	73.730011	469737	171
+IN	Asia/Kolkata	Ballari	Karnataka	15.150043	76.915036	445388	178
+IN	Asia/Kolkata	Tuticorin	Tamil Nadu	8.81999	78.130001	436094	68
+IN	Asia/Kolkata	Kurnool	Andhra Pradesh	15.830001	78.030007	424920	114
+IN	Asia/Kolkata	Gaya	Bihar	24.799971	85.000021	423692	4570
+IN	Asia/Kolkata	Sikar	Rajasthan	27.610394	75.140002	400000	695
+IN	Asia/Kolkata	Tumakuru	Karnataka	13.329973	77.100038	399606	106
+IN	Asia/Kolkata	Kollam	Kerala	8.900373	76.569993	394163	1971
+IN	Asia/Kolkata	Ahmednagar	Maharashtra	19.110421	74.75	391760	121
+IN	Asia/Kolkata	Bhilwara	Rajasthan	25.350428	74.63502	389911	105
+IN	Asia/Kolkata	Nizamabad	Telangana	18.670397	78.100028	388505	139
+IN	Asia/Kolkata	Parbhani	Maharashtra	19.270386	76.760007	378326	113
+IN	Asia/Kolkata	Shillong	Meghalaya	25.570492	91.880014	375527	222
+IN	Asia/Kolkata	Latur	Maharashtra	18.400413	76.569993	374394	118
+IN	Asia/Kolkata	Rajapalaiyam	Tamil Nadu	9.420393	77.580009	369991	201
+IN	Asia/Kolkata	Bhagalpur	Bihar	25.229996	86.980003	361548	6611
+IN	Asia/Kolkata	Muzaffarnagar	Uttar Pradesh	29.485008	77.69504	349706	3294
+IN	Asia/Kolkata	Muzaffarpur	Bihar	26.120433	85.379946	333200	15381
+IN	Asia/Kolkata	Mathura	Uttar Pradesh	27.499987	77.670029	330511	1618
+IN	Asia/Kolkata	Patiala	Punjab	30.320409	76.384991	329224	3473
+IN	Asia/Kolkata	Sagar	Madhya Pradesh	23.85039	78.750015	328240	106
+IN	Asia/Kolkata	Brahmapur	Orissa	19.319995	84.799981	324726	1207
+IN	Asia/Kolkata	Shahjahanpur	Uttar Pradesh	27.880377	79.905035	320434	4626
+IN	Asia/Kolkata	New Delhi	Delhi	28.600023	77.19998	317797	864
+IN	Asia/Kolkata	Rohtak	Haryana	28.900005	76.580018	317245	1953
+IN	Asia/Kolkata	Sambalpur	Orissa	21.470407	83.970058	310852	132
+IN	Asia/Kolkata	Ratlam	Madhya Pradesh	23.350395	75.029983	307229	140
+IN	Asia/Kolkata	Firozabad	Uttar Pradesh	27.149982	78.394946	306409	2345
+IN	Asia/Kolkata	Rajahmundry	Andhra Pradesh	17.030342	81.789984	304804	4058
+IN	Asia/Kolkata	Barddhaman	West Bengal	23.250375	87.864962	301725	7121
+IN	Asia/Kolkata	Bidar	Karnataka	17.922923	77.517532	300136	106
+IN	Asia/Kolkata	Rampur	Uttar Pradesh	28.815359	79.024985	296418	1987
+IN	Asia/Kolkata	Kakinada	Andhra Pradesh	16.967477	82.237502	292923	1141
+IN	Asia/Kolkata	Panipat	Haryana	29.400413	76.969968	292808	1961
+IN	Asia/Kolkata	Khammam	Telangana	17.28043	80.160058	290839	154
+IN	Asia/Kolkata	Bhuj	Dadra and Nagar Haveli	23.250375	69.809992	289429	0
+IN	Asia/Kolkata	Karimnagar	Telangana	18.460435	79.109993	288251	126
+IN	Asia/Kolkata	Tirupati	Andhra Pradesh	13.650419	79.42	287035	773
+IN	Asia/Kolkata	Hosapete	Karnataka	15.280397	76.375018	286007	55
+IN	Asia/Kolkata	Mandya	Karnataka	12.570381	76.919997	285034	124
+IN	Asia/Kolkata	Alwar	Rajasthan	27.545359	76.604926	283228	1202
+IN	Asia/Kolkata	Aizawl	Mizoram	23.710399	92.720015	283021	39
+IN	Asia/Kolkata	Vijayapura	Karnataka	16.835418	75.709993	271064	48
+IN	Asia/Kolkata	Imphal	Manipur	24.799971	93.950017	264986	574
+IN	Asia/Kolkata	Etawah	Uttar Pradesh	26.785457	79.01496	257448	3638
+IN	Asia/Kolkata	Raichur	Karnataka	16.210366	77.355009	255240	87
+IN	Asia/Kolkata	Pathankot	Himachal Pradesh	32.270342	75.720019	253987	15
+IN	Asia/Kolkata	Chirala	Andhra Pradesh	15.860413	80.339995	253000	182
+IN	Asia/Kolkata	Sonipat	Haryana	28.999999	77.019991	250521	1801
+IN	Asia/Kolkata	Mirzapur	Uttar Pradesh	25.145376	82.569988	245817	576
+IN	Asia/Kolkata	Hapur	Uttar Pradesh	28.743658	77.762788	242920	1137
+IN	Asia/Kolkata	Porbandar	Dadra and Nagar Haveli	21.669981	69.67	234684	93
+IN	Asia/Kolkata	Bharatpur	Rajasthan	27.250364	77.500013	229384	1456
+IN	Asia/Kolkata	Puducherry	Puducherry	11.934994	79.83	227411	1148
+IN	Asia/Kolkata	Karnal	Haryana	29.680448	76.969968	225049	2294
+IN	Asia/Kolkata	Nagercoil	Tamil Nadu	8.180365	77.429992	224329	585
+IN	Asia/Kolkata	Thanjavur	Tamil Nadu	10.770414	79.150042	219571	2598
+IN	Asia/Kolkata	Pali	Rajasthan	25.790375	73.329932	210103	88
+IN	Asia/Kolkata	Agartala	Tripura	23.835404	91.279999	203264	3914
+IN	Asia/Kolkata	Ongole	Andhra Pradesh	15.56038	80.050039	202860	87
+IN	Asia/Kolkata	Puri	Orissa	19.82043	85.900018	201026	582
+IN	Asia/Kolkata	Dindigul	Tamil Nadu	10.379972	78.000035	200797	1119
+IN	Asia/Kolkata	Haldia	West Bengal	22.02567	88.058335	200762	2401
+IN	Asia/Kolkata	Bulandshahr	Uttar Pradesh	28.410371	77.848416	198612	3387
+IN	Asia/Kolkata	Purnia	Bihar	25.785414	87.479973	198453	8621
+IN	Asia/Kolkata	Proddatur	Andhra Pradesh	14.750429	78.570026	197451	89
+IN	Asia/Kolkata	Gurgaon	Haryana	28.450006	77.019991	197340	3440
+IN	Asia/Kolkata	Burhanpur	Madhya Pradesh	21.300391	76.13002	197233	95
+IN	Asia/Kolkata	Gandhinagar	Dadra and Nagar Haveli	23.300398	72.639948	195891	2048
+IN	Asia/Kolkata	Machilipatnam	Andhra Pradesh	16.200418	81.179996	192827	949
+IN	Asia/Kolkata	Bhiwani	Haryana	28.81001	76.125007	190855	2609
+IN	Asia/Kolkata	Nandyal	Andhra Pradesh	15.520382	78.479954	188654	67
+IN	Asia/Kolkata	Bhusawal	Maharashtra	21.019995	75.830038	183001	421
+IN	Asia/Kolkata	Bahraich	Uttar Pradesh	27.620419	81.66994	182218	4292
+IN	Asia/Kolkata	Tonk	Rajasthan	26.150457	75.79004	181734	55
+IN	Asia/Kolkata	Sirsa	Haryana	29.490382	75.029983	181639	549
+IN	Asia/Kolkata	Vizianagaram	Andhra Pradesh	18.120404	83.500009	179358	1
+IN	Asia/Kolkata	Vellore	Tamil Nadu	12.920386	79.150042	177081	2722
+IN	Asia/Kolkata	Alappuzha	Kerala	9.500414	76.370005	176783	2024
+IN	Asia/Kolkata	Simla	Himachal Pradesh	31.100026	77.166597	173503	0
+IN	Asia/Kolkata	Medinipur	West Bengal	22.330406	87.150019	169127	4807
+IN	Asia/Kolkata	Hindupur	Andhra Pradesh	13.780359	77.489988	168312	67
+IN	Asia/Kolkata	Baramula	Jammu and Kashmir	34.200431	74.350025	167986	228
+IN	Asia/Kolkata	Fatehpur	Uttar Pradesh	25.88037	80.800019	166480	4302
+IN	Asia/Kolkata	Dibrugarh	Assam	27.483321	94.899985	166366	64
+IN	Asia/Kolkata	Sitapur	Uttar Pradesh	27.630005	80.749996	164435	4983
+IN	Asia/Kolkata	Navsari	Dadra and Nagar Haveli	20.850393	72.920035	163000	1
+IN	Asia/Kolkata	Budaun	Uttar Pradesh	28.030006	79.089994	161555	3831
+IN	Asia/Kolkata	Cuddalore	Tamil Nadu	11.720407	79.770004	158569	1452
+IN	Asia/Kolkata	Hoshiarpur	Punjab	31.519974	75.980003	158142	813
+IN	Asia/Kolkata	Kanchipuram	Tamil Nadu	12.833724	79.716674	155029	2819
+IN	Asia/Kolkata	Faizabad	Uttar Pradesh	26.750394	82.170013	153047	7919
+IN	Asia/Kolkata	Silchar	Assam	24.790411	92.790036	152393	1593
+IN	Asia/Kolkata	Ambala	Haryana	30.320021	76.820003	146787	2008
+IN	Asia/Kolkata	Krishnanagar	West Bengal	23.380342	88.530038	145926	4601
+IN	Asia/Kolkata	Kolar	Karnataka	13.133706	78.13336	144625	73
+IN	Asia/Kolkata	Kumbakonam	Tamil Nadu	10.980478	79.400001	139264	3323
+IN	Asia/Kolkata	Tiruvannamalai	Tamil Nadu	12.260374	79.099967	138243	2148
+IN	Asia/Kolkata	Pilibhit	Uttar Pradesh	28.639995	79.810002	131008	3000
+IN	Asia/Kolkata	Abohar	Punjab	30.120421	74.290028	130603	926
+IN	Asia/Kolkata	Port Blair	Andaman and Nicobar	11.667026	92.735983	127562	28
+IN	Asia/Kolkata	Alipur Duar	West Bengal	26.483744	89.566667	127342	5255
+IN	Asia/Kolkata	Hathras	Uttar Pradesh	27.599981	78.050006	126882	1449
+IN	Asia/Kolkata	Valparai	Tamil Nadu	10.320415	76.969968	114308	31
+IN	Asia/Kolkata	Aurangabad	Bihar	24.770412	84.380007	95929	1956
+IN	Asia/Kolkata	Kohima	Nagaland	25.666998	94.11657	92113	0
+IN	Asia/Kolkata	Gangtok	Sikkim	27.33333	88.616648	77900	26
+IN	Asia/Kolkata	Karur	Tamil Nadu	10.950377	78.083337	76915	1413
+IN	Asia/Kolkata	Jorhat	Assam	26.749981	94.216667	69033	1606
+IN	Asia/Kolkata	Panaji	Goa	15.491997	73.818001	65586	0
+IN	Asia/Kolkata	Sopore	Jammu and Kashmir	34.299959	74.466659	63035	359
+IN	Asia/Kolkata	Tezpur	Assam	26.633761	92.80001	58851	2212
+IN	Asia/Kolkata	Itanagar	Arunachal Pradesh	27.100399	93.616601	44971	0
+IN	Asia/Kolkata	Daman	Dadra and Nagar Haveli	20.417008	72.850013	39737	0
+IN	Asia/Kolkata	Leh	Ladakh	34.161559	77.572291	30870	0
+IN	Asia/Kolkata	Silvassa	Dadra and Nagar Haveli	20.266578	73.016618	27359	0
+IN	Asia/Kolkata	Diu	Dadra and Nagar Haveli	20.719673	70.990395	23779	0
+IN	Asia/Kolkata	Dispur	Assam	26.144023	91.766636	16140	434
+IN	Asia/Kolkata	Kavaratti	Lakshadweep	10.562573	72.636867	10688	0
+JP	Asia/Tokyo	Tokyo	Tokyo	35.686963	139.749462	35676000	2130
+JP	Asia/Tokyo	Ōsaka	Osaka	34.751981	135.458199	11294000	1561
+JP	Asia/Tokyo	Yokohama	Kanagawa	35.430656	139.602021	3697894	657
+JP	Asia/Tokyo	Nagoya	Aichi	35.156943	136.913046	3230000	1760
+JP	Asia/Tokyo	Fukuoka	Fukuoka	33.596961	130.408068	2792000	614
+JP	Asia/Tokyo	Sapporo	Hokkaido	43.076925	141.338099	2544000	432
+JP	Asia/Tokyo	Sendai	Miyagi	38.289052	141.019772	2250000	339
+JP	Asia/Tokyo	Hiroshima	Hiroshima	34.389781	132.440967	2045000	259
+JP	Asia/Tokyo	Kyoto	Kyoto	35.031938	135.748052	1805000	340
+JP	Asia/Tokyo	Kōbe	Hyogo	34.679988	135.169982	1528478	670
+JP	Asia/Tokyo	Kawasaki	Kanagawa	35.529988	139.705002	1437266	443
+JP	Asia/Tokyo	Kitakyūshū	Fukuoka	33.870399	130.820015	997536	512
+JP	Asia/Tokyo	Hamamatsu	Shizuoka	34.718073	137.732719	977023	550
+JP	Asia/Tokyo	Naha	Okinawa	26.207172	127.672972	905238	252
+JP	Asia/Tokyo	Okayama	Okayama	34.67203	133.917087	866092	276
+JP	Asia/Tokyo	Kumamoto	Kumamoto	32.800929	130.700642	718232	236
+JP	Asia/Tokyo	Shizuoka	Shizuoka	34.985835	138.385393	701561	157
+JP	Asia/Tokyo	Utsunomiya	Tochigi	36.549977	139.870005	667752	273
+JP	Asia/Tokyo	Nagano	Nagano	36.649997	138.170005	594311	264
+JP	Asia/Tokyo	Hachiōji	Tokyo	35.657706	139.326059	579399	852
+JP	Asia/Tokyo	Niigata	Niigata	37.919997	139.04003	569797	197
+JP	Asia/Tokyo	Kagoshima	Kagoshima	31.585965	130.561064	555352	107
+JP	Asia/Tokyo	Kanazawa	Ishikawa	36.560002	136.640021	551249	166
+JP	Asia/Tokyo	Ōtsu	Shiga	35.006402	135.867407	536976	148
+JP	Asia/Tokyo	Matsuyama	Ehime	33.845543	132.765839	533541	188
+JP	Asia/Tokyo	Tsu	Mie	34.717066	136.51667	500000	328
+JP	Asia/Tokyo	Ōita	Oita	33.243228	131.5979	448907	130
+JP	Asia/Tokyo	Tokushima	Tokushima	34.06739	134.5525	443760	224
+JP	Asia/Tokyo	Wakayama	Wakayama	34.223117	135.167708	440006	157
+JP	Asia/Tokyo	Nagasaki	Nagasaki	32.764988	129.885033	435455	92
+JP	Asia/Tokyo	Gifu	Gifu	35.423095	136.762753	412895	617
+JP	Asia/Tokyo	Iwaki	Fukushima	37.055347	140.890046	357309	99
+JP	Asia/Tokyo	Asahikawa	Hokkaido	43.755015	142.379981	356612	116
+JP	Asia/Tokyo	Mito	Ibaraki	36.370427	140.480045	353892	142
+JP	Asia/Tokyo	Maebashi	Gunma	36.3927	139.072689	344871	466
+JP	Asia/Tokyo	Kōriyama	Fukushima	37.409976	140.38	340560	96
+JP	Asia/Tokyo	Kawagoe	Saitama	35.91769	139.491062	337931	1315
+JP	Asia/Tokyo	Kōchi	Kochi	33.562433	133.537523	335570	102
+JP	Asia/Tokyo	Takamatsu	Kagawa	34.344737	134.044779	334223	109
+JP	Asia/Tokyo	Toyama	Toyama	36.699994	137.230011	332812	145
+JP	Asia/Tokyo	Miyazaki	Miyazaki	31.918244	131.418376	324384	113
+JP	Asia/Tokyo	Akita	Akita	39.709991	140.089991	320069	100
+JP	Asia/Tokyo	Hakodate	Hokkaido	41.79498	140.739978	302984	90
+JP	Asia/Tokyo	Aomori	Aomori	40.825039	140.710005	298394	96
+JP	Asia/Tokyo	Morioka	Iwate	39.720016	141.130031	295172	107
+JP	Asia/Tokyo	Fukushima	Fukushima	37.740008	140.47002	294237	103
+JP	Asia/Tokyo	Yamagata	Yamagata	38.270492	140.320003	272209	109
+JP	Asia/Tokyo	Fukui	Fukui	36.07042	136.220047	248707	67
+JP	Asia/Tokyo	Shimonoseki	Yamaguchi	33.965432	130.945433	245786	85
+JP	Asia/Tokyo	Hachinohe	Aomori	40.509994	141.540032	239046	64
+JP	Asia/Tokyo	Sasebo	Nagasaki	33.16313	129.717705	237444	54
+JP	Asia/Tokyo	Matsumoto	Nagano	36.240435	137.970018	224926	91
+JP	Asia/Tokyo	Kushiro	Hokkaido	42.97496	144.374691	198566	75
+JP	Asia/Tokyo	Kōfu	Yamanashi	35.650394	138.583313	197540	209
+JP	Asia/Tokyo	Kure	Hiroshima	34.25097	132.565593	196991	60
+JP	Asia/Tokyo	Nagaoka	Niigata	37.450413	138.860041	195318	90
+JP	Asia/Tokyo	Hirosaki	Aomori	40.56999	140.47002	174972	68
+JP	Asia/Tokyo	Tomakomai	Hokkaido	42.650406	141.550006	174806	52
+JP	Asia/Tokyo	Obihiro	Hokkaido	42.930414	143.17001	173890	77
+JP	Asia/Tokyo	Takaoka	Toyama	36.670021	136.999999	170077	81
+JP	Asia/Tokyo	Matsue	Shimane	35.466994	133.066648	156811	57
+JP	Asia/Tokyo	Muroran	Hokkaido	42.349959	140.980015	155676	80
+JP	Asia/Tokyo	Tottori	Tottori	35.500377	134.233295	154098	46
+JP	Asia/Tokyo	Otaru	Hokkaido	43.188719	140.978309	143792	41
+JP	Asia/Tokyo	Kitami	Hokkaido	43.850358	143.899991	113137	50
+JP	Asia/Tokyo	Sakata	Yamagata	38.920039	139.850058	100446	27
+JP	Asia/Tokyo	Tsuruoka	Yamagata	38.700414	139.830214	99820	29
+JP	Asia/Tokyo	Maizuru	Kyoto	35.450406	135.333331	92465	12
+JP	Asia/Tokyo	Kanoya	Kagoshima	31.383316	130.850039	82335	23
+PT	Europe/Lisbon	Lisbon	Lisboa	38.724669	-9.146812	2812000	506
+PT	Europe/Lisbon	Porto	Porto	41.151952	-8.621947	1337000	932
+PT	Europe/Lisbon	Braga	Braga	41.554995	-8.421331	826833	750
+PT	Europe/Lisbon	Setúbal	Lisboa	38.52996	-8.90001	117974	63
+PT	Europe/Lisbon	Coimbra	Coimbra	40.200374	-8.41668	106582	58
+PT	Europe/Lisbon	Portimão	Faro	37.13374	-8.533314	61226	55
+PT	Europe/Lisbon	Évora	Évora	38.559996	-7.905996	55620	0
+PT	Europe/Lisbon	Aveiro	Aveiro	40.641003	-8.650998	54162	0
+PT	Europe/Lisbon	Leiria	Leiria	39.738996	-8.804997	45112	0
+PT	Europe/Lisbon	Faro	Faro	37.01708	-7.933273	41355	20
+PT	Europe/Lisbon	Beja	Beja	38.014002	-7.863002	35854	0
+PT	Europe/Lisbon	Bragança	Bragança	41.807997	-6.755003	34375	0
+PT	Europe/Lisbon	Castelo Branco	Castelo Branco	39.810996	-7.488	33479	0
+PT	Europe/Lisbon	Guarda	Guarda	40.541004	-7.262001	32111	0
+PT	Europe/Lisbon	Santarém	Santarém	39.231	-8.682003	29385	0
+PT	Europe/Lisbon	Viseu	Viseu	40.656996	-7.91	26364	0
+PT	Europe/Lisbon	Covilhã	Castelo Branco	40.283341	-7.499992	24828	18
+PT	Europe/Lisbon	Vila Real	Vila Real	41.293998	-7.737003	17001	0
+PT	Europe/Lisbon	Portalegre	Portalegre	39.290004	-7.423002	15581	0
+PT	Europe/Lisbon	Viana Do Castelo	Viana do Castelo	41.696235	-8.844138	15555	0
+US	America/Los_Angeles	Los Angeles	California	33.991924	-118.181926	12500000	1338
+US	America/Los_Angeles	San Francisco	California	37.769196	-122.417169	3450000	218
+US	America/Los_Angeles	Seattle	Washington	47.571948	-122.341931	3074000	977
+US	America/Los_Angeles	Irvine	California	33.680411	-117.82995	3010232	1033
+US	America/Los_Angeles	San Diego	California	32.82197	-117.181936	2916000	504
+US	America/Los_Angeles	Long Beach	California	33.786967	-118.158044	2036134	684
+US	America/Los_Angeles	Portland	Oregon	45.52197	-122.681936	1875000	745
+US	America/Los_Angeles	Las Vegas	Nevada	36.211944	-115.221952	1823000	757
+US	America/Los_Angeles	San Bernardino	California	34.12233	-117.30198	1745000	453
+US	America/Los_Angeles	San Jose	California	37.301929	-121.851935	1668000	704
+US	America/Los_Angeles	Sacramento	California	38.576967	-121.471984	1604000	949
+US	America/Los_Angeles	Oakland	California	37.768921	-122.221103	1510271	317
+US	America/Los_Angeles	Tacoma	Washington	47.211316	-122.515013	719868	638
+US	America/Los_Angeles	Stockton	California	37.958134	-121.289739	685306	0
+US	America/Los_Angeles	San Mateo	California	37.556918	-122.313062	626406	284
+US	America/Los_Angeles	Fresno	California	36.747717	-119.772984	616353	349
+US	America/Los_Angeles	Oceanside	California	33.220465	-117.334968	609854	424
+US	America/Los_Angeles	Vancouver	Washington	45.630301	-122.639993	525802	371
+US	America/Los_Angeles	Berkeley	California	37.873901	-122.271152	496356	171
+US	America/Los_Angeles	Everett	Washington	47.960418	-122.199968	486903	351
+US	America/Los_Angeles	Bakersfield	California	35.369972	-119.019981	443129	288
+US	America/Los_Angeles	Palm Springs	California	33.777356	-116.533053	390115	303
+US	America/Los_Angeles	Spokane	Washington	47.669996	-117.419949	347705	275
+US	America/Los_Angeles	Reno	Nevada	39.529976	-119.82001	328585	223
+US	America/Los_Angeles	Modesto	California	37.655413	-120.98999	323386	161
+US	America/Los_Angeles	Riverside	California	33.941945	-117.398039	297554	958
+US	America/Los_Angeles	Eugene	Oregon	44.05001	-123.100016	245158	129
+US	America/Los_Angeles	Santa Rosa	California	38.450404	-122.699989	231792	137
+US	America/Los_Angeles	Salem	Oregon	44.92807	-123.023897	229010	147
+US	America/Los_Angeles	Lancaster	California	34.698049	-118.135823	225799	178
+US	America/Los_Angeles	Santa Barbara	California	34.43499	-119.71999	181632	121
+US	America/Los_Angeles	Olympia	Washington	47.038045	-122.899434	156984	147
+US	America/Los_Angeles	Salinas	California	36.682217	-121.641656	156784	57
+US	America/Los_Angeles	National City	California	32.671945	-117.098005	150000	433
+US	America/Los_Angeles	Santa Cruz	California	36.971946	-122.02639	148444	102
+US	America/Los_Angeles	Vallejo	California	38.111949	-122.258052	146289	90
+US	America/Los_Angeles	Pasadena	California	34.160381	-118.138872	144618	1155
+US	America/Los_Angeles	Bremerton	Washington	47.573596	-122.642018	126820	122
+US	America/Los_Angeles	Monterey	California	36.600258	-121.893578	124288	90
+US	America/Los_Angeles	Visalia	California	36.32503	-119.316009	121968	74
+US	America/Los_Angeles	Yuba City	California	39.141033	-121.615766	116217	87
+US	America/Los_Angeles	Santa Maria	California	34.940127	-120.436639	110705	68
+US	America/Los_Angeles	Medford	Oregon	42.326627	-122.874423	108525	85
+US	America/Los_Angeles	Kennewick	Washington	46.211377	-119.136098	102504	85
+US	America/Los_Angeles	Bellingham	Washington	48.760136	-122.486927	99662	72
+US	America/Los_Angeles	Yakima	Washington	46.602232	-120.504697	99287	67
+US	America/Los_Angeles	Merced	California	37.302618	-120.481933	96091	62
+US	America/Los_Angeles	Redding	California	40.587043	-122.390576	96058	99
+US	America/Los_Angeles	Chico	California	39.72862	-121.836398	95888	65
+US	America/Los_Angeles	Victorville	California	34.536508	-117.290319	83496	0
+US	America/Los_Angeles	Bend	Oregon	44.071921	-121.309996	75441	72
+US	America/Los_Angeles	Longview	Washington	46.13872	-122.936951	66231	61
+US	America/Los_Angeles	San Luis Obispo	California	35.283181	-120.658589	65386	36
+US	America/Los_Angeles	Wenatchee	Washington	47.423629	-120.309024	62625	55
+US	America/Los_Angeles	Corvallis	Oregon	44.572356	-123.279979	59030	41
+US	America/Los_Angeles	Carson City	Nevada	39.163849	-119.766395	57341	46
+US	America/Los_Angeles	Springfield	Oregon	44.051948	-122.978034	56032	43
+US	America/Los_Angeles	Tulare	California	36.207026	-119.344121	55908	37
+US	America/Los_Angeles	Albany	Oregon	44.620492	-123.086942	51376	45
+US	America/Los_Angeles	Lewiston	Idaho	46.41661	-117.016589	49289	58
+US	America/Los_Angeles	Grants Pass	Oregon	42.43954	-123.327186	46189	45
+US	America/Los_Angeles	Walla Walla	Washington	46.065159	-118.341883	45150	35
+US	America/Los_Angeles	El Centro	California	32.792377	-115.558048	45000	32
+US	America/Los_Angeles	Richland	Washington	46.291811	-119.291101	44869	24
+US	America/Los_Angeles	Delano	California	35.761937	-119.243068	44757	24
+US	America/Los_Angeles	Klamath Falls	Oregon	42.225005	-121.780536	42978	45
+US	America/Los_Angeles	Eureka	California	40.802224	-124.147497	42398	36
+US	America/Los_Angeles	Coeur d'Alene	Idaho	47.678083	-116.779446	34514	0
+US	America/Los_Angeles	Aberdeen	Washington	46.974896	-123.814391	32745	31
+US	America/Los_Angeles	Coos Bay	Oregon	43.366615	-124.216589	31976	32
+US	America/Los_Angeles	Roseburg	Oregon	43.218433	-123.356099	30479	34
+US	America/Los_Angeles	Ukiah	California	39.154237	-123.210862	27828	25
+US	America/Los_Angeles	Paso Robles	California	35.626597	-120.689982	27157	24
+US	America/Los_Angeles	Barstow	California	34.899018	-117.021886	21119	0
+US	America/Los_Angeles	Arcata	California	40.88519	-124.088225	20905	20
+US	America/Los_Angeles	Elko	Nevada	40.832506	-115.761989	19252	23
+US	America/Los_Angeles	Centralia	Washington	46.716411	-122.952971	18880	23
+US	America/Los_Angeles	Pendleton	Oregon	45.672599	-118.787489	16799	16
+US	America/Los_Angeles	Boulder City	Nevada	35.978953	-114.83158	15479	17
+US	America/Los_Angeles	La Grande	Oregon	45.324687	-118.086601	15004	15
+US	America/Los_Angeles	Crescent City	California	41.756455	-124.200492	11534	12
+US	America/Los_Angeles	Astoria	Oregon	46.188381	-123.829997	10011	9
+US	America/Los_Angeles	Winnemucca	Nevada	40.973376	-117.734685	9666	13
+US	America/Los_Angeles	Tillamook	Oregon	45.455247	-123.842503	8145	9
+US	America/Los_Angeles	Needles	California	34.848427	-114.613351	6974	13
+US	America/Los_Angeles	Bishop	California	37.363958	-118.394076	4827	4
+US	America/Los_Angeles	Ely	Nevada	39.247022	-114.887675	4216	6
+US	America/Los_Angeles	Mt. Shasta	California	41.310358	-122.309393	3855	5
+US	America/Los_Angeles	Tonopah	Nevada	38.06699	-117.228979	3261	2
+US	America/Los_Angeles	John Day	Oregon	44.416525	-118.952026	1573	2
+US	America/Los_Angeles	Wallace	Idaho	47.47422	-115.926888	1028	1
+US	America/Los_Angeles	Mendocino	California	39.307767	-123.799431	548	1
+US	America/New_York	New York	New York	40.751925	-73.981963	19040000	1137
+US	America/New_York	Miami	Florida	25.789557	-80.226052	5585000	380
+US	America/New_York	Philadelphia	Pennsylvania	40.001919	-75.171942	5492000	2119
+US	America/New_York	Atlanta	Georgia	33.83196	-84.401895	4506000	2761
+US	America/New_York	Boston	Massachusetts	42.331906	-71.07196	4467000	1365
+US	America/New_York	Washington,  D.C.	District of Columbia	38.901495	-77.011364	4338000	1114
+US	America/New_York	Tampa	Florida	27.948934	-82.460567	2314000	975
+US	America/New_York	Baltimore	Maryland	39.301936	-76.621931	2255000	1079
+US	America/New_York	Fort Lauderdale	Florida	26.136065	-80.141786	2042042	567
+US	America/New_York	Cleveland	Ohio	41.471933	-81.696944	1890000	1466
+US	America/New_York	Pittsburgh	Pennsylvania	40.431945	-80.001931	1838000	1147
+US	America/New_York	Cincinnati	Ohio	39.163831	-84.458869	1636000	795
+US	America/New_York	Virginia Beach	Virginia	36.85516	-75.980265	1491000	198
+US	America/New_York	Orlando	Florida	28.511923	-81.381976	1350000	842
+US	America/New_York	Providence	Rhode Island	41.823048	-71.416926	1277000	758
+US	America/New_York	Columbus	Ohio	39.98192	-82.991956	1270000	927
+US	America/New_York	West Palm Beach	Florida	26.74502	-80.123621	1250000	755
+US	America/New_York	Raleigh	North Carolina	35.818781	-78.644693	1163515	665
+US	America/New_York	Norfolk	Virginia	36.849959	-76.280006	1047869	525
+US	America/New_York	Bridgeport	Connecticut	41.181925	-73.201907	1018000	361
+US	America/New_York	Buffalo	New York	42.881924	-78.881948	1016000	591
+US	America/New_York	Charlotte	North Carolina	35.20694	-80.831984	995000	1017
+US	America/New_York	Jacksonville	Florida	30.331967	-81.671933	988000	785
+US	America/New_York	Hartford	Connecticut	41.771966	-72.681913	913000	565
+US	America/New_York	Richmond	Virginia	37.551965	-77.451932	912000	749
+US	America/New_York	Albany	New York	42.670017	-73.819949	870716	286
+US	America/New_York	New Haven	Connecticut	41.330383	-72.900005	846766	453
+US	America/New_York	St. Petersburg	Florida	27.770539	-82.679383	800313	579
+US	America/New_York	Dayton	Ohio	39.752322	-84.201933	773000	564
+US	America/New_York	Rochester	New York	43.172372	-77.621896	755000	569
+US	America/New_York	Stamford	Connecticut	41.053346	-73.539191	746920	575
+US	America/New_York	Lowell	Massachusetts	42.633688	-71.316691	723629	715
+US	America/New_York	Akron	Ohio	41.070399	-81.519996	703200	550
+US	America/New_York	Syracuse	New York	43.049994	-76.150014	662577	317
+US	America/New_York	Knoxville	Tennessee	35.970012	-83.92003	655400	348
+US	America/New_York	Sarasota	Florida	27.336121	-82.530787	589959	434
+US	America/New_York	Covington	Kentucky	39.084008	-84.508599	585489	457
+US	America/New_York	Harrisburg	Pennsylvania	40.2736	-76.884749	528892	180
+US	America/New_York	Allentown	Pennsylvania	40.599988	-75.500028	496442	415
+US	America/New_York	Toledo	Ohio	41.670026	-83.579974	469924	427
+US	America/New_York	Springfield	Massachusetts	42.120025	-72.579999	421780	406
+US	America/New_York	Charleston	South Carolina	32.792377	-79.992105	411940	414
+US	America/New_York	Miami Beach	Florida	25.80992	-80.131781	407750	156
+US	America/New_York	Columbia	South Carolina	34.039975	-80.899982	398093	445
+US	America/New_York	Greensboro	North Carolina	36.070006	-79.800023	388887	443
+US	America/New_York	Hampton	Virginia	37.030025	-76.34995	366766	332
+US	America/New_York	Trenton	New Jersey	40.216963	-74.743355	366513	598
+US	America/New_York	Greenville	South Carolina	34.852923	-82.394155	350954	455
+US	America/New_York	Salem	Massachusetts	42.522499	-70.883092	335509	235
+US	America/New_York	Sanford	Florida	28.78996	-81.279985	333460	325
+US	America/New_York	Youngstown	Ohio	41.099699	-80.649739	311990	356
+US	America/New_York	Durham	North Carolina	35.999959	-78.92	309495	334
+US	America/New_York	Worcester	Massachusetts	42.270429	-71.800021	287365	250
+US	America/New_York	Winston-Salem	North Carolina	36.105431	-80.259995	281683	377
+US	America/New_York	Newark	New Jersey	40.700421	-74.170005	280123	1842
+US	America/New_York	Melbourne	Florida	28.08331	-80.60832	265414	345
+US	America/New_York	Lexington	Kentucky	38.050015	-84.500021	264578	197
+US	America/New_York	Augusta	Georgia	33.460812	-81.984981	262332	323
+US	America/New_York	Naples	Florida	26.142059	-81.794992	262306	303
+US	America/New_York	Canton	Ohio	40.798865	-81.378635	258660	277
+US	America/New_York	Chattanooga	Tennessee	35.06999	-85.250001	257589	319
+US	America/New_York	Coral Springs	Florida	26.270837	-80.270822	250000	590
+US	America/New_York	Fayetteville	North Carolina	35.062936	-78.883594	243306	307
+US	America/New_York	Fort Pierce	Florida	27.446786	-80.325805	228245	280
+US	America/New_York	Kissimmee	Florida	28.292057	-81.407781	225494	210
+US	America/New_York	Tallahassee	Florida	30.449988	-84.280034	221222	237
+US	America/New_York	York	Pennsylvania	39.962921	-76.72804	218010	202
+US	America/New_York	Columbus	Georgia	32.470433	-84.980017	217980	255
+US	America/New_York	Daytona Beach	Florida	29.210554	-81.023075	216890	227
+US	America/New_York	Lancaster	Pennsylvania	40.037775	-76.305766	209489	193
+US	America/New_York	Roanoke	Virginia	37.271199	-79.941617	198171	241
+US	America/New_York	Manchester	New Hampshire	42.995992	-71.455287	196566	197
+US	America/New_York	Gainesville	Florida	29.65138	-82.325037	191097	172
+US	America/New_York	Ft. Myers	Florida	26.640298	-81.860492	188606	157
+US	America/New_York	Savannah	Georgia	32.021106	-81.109995	180187	161
+US	America/New_York	Erie	Pennsylvania	42.129921	-80.084993	178182	134
+US	America/New_York	Waterbury	Connecticut	41.550008	-73.050022	174236	171
+US	America/New_York	Poughkeepsie	New York	41.700231	-73.921416	170996	197
+US	America/New_York	Wilmington	Delaware	39.746268	-75.546898	161560	199
+US	America/New_York	Wilmington	North Carolina	34.225519	-77.94502	161560	199
+US	America/New_York	Wilkes-Barre	Pennsylvania	41.249044	-75.877937	158913	126
+US	America/New_York	Scranton	Pennsylvania	41.409293	-75.662679	156196	134
+US	America/New_York	Paterson	New Jersey	40.919995	-74.170005	151205	1269
+US	America/New_York	Coral Gables	Florida	25.715419	-80.291079	150000	406
+US	America/New_York	Schenectady	New York	42.814582	-73.939968	149255	144
+US	America/New_York	Asheville	North Carolina	35.601198	-82.554145	142755	203
+US	America/New_York	Ocala	Florida	29.187352	-82.140268	141382	185
+US	America/New_York	Binghamton	New York	42.099018	-75.918322	139895	137
+US	America/New_York	New Bedford	Massachusetts	41.656125	-70.944698	136082	108
+US	America/New_York	Portland	Maine	43.672162	-70.245527	135866	125
+US	America/New_York	Fredericksburg	Virginia	38.303513	-77.460786	133134	156
+US	America/New_York	Cape Coral	Florida	26.60291	-81.979684	132489	175
+US	America/New_York	Alexandria	Virginia	38.820433	-77.099982	127273	951
+US	America/New_York	Spartanburg	South Carolina	34.949429	-81.932271	124126	180
+US	America/New_York	Charleston	West Virginia	38.349738	-81.632728	123799	141
+US	America/New_York	Beaver Falls	Pennsylvania	40.751943	-80.319423	120125	155
+US	America/New_York	Petersburg	Virginia	37.227765	-77.402237	118577	163
+US	America/New_York	Macon	Georgia	32.850384	-83.630048	115592	150
+US	America/New_York	Spring Hill	Florida	28.478945	-82.547711	114697	168
+US	America/New_York	Athens	Georgia	33.961298	-83.378022	110301	132
+US	America/New_York	Winter Haven	Florida	28.021919	-81.733006	108932	128
+US	America/New_York	Utica	New York	43.101179	-75.233067	105150	98
+US	America/New_York	Lynchburg	Virginia	37.413619	-79.142467	103893	155
+US	America/New_York	New London	Connecticut	41.355524	-72.100028	96178	114
+US	America/New_York	Rock Hill	South Carolina	34.940385	-81.03	94564	103
+US	America/New_York	Burlington	Vermont	44.475798	-73.212467	93807	88
+US	America/New_York	Greenville	North Carolina	35.612877	-77.366684	92565	83
+US	America/New_York	Hickory	North Carolina	35.733489	-81.341402	89462	144
+US	America/New_York	Albany	Georgia	31.57873	-84.15583	88766	130
+US	America/New_York	State College	Pennsylvania	40.793723	-77.860245	87926	58
+US	America/New_York	Charlottesville	Virginia	38.029189	-78.476926	87925	75
+US	America/New_York	Vero Beach	Florida	27.642252	-80.391124	86039	107
+US	America/New_York	Homestead	Florida	25.468302	-80.477786	85967	75
+US	America/New_York	Huntington	West Virginia	38.419579	-82.445288	85396	93
+US	America/New_York	Springfield	Ohio	39.920004	-83.799986	84576	76
+US	America/New_York	Annapolis	Maryland	38.97833	-76.492499	81300	63
+US	America/New_York	Hagerstown	Maryland	39.641649	-77.72028	79662	83
+US	America/New_York	Altoona	Pennsylvania	40.518598	-78.394967	78607	73
+US	America/New_York	Mansfield	Ohio	40.758325	-82.515542	77768	89
+US	America/New_York	Johnson City	Tennessee	36.313325	-82.353614	77538	104
+US	America/New_York	Jacksonville	North Carolina	34.754324	-77.430556	77288	101
+US	America/New_York	Atlantic City	New Jersey	39.364637	-74.423323	76573	29
+US	America/New_York	St. Augustine	Florida	29.894879	-81.314711	76331	101
+US	America/New_York	Dover	Delaware	39.158087	-75.524703	76039	85
+US	America/New_York	Johnstown	Pennsylvania	40.327085	-78.922222	69286	72
+US	America/New_York	St. Charles	Maryland	38.603056	-76.938932	69208	59
+US	America/New_York	Lima	Ohio	40.742874	-84.105265	68364	87
+US	America/New_York	Blacksburg	Virginia	37.229419	-80.414198	67508	62
+US	America/New_York	Port Charlotte	Florida	27.000043	-82.105697	64279	89
+US	America/New_York	Elmira	New York	42.09013	-76.808036	62376	59
+US	America/New_York	Parkersburg	West Virginia	39.266659	-81.561647	61935	65
+US	America/New_York	Anderson	South Carolina	34.503745	-82.650263	61558	88
+US	America/New_York	Marietta	Georgia	33.955613	-84.543248	61360	1240
+US	America/New_York	Valdosta	Georgia	30.832858	-83.278597	61179	63
+US	America/New_York	Ithaca	New York	42.440574	-76.496943	59930	37
+US	America/New_York	Morgantown	West Virginia	39.629815	-79.95606	58808	39
+US	America/New_York	Dalton	Georgia	34.769724	-84.970302	58557	80
+US	America/New_York	Rocky Mount	North Carolina	35.937999	-77.790766	58361	75
+US	America/New_York	Lewiston	Maine	44.100705	-70.21526	57688	53
+US	America/New_York	Kingsport	Tennessee	36.548323	-82.561948	57467	77
+US	America/New_York	Florence	South Carolina	34.195676	-79.762791	57438	82
+US	America/New_York	Williamsport	Pennsylvania	41.241086	-77.001383	56877	52
+US	America/New_York	Saratoga Springs	New York	43.082963	-73.785016	55793	67
+US	America/New_York	Winchester	Virginia	39.178731	-78.166635	53941	59
+US	America/New_York	Wheeling	West Virginia	40.06431	-80.721078	52492	63
+US	America/New_York	Titusville	Florida	28.612348	-80.807791	52311	72
+US	America/New_York	Sumter	South Carolina	33.920654	-80.341722	50868	72
+US	America/New_York	Bangor	Maine	44.801153	-68.778345	50213	54
+US	America/New_York	Leesburg	Florida	28.810501	-81.883333	49574	60
+US	America/New_York	Myrtle Beach	South Carolina	33.688911	-78.886978	49357	44
+US	America/New_York	Lancaster	Ohio	39.719215	-82.605304	48829	47
+US	America/New_York	Palm Coast	Florida	29.538002	-81.223296	48577	71
+US	America/New_York	Goldsboro	North Carolina	35.385139	-77.993054	47602	64
+US	America/New_York	Brunswick	Georgia	31.149687	-81.491652	47085	57
+US	America/New_York	Pittsfield	Massachusetts	42.448196	-73.259828	46230	53
+US	America/New_York	Aiken	South Carolina	33.549463	-81.720604	46196	65
+US	America/New_York	Newport	Rhode Island	41.490399	-71.313358	45968	44
+US	America/New_York	Danville	Virginia	36.586254	-79.39532	45894	57
+US	America/New_York	Jamestown	New York	42.097365	-79.235536	45756	43
+US	America/New_York	Concord	New Hampshire	43.208072	-71.538047	44606	41
+US	America/New_York	Harrisonburg	Virginia	38.449422	-78.869176	42538	36
+US	America/New_York	Salisbury	North Carolina	35.67078	-80.474478	41352	54
+US	America/New_York	Zanesville	Ohio	39.940287	-82.013325	40052	47
+US	America/New_York	Beckley	West Virginia	37.780186	-81.183014	37836	59
+US	America/New_York	Bristol	Virginia	36.611524	-82.176002	37443	57
+US	America/New_York	Bowling Green	Ohio	41.374747	-83.65139	37080	21
+US	America/New_York	Frankfort	Kentucky	38.200807	-84.873357	36688	49
+US	America/New_York	Orangeburg	South Carolina	33.496804	-80.862233	35472	37
+US	America/New_York	Watertown	New York	43.975157	-75.911062	33821	28
+US	America/New_York	Oak Ridge	Tennessee	36.010656	-84.269725	33556	51
+US	America/New_York	Lumberton	North Carolina	34.6272	-79.011906	32785	38
+US	America/New_York	La Grange	Georgia	33.036471	-85.031875	31776	42
+US	America/New_York	Lake City	Florida	30.189719	-82.639747	29395	39
+US	America/New_York	Key West	Florida	24.555231	-81.782745	29377	24
+US	America/New_York	Plattsburgh	New York	44.694984	-73.457982	29238	22
+US	America/New_York	Clarksburg	West Virginia	39.283273	-80.336916	28773	30
+US	America/New_York	Waterville	Maine	44.551892	-69.645785	25152	28
+US	America/New_York	Augusta	Maine	44.310563	-69.779989	24042	25
+US	America/New_York	Dublin	Georgia	32.537457	-82.918283	22623	39
+US	America/New_York	Palatka	Florida	29.647685	-81.651306	21452	28
+US	America/New_York	Cumberland	Maryland	39.653173	-78.762774	21316	19
+US	America/New_York	Waycross	Georgia	31.213817	-82.354906	19824	36
+US	America/New_York	Douglas	Georgia	31.507778	-82.85069	13441	22
+US	America/New_York	Presque Isle	Maine	46.793409	-68.002165	9466	0
+US	America/New_York	Montpelier	Vermont	44.259972	-72.575813	8538	9
+US	America/New_York	London	Kentucky	37.128882	-84.083354	7844	0
+US	America/New_York	Houlton	Maine	46.125517	-67.83972	6703	7
+US	America/New_York	Bar Harbor	Maine	44.387897	-68.204375	6090	4
+US	America/New_York	Kitty Hawk	North Carolina	36.077319	-75.704718	3413	3
+US	America/New_York	Calais	Maine	45.165989	-67.242392	3306	1
+US	America/New_York	White Sulphur Springs	West Virginia	37.79388	-80.303481	2407	3
+US	America/New_York	Apalachicola	Florida	29.725613	-84.992523	2284	4

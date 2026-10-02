@@ -8,9 +8,12 @@
 
 mod calendar;
 mod catalogue;
+mod chords;
 mod demand;
 mod encode;
 mod load;
+mod oo;
+mod places;
 mod rng;
 mod switchboard;
 mod text;
@@ -37,19 +40,33 @@ use crate::switchboard::{Dials, Switchboard};
 use crate::traps::DECLS;
 use crate::world::{builders_for, Wiring, World, PURCHASES_PER_SET, ROWS_PER_BUILDER};
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
 enum Size {
     Small,
     Medium,
     Huge,
+    #[value(name = "8m")]
+    Sets8m,
+    #[value(name = "80m")]
+    Sets80m,
+    #[value(name = "800m")]
+    Sets800m,
 }
 
 impl Size {
+    fn name(self) -> String {
+        self.to_possible_value()
+            .map_or_else(String::new, |v| v.get_name().to_string())
+    }
+
     fn sets(self) -> u64 {
         match self {
             Size::Small => 20_000,
             Size::Medium => 200_000,
             Size::Huge => 2_000_000,
+            Size::Sets8m => 8_000_000,
+            Size::Sets80m => 80_000_000,
+            Size::Sets800m => 800_000_000,
         }
     }
 }
@@ -76,7 +93,7 @@ struct Cli {
     /// Schema the generated tables are written to; dropped and recreated.
     #[arg(long, default_value = "lego")]
     schema: String,
-    /// A named size: small, medium or huge.
+    /// A named size: small, medium, huge, or past huge by its number of sets: 8m, 80m, 800m.
     #[arg(long, value_enum, default_value = "huge")]
     size: Size,
     /// Synthesized sets; overrides `--size`.
@@ -91,7 +108,7 @@ struct Cli {
     #[arg(long, default_value_t = 4)]
     jobs: u32,
     /// The phases of the switchboard, as `<pattern>:<percent>,…`.
-    #[arg(long, default_value = "natural:91,wavy:9")]
+    #[arg(long, default_value = "natural:90,wavy:9,zchord:1")]
     patch: String,
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,
@@ -151,9 +168,10 @@ struct Cli {
     /// `statement_timeout` for each wave's statements.
     #[arg(long, default_value = "300s")]
     wave_timeout: String,
-    /// `statement_timeout` for the key, statistics and vacuum builds.
-    #[arg(long, default_value = "3600s")]
-    build_timeout: String,
+    /// `statement_timeout` for the key, statistics and vacuum builds; an hour for every two million
+    /// sets when absent.
+    #[arg(long)]
+    build_timeout: Option<String>,
     #[arg(long, default_value = "1GB")]
     maintenance_work_mem: String,
     #[arg(long, default_value_t = 4)]
@@ -176,6 +194,10 @@ struct Cli {
     /// Generate and encode every wave, write nothing.
     #[arg(long)]
     dry_run: bool,
+    /// Also build the object-oriented tables in this schema, which is dropped and recreated: the
+    /// generated sets, colours and builders, each decomposed by kind with table inheritance.
+    #[arg(long)]
+    oo_schema: Option<String>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
     /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
     #[arg(long)]
@@ -192,6 +214,11 @@ fn same_schema(a: &str, b: &str) -> bool {
         }
     }
     folded(a) == folded(b)
+}
+
+/// The build timeout for `sets` synthesized sets: an hour for every two million, at least an hour.
+fn build_timeout_for(sets: u64) -> String {
+    format!("{}s", 3600 * sets.div_ceil(2_000_000).max(1))
 }
 
 fn on(s: &str) -> Result<bool, String> {
@@ -242,7 +269,19 @@ async fn run(cli: Cli) -> Result<(), String> {
             cli.schema
         ));
     }
+    if let Some(oo) = &cli.oo_schema {
+        if same_schema(oo, &cli.schema) || same_schema(oo, &cli.source_schema) {
+            return Err(format!(
+                "--oo-schema {oo} names the --schema or the --source-schema: the object-oriented \
+                 schema is dropped and recreated"
+            ));
+        }
+    }
     let sets = cli.sets.unwrap_or(cli.size.sets());
+    let build_timeout = cli
+        .build_timeout
+        .clone()
+        .unwrap_or_else(|| build_timeout_for(sets));
     let settings = Settings {
         schema: cli.schema.clone(),
         format: Format::parse(&cli.copy_format)?,
@@ -259,7 +298,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         unlogged: cli.unlogged,
         synchronous_commit: on(&cli.synchronous_commit)?,
         wave_timeout: cli.wave_timeout.clone(),
-        build_timeout: cli.build_timeout.clone(),
+        build_timeout: build_timeout.clone(),
         maintenance_work_mem: cli.maintenance_work_mem.clone(),
         parallel_maintenance_workers: cli.parallel_maintenance_workers,
         freeze_reference_tables: cli.freeze,
@@ -274,7 +313,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     let started = Instant::now();
     let cat = {
         let mut conn = pool.acquire().await.map_err(|e| format!("connect: {e}"))?;
-        sqlx::query(&format!("SET statement_timeout = '{}'", cli.build_timeout))
+        sqlx::query(&format!("SET statement_timeout = '{build_timeout}'"))
             .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
@@ -340,7 +379,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     // The banner: the resolved wiring and the server it runs against.
     let server = load::server_settings(&pool).await;
     let mut run_rows: Vec<(String, String)> = vec![
-        ("size".into(), format!("{:?}", cli.size).to_lowercase()),
+        ("size".into(), cli.size.name()),
         ("sets".into(), sets.to_string()),
         ("seed".into(), cli.seed.to_string()),
         ("chunk".into(), wiring.chunk.to_string()),
@@ -469,6 +508,10 @@ async fn run(cli: Cli) -> Result<(), String> {
             "autovacuum_during_load".into(),
             cli.autovacuum_during_load.clone(),
         ),
+        (
+            "oo_schema".into(),
+            cli.oo_schema.clone().unwrap_or_default(),
+        ),
     ];
     for d in DECLS {
         let planted = world
@@ -484,6 +527,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             ),
         ));
     }
+    run_rows.extend(load::roster_rows(&settings.schema));
     for (k, v) in &server {
         run_rows.push((format!("server_{k}"), v.clone()));
     }
@@ -528,9 +572,16 @@ async fn run(cli: Cli) -> Result<(), String> {
         load::create_schema(&pool, &settings)
             .await
             .map_err(|e| format!("create schema: {e}"))?;
-        load::load_reference_tables(&pool, &settings, &world.real.cat, &metrics)
-            .await
-            .map_err(|e| e.to_string())?;
+        load::load_reference_tables(
+            &pool,
+            &settings,
+            &world.real.cat,
+            &world.added_themes(),
+            &world.places,
+            &metrics,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         load::write_run(&pool, &settings, &run_rows)
             .await
             .map_err(|e| format!("generator_run: {e}"))?;
@@ -654,6 +705,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
 
     let mut steps = Vec::new();
+    let mut oo_rows = Vec::new();
     if !cli.dry_run {
         let mut conn = load::build_session(&cli.database_url, &settings)
             .await
@@ -661,11 +713,19 @@ async fn run(cli: Cli) -> Result<(), String> {
         steps = load::finish(&mut conn, &settings)
             .await
             .map_err(|e| format!("finish: {e}"))?;
+        if let Some(oo) = &cli.oo_schema {
+            let built = oo::build(&mut conn, &cli.schema, oo).await?;
+            steps.extend(built.steps);
+            oo_rows = built.rows;
+        }
     }
 
     // The summary.
     for (step, d) in &steps {
         summary(&[&"step", step, &format!("{:.3}", d.as_secs_f64())]);
+    }
+    for (class, rows) in &oo_rows {
+        summary(&[&"oo", class, rows]);
     }
     {
         let levels = metrics.levels.lock().expect("metrics lock");

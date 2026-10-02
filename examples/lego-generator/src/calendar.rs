@@ -1,7 +1,7 @@
 //! Civil dates, the builders' home time zones, and ISO 8601 week dates.
 //!
-//! A purchase is an instant (seconds since 1970-01-01 UTC). A builder writes it down as the wall
-//! clock of their home zone. The zones' offsets are the IANA time zone database's, bundled into the
+//! A purchase is an instant (seconds since 1970-01-01 UTC, and the milliseconds past them). A
+//! builder writes it down as the wall clock of their home zone. The zones' offsets are the IANA time zone database's, bundled into the
 //! binary, so every machine reads the same history; purchase dates are drawn from 1950 onward.
 
 use std::sync::OnceLock;
@@ -71,6 +71,18 @@ pub const ZONE_NAMES: [&str; 8] = [
     "Asia/Tokyo",
     "America/Los_Angeles",
     "Asia/Kolkata",
+];
+
+/// Each home zone's country, by its ISO 3166 code, as the IANA database's `zone.tab` gives it.
+pub const ZONE_COUNTRIES: [(&str, &str); 8] = [
+    ("Europe/Lisbon", "PT"),
+    ("Europe/Copenhagen", "DK"),
+    ("America/New_York", "US"),
+    ("Australia/Sydney", "AU"),
+    ("Europe/London", "GB"),
+    ("Asia/Tokyo", "JP"),
+    ("America/Los_Angeles", "US"),
+    ("Asia/Kolkata", "IN"),
 ];
 
 /// A builder's home zone: its IANA name and its offset history, from the bundled database.
@@ -193,37 +205,34 @@ pub fn local_secs(days: i64, hour: u32, minute: u32) -> i64 {
     days * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60
 }
 
-/// `YYYY-MM-DD HH:MM:SS+HH:MM`: the instant `t` as the wall clock at `offset_min`, with the offset.
-pub fn render_with_offset(t: i64, offset_min: i32) -> String {
-    let local = t + i64::from(offset_min) * 60;
-    let (y, m, d) = civil_from_days(local.div_euclid(86_400));
-    let s = local.rem_euclid(86_400);
+/// `YYYY-MM-DD HH:MM:SS.mmm+HH:MM`: the instant `t` and `ms` past it as the wall clock at
+/// `offset_min`, with the offset.
+pub fn render_with_offset(t: i64, ms: u16, offset_min: i32) -> String {
     let sign = if offset_min < 0 { '-' } else { '+' };
     let o = offset_min.unsigned_abs();
     format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}{sign}{:02}:{:02}",
-        s / 3600,
-        (s % 3600) / 60,
-        s % 60,
+        "{}{sign}{:02}:{:02}",
+        render_local(t + i64::from(offset_min) * 60, ms),
         o / 60,
         o % 60
     )
 }
 
-/// `YYYY-MM-DD HH:MM` of a wall-clock reading.
-pub fn render_local_minute(local: i64) -> String {
+/// `YYYY-MM-DD HH:MM:SS.mmm` of a wall-clock reading and `ms` past it.
+pub fn render_local(local: i64, ms: u16) -> String {
     let (y, m, d) = civil_from_days(local.div_euclid(86_400));
     let s = local.rem_euclid(86_400);
     format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}.{ms:03}",
         s / 3600,
-        (s % 3600) / 60
+        (s % 3600) / 60,
+        s % 60
     )
 }
 
 /// Microseconds since 2000-01-01 00:00 UTC: the binary form of a Postgres timestamptz.
-pub fn pg_micros(t: i64) -> i64 {
-    (t - 946_684_800) * 1_000_000
+pub fn pg_micros(t: i64, ms: u16) -> i64 {
+    (t - 946_684_800) * 1_000_000 + i64::from(ms) * 1000
 }
 
 #[cfg(test)]
@@ -355,12 +364,12 @@ mod tests {
             LocalTime::Twice(a, b) => {
                 assert_eq!(b - a, 3600);
                 assert_eq!(
-                    render_with_offset(a, lisbon.offset_min_at(a)),
-                    "2025-10-26 01:30:00+01:00"
+                    render_with_offset(a, 0, lisbon.offset_min_at(a)),
+                    "2025-10-26 01:30:00.000+01:00"
                 );
                 assert_eq!(
-                    render_with_offset(b, lisbon.offset_min_at(b)),
-                    "2025-10-26 01:30:00+00:00"
+                    render_with_offset(b + 7, 250, lisbon.offset_min_at(b)),
+                    "2025-10-26 01:30:07.250+00:00"
                 );
             }
             other => panic!("{other:?}"),

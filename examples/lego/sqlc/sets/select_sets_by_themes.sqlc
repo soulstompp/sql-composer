@@ -1,6 +1,8 @@
 # Find sets in any of the given theme scopes: each given theme and every theme below it. One row per
 # set, however many of the given scopes contain it. The ORDER BY ends on set_num, so the order is
-# total. Demonstrates a multi-value bind for an IN clause.
+# total. Within a year, a set with no part count comes before the counted ones; the ORDER BY says
+# so, because databases disagree on where a NULL sorts. A set with no year is never at or after
+# min_year, so the year needs no such term. Demonstrates a multi-value bind for an IN clause.
 SELECT
     s.set_num,
     s.name,
@@ -18,4 +20,4 @@ WHERE EXISTS (
       AND tc.ancestor_id IN (:bind(theme_ids EXPECTING 1..20))
 )
   AND s.year >= :bind(min_year)
-ORDER BY s.year DESC, s.num_parts DESC, s.set_num
+ORDER BY s.year DESC, s.num_parts IS NULL DESC, s.num_parts DESC, s.set_num

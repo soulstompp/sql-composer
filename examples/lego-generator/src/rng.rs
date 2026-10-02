@@ -34,6 +34,9 @@ pub enum Purpose {
     Popularity,
     Timeline,
     ThemeSpike,
+    Seconds,
+    Places,
+    Address,
 }
 
 impl Rng {

@@ -5,11 +5,12 @@ use sqlx::{Postgres, Transaction};
 
 use crate::calendar;
 use crate::load::{table, Level};
+use crate::places;
 use crate::world::Stamp;
 
 fn stamp_text(s: &Stamp) -> String {
     match s {
-        Stamp::At { t, offset_min } => calendar::render_with_offset(*t, *offset_min),
+        Stamp::At { t, ms, offset_min } => calendar::render_with_offset(*t, *ms, *offset_min),
         Stamp::Infinity => "infinity".into(),
     }
 }
@@ -114,18 +115,30 @@ pub async fn insert(
         Level::Builders(w) => {
             let a: Vec<i32> = w.builders.iter().map(|r| r.builder_id).collect();
             let b: Vec<&str> = w.builders.iter().map(|r| r.name.as_str()).collect();
-            let c: Vec<&str> = w.builders.iter().map(|r| r.home_zone).collect();
-            let bytes = b
+            let c: Vec<i32> = w.builders.iter().map(|r| r.street_id).collect();
+            let d: Vec<i32> = w.builders.iter().map(|r| r.house_number).collect();
+            let e: Vec<f64> = w
+                .builders
                 .iter()
-                .chain(c.iter())
-                .map(|s| s.len() as u64)
-                .sum::<u64>()
-                + 4 * a.len() as u64;
-            let sql = q("lego_builders", "int4[], text[], text[]");
+                .map(|r| places::degrees(r.latitude))
+                .collect();
+            let f: Vec<f64> = w
+                .builders
+                .iter()
+                .map(|r| places::degrees(r.longitude))
+                .collect();
+            let bytes = b.iter().map(|s| s.len() as u64).sum::<u64>() + 28 * a.len() as u64;
+            let sql = q(
+                "lego_builders",
+                "int4[], text[], int4[], int4[], float8[], float8[]",
+            );
             let r = sqlx::query(&sql)
                 .bind(a)
                 .bind(b)
                 .bind(c)
+                .bind(d)
+                .bind(e)
+                .bind(f)
                 .execute(&mut **tx)
                 .await;
             (sql, bytes, r)

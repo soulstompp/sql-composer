@@ -10,6 +10,7 @@ use crate::calendar::{self, LocalTime, Shift, Zone};
 use crate::catalogue::{decade_of, is_release_year, split_version, Real, Theme, DECADE_LO};
 use crate::chords::{self, Z_PAIRS};
 use crate::demand::{self, Alias, Spike, Timeline};
+use crate::places::Places;
 use crate::rng::{Purpose, Rng};
 use crate::switchboard::{Pattern, Switchboard};
 use crate::text;
@@ -99,11 +100,15 @@ pub struct NestOut {
     pub quantity: i32,
 }
 
+/// A builder, and where they live: a house on a street, and the home's point in microdegrees.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BuilderOut {
     pub builder_id: i32,
     pub name: String,
-    pub home_zone: &'static str,
+    pub street_id: i32,
+    pub house_number: i32,
+    pub latitude: i32,
+    pub longitude: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,10 +123,11 @@ pub struct CollectionOut {
     pub typed_name: Option<String>,
 }
 
-/// An instant with the offset it is written in, or the open end of time.
+/// An instant with the offset it is written in, or the open end of time: `t` whole seconds since
+/// 1970-01-01 UTC, and `ms` the milliseconds past them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stamp {
-    At { t: i64, offset_min: i32 },
+    At { t: i64, ms: u16, offset_min: i32 },
     Infinity,
 }
 
@@ -221,6 +227,8 @@ pub struct World {
     pub real: Real,
     pub wiring: Wiring,
     pub board: Switchboard,
+    /// The cities, postcodes and streets the builders live in.
+    pub places: Places,
     pub set_traps: HashMap<u64, (Trap, u64)>,
     pub row_traps: HashMap<u64, (Trap, u64)>,
     pub planted: Vec<(Trap, u64)>,
@@ -280,8 +288,27 @@ fn day_begun_twice(fold: &Shift) -> Option<i64> {
     (fold.is_fold() && repeated.contains(&(day * 86_400))).then_some(day)
 }
 
+/// The first synthesized inventory id: past the real ones, on a round hundred thousand.
+fn inventory_base(real: &Real) -> i64 {
+    (i64::from(real.max_inventory_id) / 100_000 + 1) * 100_000
+}
+
+/// The id past every inventory `sets` synthesized sets number.
+pub fn inventory_ceiling(real: &Real, sets: u64) -> i64 {
+    inventory_base(real) + 2 * sets as i64
+}
+
 impl World {
     pub fn new(real: Real, wiring: Wiring, board: Switchboard) -> Result<World, String> {
+        let last_inventory = inventory_ceiling(&real, wiring.sets);
+        if last_inventory > i64::from(i32::MAX) {
+            return Err(format!(
+                "{} sets number their inventories up to {last_inventory}, past {}, the largest integer \
+                 the tables hold",
+                wiring.sets,
+                i32::MAX
+            ));
+        }
         let mut templates_by_year: HashMap<i32, Vec<u32>> = HashMap::new();
         for &t in &real.templates {
             if let (Some(y), Some(_)) =
@@ -355,10 +382,12 @@ impl World {
             }
         }
         let real_waves = (real.cat.sets.len() as u64).div_ceil(wiring.chunk.max(1));
+        let places = Places::new(wiring.seed, wiring.builders);
         let mut w = World {
             real,
             wiring,
             board,
+            places,
             set_traps: HashMap::new(),
             row_traps: HashMap::new(),
             planted: Vec::new(),
@@ -1076,7 +1105,7 @@ impl World {
         let seed = self.wiring.seed;
         let mut out = SetWave::default();
         let wave_no = w as i64;
-        let inv_base = (real.max_inventory_id as i64 / 100_000 + 1) * 100_000;
+        let inv_base = inventory_base(real);
         let mut scratch: Vec<(u32, i32, bool, i32)> = Vec::new();
         for i in lo..hi {
             let h = self.head(i);
@@ -1552,10 +1581,16 @@ impl World {
                 FIRST_NAMES[(j % 32) as usize],
                 char::from(b'A' + ((j / 32) % 26) as u8)
             );
+            let lives = self
+                .places
+                .home(zone_index(j), &mut Rng::stream(seed, Purpose::Address, j));
             out.builders.push(BuilderOut {
                 builder_id,
                 name,
-                home_zone: zone.name,
+                street_id: lives.street_id,
+                house_number: lives.house_number,
+                latitude: lives.latitude,
+                longitude: lives.longitude,
             });
             for row in 0..rpb {
                 let c = j * rpb + row;
@@ -1618,11 +1653,19 @@ impl World {
                     ));
                 }
                 let mut rp = Rng::stream(seed, Purpose::Purchase, c);
+                let mut rs = Rng::stream(seed, Purpose::Seconds, c);
                 let first_year = set_year.map_or(FIRST_PURCHASE_YEAR, |y| {
                     i64::from(y).max(FIRST_PURCHASE_YEAR)
                 });
-                let stamps =
-                    self.purchase_times(zone_index(j), trap, set, first_year, copies, &mut rp);
+                let stamps = self.purchase_times(
+                    zone_index(j),
+                    trap,
+                    set,
+                    first_year,
+                    copies,
+                    &mut rp,
+                    &mut rs,
+                );
                 out.bought.push((set, stamps.len() as u32));
                 for (k, (store, ordered, local, delivered)) in stamps.into_iter().enumerate() {
                     let purchase_id = (c * 4 + k as u64 + 1) as i64;
@@ -1650,7 +1693,7 @@ impl World {
                             ));
                         }
                     }
-                    if let Stamp::At { t, offset_min } = p.ordered_at {
+                    if let Stamp::At { t, offset_min, .. } = p.ordered_at {
                         let local_days = (t + i64::from(offset_min) * 60).div_euclid(86_400);
                         let (ly, lm, ld) = calendar::civil_from_days(local_days);
                         let (uy, um, _) = calendar::civil_from_days(t.div_euclid(86_400));
@@ -1791,8 +1834,10 @@ impl World {
     }
 
     /// The purchases of one collection row: store, when ordered, the wall clock the builder wrote,
-    /// and when delivered.
-    fn purchase_times(
+    /// and when delivered. `r` draws each reading's minute, and `rs` where in its minute it falls,
+    /// so the minutes are the same whether or not a reading carries its seconds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn purchase_times(
         &self,
         zi: usize,
         trap: Option<(Trap, u64)>,
@@ -1800,6 +1845,7 @@ impl World {
         first_year: i64,
         copies: u64,
         r: &mut Rng,
+        rs: &mut Rng,
     ) -> Vec<(&'static str, Stamp, String, Stamp)> {
         let zone = &calendar::zones()[zi];
         let today = calendar::days_from_civil(TODAY.0, TODAY.1, TODAY.2);
@@ -1810,35 +1856,34 @@ impl World {
                 .filter(|s| s.at >= year_start(first_year))
                 .collect()
         };
-        let at = |t: i64| Stamp::At {
-            t,
-            offset_min: zone.offset_min_at(t),
-        };
+        // Milliseconds into a minute.
+        let mut within = || rs.below(60_000) as i64;
+        let at = |t: i64, into: i64| into_minute(t, into, zone.offset_min_at(t));
         let mut out = Vec::new();
         let online = STORES[1].0;
-        let deliver = |ordered: i64, r: &mut Rng| -> Stamp {
+        let deliver = |ordered: i64, r: &mut Rng, into: i64| -> Stamp {
             let local_days = (ordered + i64::from(zone.offset_min_at(ordered)) * 60)
                 .div_euclid(86_400)
                 + r.range_i64(2, 9);
             let hour = r.range_i64(10, 17) as u32;
             let minute = r.below(60) as u32;
-            let t = zone.instant_of(calendar::local_secs(local_days, hour, minute));
-            Stamp::At {
-                t,
-                offset_min: zone.offset_min_at(t),
-            }
+            at(
+                zone.instant_of(calendar::local_secs(local_days, hour, minute)),
+                into,
+            )
         };
         match trap {
             Some((Trap::D1, _)) => {
-                // Both readings of one minute in the hour a fold reads twice.
+                // Both readings of one clock time in the hour a fold reads twice.
                 let folds = since(&self.folds[zi]);
                 let fold = *r.pick(&folds);
                 let len = fold.len_secs();
                 let a = fold.at - len + 60 * r.below((len / 60) as u64) as i64;
                 let b = a + len;
-                let local = calendar::render_local_minute(a + i64::from(fold.before_min) * 60);
-                out.push((online, at(a), local.clone(), deliver(a, r)));
-                out.push((online, at(b), local, deliver(b, r)));
+                let into = within();
+                let local = reading(a + i64::from(fold.before_min) * 60, into);
+                out.push((online, at(a, into), local.clone(), deliver(a, r, within())));
+                out.push((online, at(b, into), local, deliver(b, r, within())));
                 return out;
             }
             Some((Trap::D2, _)) => {
@@ -1847,15 +1892,12 @@ impl World {
                 let gap = *r.pick(&gaps);
                 let t = gap.at + 60 * r.below((gap.len_secs() / 60) as u64) as i64;
                 let before = gap.before_min;
-                let local = calendar::render_local_minute(t + i64::from(before) * 60);
+                let into = within();
                 out.push((
                     online,
-                    Stamp::At {
-                        t,
-                        offset_min: before,
-                    },
-                    local,
-                    deliver(t, r),
+                    into_minute(t, into, before),
+                    reading(t + i64::from(before) * 60, into),
+                    deliver(t, r, within()),
                 ));
             }
             Some((Trap::D8, _)) => {
@@ -1870,11 +1912,12 @@ impl World {
                 let local =
                     midnight + 60 * r.below(((repeated_until - midnight) / 60) as u64) as i64;
                 let t = local - i64::from(fold.before_min) * 60;
+                let into = within();
                 out.push((
                     online,
-                    at(t),
-                    calendar::render_local_minute(local),
-                    deliver(t, r),
+                    at(t, into),
+                    reading(local, into),
+                    deliver(t, r, within()),
                 ));
             }
             Some((Trap::D3, _)) => {
@@ -1904,17 +1947,17 @@ impl World {
                         let (ly, lm, _) = calendar::civil_from_days(local_days);
                         let (uy, um, _) = calendar::civil_from_days(t.div_euclid(86_400));
                         if (ly, lm) != (uy, um) {
-                            let local = calendar::render_local_minute(calendar::local_secs(
-                                days, hour, minute,
-                            ));
-                            out.push((online, at(t), local, deliver(t, r)));
+                            let into = within();
+                            let local = reading(calendar::local_secs(days, hour, minute), into);
+                            out.push((online, at(t, into), local, deliver(t, r, within())));
                             break;
                         }
                     }
                 }
             }
             Some((Trap::D4, _)) => loop {
-                // A midnight the clock skipped has no instant to write as 24:00 of the eve.
+                // A midnight the clock skipped has no instant to write as 24:00 of the eve. The
+                // reading is the midnight itself, so nothing falls past it.
                 let eve = r.range_i64(calendar::days_from_civil(first_year, 1, 1), today - 1);
                 if let LocalTime::Unique(t) | LocalTime::Twice(t, _) =
                     zone.instants_of(calendar::local_secs(eve + 1, 0, 0))
@@ -1922,9 +1965,9 @@ impl World {
                     let (y, m, d) = calendar::civil_from_days(eve);
                     out.push((
                         STORES[0].0,
-                        at(t),
-                        format!("{y:04}-{m:02}-{d:02} 24:00"),
-                        at(t),
+                        at(t, 0),
+                        format!("{y:04}-{m:02}-{d:02} 24:00:00.000"),
+                        at(t, 0),
                     ));
                     break;
                 }
@@ -1936,10 +1979,11 @@ impl World {
                 if let LocalTime::Unique(t) | LocalTime::Twice(t, _) =
                     zone.instants_of(calendar::local_secs(day, hour, minute))
                 {
+                    let into = within();
                     out.push((
                         online,
-                        at(t),
-                        calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
+                        at(t, into),
+                        reading(calendar::local_secs(day, hour, minute), into),
                         Stamp::Infinity,
                     ));
                     break;
@@ -1959,11 +2003,12 @@ impl World {
                 if let LocalTime::Unique(t) =
                     zone.instants_of(calendar::local_secs(day, hour, minute))
                 {
+                    let into = within();
                     out.push((
                         STORES[0].0,
-                        at(t),
-                        calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
-                        at(t),
+                        at(t, into),
+                        reading(calendar::local_secs(day, hour, minute), into),
+                        at(t, into),
                     ));
                     break;
                 }
@@ -1991,11 +2036,12 @@ impl World {
                     if let LocalTime::Unique(t) =
                         zone.instants_of(calendar::local_secs(day, hour, minute))
                     {
+                        let into = within();
                         out.push((
                             STORES[0].0,
-                            at(t),
-                            calendar::render_local_minute(calendar::local_secs(day, hour, minute)),
-                            at(t),
+                            at(t, into),
+                            reading(calendar::local_secs(day, hour, minute), into),
+                            at(t, into),
                         ));
                         break;
                     }
@@ -2025,11 +2071,16 @@ impl World {
             let minute = r.below(60) as u32;
             // The clock the builder saw: a reading the clock skipped is read on past the gap.
             let t = zone.instant_of(calendar::local_secs(day, hour, minute));
-            let delivered = if store.4 { deliver(t, r) } else { at(t) };
+            let into = within();
+            let delivered = if store.4 {
+                deliver(t, r, within())
+            } else {
+                at(t, into)
+            };
             out.push((
                 store.0,
-                at(t),
-                calendar::render_local_minute(t + i64::from(zone.offset_min_at(t)) * 60),
+                at(t, into),
+                reading(t + i64::from(zone.offset_min_at(t)) * 60, into),
                 delivered,
             ));
         }
@@ -2037,16 +2088,32 @@ impl World {
     }
 }
 
+/// The instant `into` milliseconds past the whole minute `t`, written at `offset_min`.
+fn into_minute(t: i64, into: i64, offset_min: i32) -> Stamp {
+    Stamp::At {
+        t: t + into / 1000,
+        ms: (into % 1000) as u16,
+        offset_min,
+    }
+}
+
+/// The wall clock `into` milliseconds past the whole minute `local`.
+fn reading(local: i64, into: i64) -> String {
+    calendar::render_local(local + into / 1000, (into % 1000) as u16)
+}
+
 /// The `zchord` phase's pattern.
 pub fn zchord_pattern() -> Pattern {
     Pattern::Zchord
 }
 
-/// A synthesized set's number: seven digits, distinct for every index below nine million.
+/// A synthesized set's number: seven digits for the first nine million sets, then each further
+/// nine million in a band of its own, above the numbers the band before moves to when its bare
+/// form is a real record.
 pub fn base_number(seed: u64, i: u64) -> u64 {
     const SPAN: u64 = 9_000_000;
     const MULT: u64 = 7_654_321;
-    1_000_000 + (i.wrapping_mul(MULT) + seed % SPAN) % SPAN
+    1_000_000 + i / SPAN * 2 * SPAN + (i.wrapping_mul(MULT) + seed % SPAN) % SPAN
 }
 
 /// A name whose UTF-8 was read back as Latin-1: a lead byte of a two-byte sequence (`Ã`, `Â`,

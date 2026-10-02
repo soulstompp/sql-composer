@@ -25,10 +25,14 @@ it loads the catalogue, so a `setup` that stops early leaves an empty database b
 checks for the eight tables before it reads anything, and names the ones it cannot find.
 `--schema` may not name the `--source-schema`: the target schema is dropped and recreated.
 
-`--size small|medium|huge` names a number of synthesized sets; `--sets N` sets it directly and wins.
+`--size small|medium|huge|8m|80m|800m` names a number of synthesized sets: 20 thousand, 200
+thousand, 2 million, and past huge the number in the name (8, 80 and 800 million). `--sets N` sets
+it directly and wins.
 The default is `huge`. Everything else scales with it: builders, collection rows and purchases
-(`PURCHASES_PER_SET` per set, real and synthesized), and every trap planted at a rate. The same
-`--sets`, `--seed` and wiring flags give the same rows.
+(`PURCHASES_PER_SET` per set, real and synthesized), and every trap planted at a rate. The cities,
+postcodes, names, stores and calendar stay the same at every size, so a bigger size crowds them.
+The same `--sets`, `--seed` and wiring flags give the same rows. Each key, statistics and vacuum
+build may run an hour for every two million sets unless `--build-timeout` says otherwise.
 
 The database URL can also come from `LEGO_GENERATOR_DATABASE_URL`, never from the general
 `DATABASE_URL`: the target schema is dropped and recreated, so the database has to be named on
@@ -53,10 +57,14 @@ indexes a DBA gives the tables for the joins between them, each led by the colum
 table fixes (`STRANDS` in `src/load.rs`). A strand's key holds columns, then cycles read off the
 clock (the month), then the line, the instant itself. The clock is `<schema>.clock(timestamptz)`, an
 instant as the wall clock of UTC, which the load creates before the strands; a query that means to
-use a strand reads time through the same function. Autovacuum is off on the tables during the load
-and back on afterwards (`--autovacuum-during-load on` leaves it on); then the tables are vacuumed and
-analysed. `--unlogged` creates unlogged tables for scratch runs, and `--synchronous-commit` sets the
-loading sessions' commit mode (off by default).
+use a strand reads time through the same function. Beside the strands the load builds what a DBA
+adds for the searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the
+postcodes' unique code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders'
+homes by distance (`ll_to_earth`), and GINs on part names by their words and on part and set names
+by trigrams. It creates the extensions they need (`cube`, `earthdistance`, `pg_trgm`) in `public`.
+Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
+leaves it on); then the tables are vacuumed and analysed. `--unlogged` creates unlogged tables for
+scratch runs, and `--synchronous-commit` sets the loading sessions' commit mode (off by default).
 
 ## Years
 
@@ -104,14 +112,43 @@ of its timeline has passed by today.
 
 A collection row draws its set by demand, from the builder's home socket unless the collection cord
 crosses, and each copy is bought on a day drawn from the set's timeline, in the store's opening
-hours. The builder writes the instant down as the wall clock of their home zone, by that zone's
-offset history from the IANA time zone database bundled into the binary, from 1950 on.
+hours, at a second and a millisecond of its minute. The builder writes the instant down as the wall
+clock of their home zone, to the millisecond, by that zone's offset history from the IANA time zone
+database bundled into the binary, from 1950 on.
 
 The row names the set it holds by its number, `set_num`, and the set's name is the sets' own. Where
 the builder typed the set's number or name their own way (traps K1, K2, K3 and K5), the row also
 keeps what they typed, in `typed_set_num` or `typed_name`; on every other row both are NULL. Each
 copy the row holds is one purchase, which names the row by `(builder_id, row_no)`: the copies are
 counted from the purchases, and a purchase reaches its set through its row.
+
+## Where builders live
+
+The builders live in real cities: `data/cities.tsv`, Natural Earth's 1:10m populated places (public
+domain) in the eight home zones, at their real coordinates, with their populations. Its header says
+how the places were picked.
+
+- `lego_cities`: each city, its country, region, home zone, coordinates and population.
+- `lego_postcodes`: a city's postcode districts, a grid over a square of its urban core's area, one
+  district for about every 25,000 people, so the postcodes are the same at every size. Each code is
+  in its country's format, and its leading characters follow the country's own scheme, so a code
+  says where it is:
+  - a US ZIP code's first digit, an Indian PIN code's, a Japanese and a Portuguese code's, by state,
+    prefecture or district;
+  - an Australian code by state, a Danish one by region;
+  - a UK code's letters by its town's postcode area (`AB`, `IV`, `KW`, `ZE`, `BT`, …), London's by
+    its compass point (`EC`, `WC`, `E`, `N`, `NW`, `W`, `SW`, `SE`).
+
+  The rest of each code is numbered in order, and made up.
+- `lego_streets`: a district's streets, as many as its builders need, each running north–south or
+  east–west from one end to the other, under a made-up name in the country's way of naming streets.
+- `lego_builders`: each builder's street and house number, odd on one side of the street and even
+  on the other, and their home's point beside it.
+
+A builder's zone is their city's, reached through their street and its postcode. Builders spread
+over each zone's cities by population, and over each city to its edges. Every point a street or a
+home holds is the centre of the thousandth-of-a-degree cell it falls in, so it names a block, not a
+house, and no street name is real, so no row is anybody's address.
 
 ## Traps
 
@@ -139,8 +176,8 @@ On standard output, the lines starting `SUMMARY` hold the run's figures: the res
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
 the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the sets,
 most bought first), the WAL written and each table's final size. The same configuration is written to the table
-`generator_run`, with the clock's zone (`clock_zone`) and each strand's definition, keyed by its
-index's name (`strand_<name>`).
+`generator_run`, with the clock's zone (`clock_zone`) and each strand's, unique key's and search
+index's definition, keyed by its name (`strand_<name>`, `unique_<name>`, `search_<name>`).
 
 ## Object-oriented tables
 
@@ -166,7 +203,8 @@ table of its most specific class. Every class's CHECK reads the row's own column
   - The hue is `<schema>.colour_wheel(rgb)`: the place on a twelve-hue wheel, counted from red, each
     place thirty degrees. A colour's class follows its `rgb`, not its name.
 - **Builders, by the country of their home zone,** from the IANA database's `zone.tab`. A country
-  with two home zones (the United States) has a class per zone under it.
+  with two home zones (the United States) has a class per zone under it. A builder's class is read
+  off their own `street_id`: the streets of one zone, and of one country, are one run of ids.
 
 Each class has the generated table's primary key, and each class that holds rows every one of the
 generated table's strands. Every class is vacuumed and analysed. Read a hierarchy through its root,
@@ -178,7 +216,7 @@ SELECT count(*) FROM lego_sets WHERE theme_id = 158;                  -- the Sta
 SELECT count(*) FROM lego_colors WHERE lego_oo.colour_wheel(rgb) = 0;  -- the red class
 ```
 
-A query that names a class's own condition, such as a theme, a zone or a wheel place, reads only
+A query that names a class's own condition, such as a theme, a street or a wheel place, reads only
 the classes that can hold it. The planner leaves out the others, as long as the value is a constant
 when the statement is planned.
 

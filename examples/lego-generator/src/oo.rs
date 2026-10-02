@@ -399,8 +399,10 @@ pub fn colours(schema: &str) -> Hierarchy {
 }
 
 /// The builders' classes: a class per country of the home zones, and a class per zone under a
-/// country that holds more than one.
-pub fn builders() -> Hierarchy {
+/// country that holds more than one. A builder's class is read off their street: `streets` gives
+/// each zone's lowest and highest street id, and the streets of a zone, and of a country, are one
+/// run of ids.
+pub fn builders(streets: &BTreeMap<String, (i32, i32)>) -> Hierarchy {
     let mut by_country: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for zone in ZONE_NAMES {
         let country = ZONE_COUNTRIES
@@ -410,12 +412,18 @@ pub fn builders() -> Hierarchy {
             .unwrap_or_else(|| panic!("{zone} has no country"));
         by_country.entry(country).or_default().push(zone);
     }
-    let quoted = |zones: &[&str]| {
-        zones
+    let run = |zones: &[&str]| {
+        let ids: Vec<(i32, i32)> = zones
             .iter()
-            .map(|z| format!("'{z}'"))
-            .collect::<Vec<_>>()
-            .join(", ")
+            .map(|z| {
+                *streets
+                    .get(*z)
+                    .unwrap_or_else(|| panic!("{z} has no streets"))
+            })
+            .collect();
+        let lo = ids.iter().map(|r| r.0).min().expect("a zone");
+        let hi = ids.iter().map(|r| r.1).max().expect("a zone");
+        format!("street_id BETWEEN {lo} AND {hi}")
     };
     let mut classes = vec![class("lego_builders", &[], None, None, false)];
     for (country, zones) in &by_country {
@@ -424,7 +432,7 @@ pub fn builders() -> Hierarchy {
         classes.push(class(
             &name,
             &["lego_builders"],
-            Some(Test::Sql(format!("home_zone IN ({})", quoted(zones)))),
+            Some(Test::Sql(run(zones))),
             None,
             one,
         ));
@@ -434,7 +442,7 @@ pub fn builders() -> Hierarchy {
                 classes.push(class(
                     &format!("{name}_{city}"),
                     &[&name],
-                    Some(Test::Sql(format!("home_zone = '{zone}'"))),
+                    Some(Test::Sql(run(&[zone]))),
                     None,
                     true,
                 ));
@@ -516,7 +524,20 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
     .fetch_all(&mut *conn)
     .await
     .map_err(|e| format!("reading the themes: {e}"))?;
-    let hierarchies = [sets(&themes)?, colours(oo), builders()];
+    let streets: BTreeMap<String, (i32, i32)> = sqlx::query_as::<_, (String, i32, i32)>(&format!(
+        "SELECT c.zone, min(s.street_id), max(s.street_id) \
+         FROM {generated}.lego_streets s \
+         JOIN {generated}.lego_postcodes p ON p.postcode_id = s.postcode_id \
+         JOIN {generated}.lego_cities c ON c.city_id = p.city_id \
+         GROUP BY c.zone"
+    ))
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| format!("reading the streets: {e}"))?
+    .into_iter()
+    .map(|(zone, lo, hi)| (zone, (lo, hi)))
+    .collect();
+    let hierarchies = [sets(&themes)?, colours(oo), builders(&streets)];
 
     for h in &hierarchies {
         for c in &h.classes {
@@ -778,18 +799,34 @@ mod tests {
         assert!(e.contains("Pirates"), "{e}");
     }
 
+    /// Each zone's lowest and highest street id, from the places a small world draws.
+    fn streets() -> BTreeMap<String, (i32, i32)> {
+        let places = crate::places::Places::new(7, 4000);
+        ZONE_NAMES
+            .iter()
+            .enumerate()
+            .map(|(z, name)| (name.to_string(), places.street_ids(&[z])))
+            .collect()
+    }
+
     #[test]
     fn every_home_zone_has_a_country_and_a_country_of_two_zones_has_a_class_per_zone() {
-        let h = builders();
-        for zone in ZONE_NAMES {
+        let runs = streets();
+        let h = builders(&runs);
+        let range = |t: &Test| -> (i32, i32) {
+            let Test::Sql(s) = t else { panic!("{t:?}") };
+            let n: Vec<i32> = s.split(' ').filter_map(|w| w.parse().ok()).collect();
+            (n[0], n[1])
+        };
+        for (zone, (lo, hi)) in &runs {
             let homes: Vec<&str> = h
                 .classes
                 .iter()
                 .filter(|c| c.holds)
                 .filter(|c| {
-                    h.tests(&c.name).iter().all(|t| match t {
-                        Test::Sql(s) => s.contains(&format!("'{zone}'")),
-                        _ => false,
+                    h.tests(&c.name).iter().all(|t| {
+                        let (a, b) = range(t);
+                        a <= *lo && *hi <= b
                     })
                 })
                 .map(|c| c.name.as_str())
@@ -834,7 +871,11 @@ mod tests {
         assert!(generated.iter().all(|n| n.len() <= NAME_BYTES));
         let mut names = BTreeSet::new();
         let mut carried = 0;
-        for h in [sets(&themes()).unwrap(), colours("oo"), builders()] {
+        for h in [
+            sets(&themes()).unwrap(),
+            colours("oo"),
+            builders(&streets()),
+        ] {
             let of_table: Vec<&Strand> = STRANDS.iter().filter(|s| s.table == h.table).collect();
             for c in &h.classes {
                 let want = if c.holds {

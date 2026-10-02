@@ -1,6 +1,7 @@
 //! Rows written straight into a COPY buffer, in Postgres's text or binary COPY format.
 
 use crate::calendar;
+use crate::places;
 use crate::world::{
     BuilderOut, CollectionOut, InvOut, LineOut, ManifestOut, NestOut, PurchaseOut, SetOut, Stamp,
 };
@@ -129,6 +130,17 @@ impl Enc {
         }
     }
 
+    fn f64(&mut self, v: f64) {
+        self.sep();
+        match self.fmt {
+            Format::Text => self.buf.extend_from_slice(v.to_string().as_bytes()),
+            Format::Binary => {
+                self.buf.extend_from_slice(&8i32.to_be_bytes());
+                self.buf.extend_from_slice(&v.to_be_bytes());
+            }
+        }
+    }
+
     fn bool(&mut self, v: bool) {
         self.sep();
         match self.fmt {
@@ -170,11 +182,11 @@ impl Enc {
 
     fn stamp(&mut self, s: &Stamp) {
         match (self.fmt, s) {
-            (Format::Text, Stamp::At { t, offset_min }) => {
-                self.str(&calendar::render_with_offset(*t, *offset_min))
+            (Format::Text, Stamp::At { t, ms, offset_min }) => {
+                self.str(&calendar::render_with_offset(*t, *ms, *offset_min))
             }
             (Format::Text, Stamp::Infinity) => self.str("infinity"),
-            (Format::Binary, Stamp::At { t, .. }) => self.i64(calendar::pg_micros(*t)),
+            (Format::Binary, Stamp::At { t, ms, .. }) => self.i64(calendar::pg_micros(*t, *ms)),
             (Format::Binary, Stamp::Infinity) => self.i64(i64::MAX),
         }
     }
@@ -216,10 +228,13 @@ impl Enc {
     }
 
     pub fn builder(&mut self, r: &BuilderOut) {
-        self.begin(3);
+        self.begin(6);
         self.i32(r.builder_id);
         self.str(&r.name);
-        self.str(r.home_zone);
+        self.i32(r.street_id);
+        self.i32(r.house_number);
+        self.f64(places::degrees(r.latitude));
+        self.f64(places::degrees(r.longitude));
         self.end();
     }
 
@@ -258,7 +273,7 @@ impl Enc {
         self.end();
     }
 
-    /// A reference table row: every column text or int4, as the reference tables hold.
+    /// A reference table row: every column text, int4 or float8, as the reference tables hold.
     pub fn reference_row(&mut self, cols: &[Cell<'_>]) {
         self.begin(cols.len() as i16);
         for c in cols {
@@ -266,6 +281,7 @@ impl Enc {
                 Cell::Int(v) => self.i32(*v),
                 Cell::OptInt(v) => self.opt_i32(*v),
                 Cell::Text(s) => self.str(s),
+                Cell::Float(v) => self.f64(*v),
             }
         }
         self.end();
@@ -276,6 +292,7 @@ pub enum Cell<'a> {
     Int(i32),
     OptInt(Option<i32>),
     Text(&'a str),
+    Float(f64),
 }
 
 fn itoa(v: i64, buf: &mut [u8]) -> &[u8] {

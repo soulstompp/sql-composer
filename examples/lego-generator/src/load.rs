@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::catalogue::{Catalogue, Theme};
 use crate::encode::{Cell, Enc, Format};
+use crate::places::{self, Places};
 use crate::world::{BuilderWave, ManifestOut, SetWave};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +64,7 @@ pub struct TableDef {
     pub key: Option<&'static str>,
 }
 
-pub const TABLES: [TableDef; 13] = [
+pub const TABLES: [TableDef; 16] = [
     TableDef { name: "lego_colors", columns: "id, name, rgb, is_trans", typed: "id integer NOT NULL, name varchar(255) NOT NULL, rgb varchar(6) NOT NULL, is_trans character(1) NOT NULL", key: Some("id") },
     TableDef { name: "lego_themes", columns: "id, name, parent_id", typed: "id integer NOT NULL, name varchar(255) NOT NULL, parent_id integer", key: Some("id") },
     TableDef { name: "lego_part_categories", columns: "id, name", typed: "id integer NOT NULL, name varchar(255) NOT NULL", key: Some("id") },
@@ -72,7 +73,10 @@ pub const TABLES: [TableDef; 13] = [
     TableDef { name: "lego_inventories", columns: "id, version, set_num", typed: "id integer NOT NULL, version integer NOT NULL, set_num varchar(255) NOT NULL", key: Some("id") },
     TableDef { name: "lego_inventory_parts", columns: "inventory_id, part_num, color_id, quantity, is_spare", typed: "inventory_id integer NOT NULL, part_num varchar(255) NOT NULL, color_id integer NOT NULL, quantity integer NOT NULL, is_spare boolean NOT NULL", key: None },
     TableDef { name: "lego_inventory_sets", columns: "inventory_id, set_num, quantity", typed: "inventory_id integer NOT NULL, set_num varchar(255) NOT NULL, quantity integer NOT NULL", key: None },
-    TableDef { name: "lego_builders", columns: "builder_id, name, home_zone", typed: "builder_id integer NOT NULL, name varchar(255) NOT NULL, home_zone varchar(64) NOT NULL", key: Some("builder_id") },
+    TableDef { name: "lego_cities", columns: "city_id, name, country, region, zone, latitude, longitude, population", typed: "city_id integer NOT NULL, name varchar(255) NOT NULL, country character(2) NOT NULL, region varchar(255) NOT NULL, zone varchar(64) NOT NULL, latitude double precision NOT NULL, longitude double precision NOT NULL, population integer NOT NULL", key: Some("city_id") },
+    TableDef { name: "lego_postcodes", columns: "postcode_id, city_id, code", typed: "postcode_id integer NOT NULL, city_id integer NOT NULL, code varchar(16) NOT NULL", key: Some("postcode_id") },
+    TableDef { name: "lego_streets", columns: "street_id, postcode_id, name, from_latitude, from_longitude, to_latitude, to_longitude", typed: "street_id integer NOT NULL, postcode_id integer NOT NULL, name varchar(255) NOT NULL, from_latitude double precision NOT NULL, from_longitude double precision NOT NULL, to_latitude double precision NOT NULL, to_longitude double precision NOT NULL", key: Some("street_id") },
+    TableDef { name: "lego_builders", columns: "builder_id, name, street_id, house_number, latitude, longitude", typed: "builder_id integer NOT NULL, name varchar(255) NOT NULL, street_id integer NOT NULL, house_number integer NOT NULL, latitude double precision NOT NULL, longitude double precision NOT NULL", key: Some("builder_id") },
     TableDef { name: "lego_collection", columns: "builder_id, row_no, set_num, typed_set_num, typed_name", typed: "builder_id integer NOT NULL, row_no integer NOT NULL, set_num varchar(255) NOT NULL, typed_set_num varchar(255), typed_name varchar(255)", key: Some("builder_id, row_no") },
     TableDef { name: "lego_purchases", columns: "purchase_id, builder_id, row_no, store, ordered_at, ordered_local, delivered_at", typed: "purchase_id bigint NOT NULL, builder_id integer NOT NULL, row_no integer NOT NULL, store varchar(64) NOT NULL, ordered_at timestamptz NOT NULL, ordered_local varchar(32) NOT NULL, delivered_at timestamptz", key: Some("purchase_id") },
     TableDef { name: "trap_manifest", columns: "trap, origin, tbl, row_key, phase, wave, socket, detail", typed: "trap varchar(8) NOT NULL, origin varchar(16) NOT NULL, tbl varchar(64) NOT NULL, row_key text NOT NULL, phase varchar(32) NOT NULL, wave bigint NOT NULL, socket varchar(32), detail text NOT NULL", key: None },
@@ -247,6 +251,75 @@ pub const STRANDS: &[Strand] = &[
         parts: &[MONTH, ORDERED_AT],
         include: &["builder_id", "row_no", "ordered_at", "purchase_id"],
     },
+    Strand {
+        table: "lego_cities",
+        parts: &[Part::Column("zone"), Part::Column("city_id")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_postcodes",
+        parts: &[Part::Column("city_id"), Part::Column("postcode_id")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_streets",
+        parts: &[Part::Column("postcode_id"), Part::Column("street_id")],
+        include: &[],
+    },
+    Strand {
+        table: "lego_builders",
+        parts: &[Part::Column("street_id"), Part::Column("builder_id")],
+        include: &[],
+    },
+];
+
+/// A unique key besides the primary key, added as a constraint after the load: its table, its name
+/// and its columns.
+pub const UNIQUE_KEYS: &[(&str, &str, &str)] =
+    &[("lego_postcodes", "lego_postcodes_code_key", "code")];
+
+/// An index a DBA adds beside the strands, for a search they do not serve: a code by its prefix, a
+/// home by its distance, a name by its words or by a pattern. `sql` is what follows `ON <table>`,
+/// and `extensions` are created in the database, in `public`, before it is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Search {
+    pub name: &'static str,
+    pub table: &'static str,
+    pub sql: &'static str,
+    pub extensions: &'static [&'static str],
+}
+
+pub const SEARCHES: &[Search] = &[
+    Search {
+        name: "lego_postcodes_code_pattern_idx",
+        table: "lego_postcodes",
+        sql: "(code text_pattern_ops)",
+        extensions: &[],
+    },
+    Search {
+        name: "lego_builders_home_earth_idx",
+        table: "lego_builders",
+        sql: "USING gist (public.ll_to_earth(latitude, longitude))",
+        extensions: &["cube", "earthdistance"],
+    },
+    Search {
+        name: "lego_parts_name_words_idx",
+        table: "lego_parts",
+        sql: "USING gin (to_tsvector('english', name))",
+        extensions: &[],
+    },
+    Search {
+        name: "lego_parts_name_trgm_idx",
+        table: "lego_parts",
+        sql: "USING gin (name public.gin_trgm_ops)",
+        extensions: &["pg_trgm"],
+    },
+    Search {
+        name: "lego_sets_name_trgm_idx",
+        table: "lego_sets",
+        sql: "USING gin (name public.gin_trgm_ops)",
+        extensions: &["pg_trgm"],
+    },
 ];
 
 /// The longest name the server keeps, in bytes.
@@ -270,14 +343,23 @@ pub fn strand_name(table: &str, parts: &[Part]) -> String {
     format!("{}_{digest:08x}", &full[..cut])
 }
 
-/// What `generator_run` records of the strands: the clock's zone, and each strand's definition by
-/// its index's name.
+/// What `generator_run` records of the indexes: the clock's zone, and each strand's, unique key's
+/// and search index's definition by its name.
 pub fn roster_rows(schema: &str) -> Vec<(String, String)> {
     let mut rows = vec![("clock_zone".to_string(), CLOCK_ZONE.to_string())];
     for s in STRANDS {
         rows.push((
             format!("strand_{}", strand_name(s.table, s.parts)),
             format!("{} {}", s.table, s.definition(schema)),
+        ));
+    }
+    for (table, name, columns) in UNIQUE_KEYS {
+        rows.push((format!("unique_{name}"), format!("{table} ({columns})")));
+    }
+    for s in SEARCHES {
+        rows.push((
+            format!("search_{}", s.name),
+            format!("{} {}", s.table, s.sql),
         ));
     }
     rows
@@ -525,7 +607,10 @@ pub async fn create_schema(pool: &PgPool, s: &Settings) -> Result<(), sqlx::Erro
     sqlx::query(&format!("CREATE SCHEMA {}", s.schema))
         .execute(pool)
         .await?;
-    for t in &TABLES[4..] {
+    for t in TABLES
+        .iter()
+        .filter(|t| !REFERENCE_TABLES.contains(&t.name))
+    {
         sqlx::query(&create_table(s, t, s.index_timing == IndexTiming::Before))
             .execute(pool)
             .await?;
@@ -561,17 +646,26 @@ async fn copy_batch(
     copy.finish().await
 }
 
-/// The reference tables, in the order they are loaded.
-pub const REFERENCE_TABLES: [&str; 4] = [
+/// The reference tables, in the order they are loaded: the real catalogue's, then the places.
+pub const REFERENCE_TABLES: [&str; 7] = [
     "lego_colors",
     "lego_themes",
     "lego_part_categories",
     "lego_parts",
+    "lego_cities",
+    "lego_postcodes",
+    "lego_streets",
 ];
 
 /// The rows of reference table `name`: the real catalogue's, and after its themes the root themes
-/// the generator adds (`World::added_themes`).
-pub fn encode_reference(name: &str, cat: &Catalogue, added_themes: &[Theme], enc: &mut Enc) {
+/// the generator adds (`World::added_themes`); or the places' cities, postcodes and streets.
+pub fn encode_reference(
+    name: &str,
+    cat: &Catalogue,
+    added_themes: &[Theme],
+    places: &Places,
+    enc: &mut Enc,
+) {
     match name {
         "lego_colors" => cat.colours.iter().for_each(|c| {
             enc.reference_row(&[
@@ -599,6 +693,36 @@ pub fn encode_reference(name: &str, cat: &Catalogue, added_themes: &[Theme], enc
                 Cell::Int(p.part_cat_id),
             ])
         }),
+        "lego_cities" => places.cities.iter().for_each(|c| {
+            enc.reference_row(&[
+                Cell::Int(c.id),
+                Cell::Text(c.name),
+                Cell::Text(c.country),
+                Cell::Text(c.region),
+                Cell::Text(crate::calendar::ZONE_NAMES[c.zone]),
+                Cell::Float(places::degrees(c.latitude)),
+                Cell::Float(places::degrees(c.longitude)),
+                Cell::Int(c.population),
+            ])
+        }),
+        "lego_postcodes" => places.postcodes.iter().for_each(|p| {
+            enc.reference_row(&[
+                Cell::Int(p.id),
+                Cell::Int(places.cities[p.city].id),
+                Cell::Text(&p.code),
+            ])
+        }),
+        "lego_streets" => places.streets.iter().for_each(|s| {
+            enc.reference_row(&[
+                Cell::Int(s.id),
+                Cell::Int(places.postcodes[s.postcode].id),
+                Cell::Text(&s.name),
+                Cell::Float(places::degrees(s.from.0)),
+                Cell::Float(places::degrees(s.from.1)),
+                Cell::Float(places::degrees(s.to.0)),
+                Cell::Float(places::degrees(s.to.1)),
+            ])
+        }),
         other => unreachable!("{other} is not a reference table"),
     }
 }
@@ -610,6 +734,7 @@ pub async fn load_reference_tables(
     s: &Settings,
     cat: &Catalogue,
     added_themes: &[Theme],
+    places: &Places,
     metrics: &Metrics,
 ) -> Result<(), LoadError> {
     let err = |t: &'static str, rows: u64, e: sqlx::Error, rb: bool| {
@@ -626,7 +751,7 @@ pub async fn load_reference_tables(
     for name in REFERENCE_TABLES {
         let t = table(name);
         let mut enc = Enc::new(s.format);
-        encode_reference(name, cat, added_themes, &mut enc);
+        encode_reference(name, cat, added_themes, places, &mut enc);
         enc.finish();
         let started = Instant::now();
         let mut tx = pool
@@ -857,8 +982,8 @@ pub async fn watch_progress(
     }
 }
 
-/// After the load: keys (when built after), autovacuum back on, the clock and then the strands,
-/// statistics, the visibility map.
+/// After the load: keys (when built after), autovacuum back on, the clock and then the strands, the
+/// unique keys and the search indexes, statistics, the visibility map.
 pub async fn finish(
     conn: &mut PgConnection,
     s: &Settings,
@@ -906,6 +1031,50 @@ pub async fn finish(
             index = %name,
             elapsed_ms = started.elapsed().as_millis() as u64,
             "strand built"
+        );
+    }
+    for (table, name, columns) in UNIQUE_KEYS {
+        let started = Instant::now();
+        sqlx::query(&format!(
+            "ALTER TABLE {}.{table} ADD CONSTRAINT {name} UNIQUE ({columns})",
+            s.schema
+        ))
+        .execute(&mut *conn)
+        .await?;
+        steps.push((format!("unique {name}"), started.elapsed()));
+        info!(
+            table,
+            index = name,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "unique key built"
+        );
+    }
+    let mut extensions: Vec<&str> = SEARCHES
+        .iter()
+        .flat_map(|x| x.extensions.iter().copied())
+        .collect();
+    extensions.dedup();
+    for e in extensions {
+        sqlx::query(&format!(
+            "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA public"
+        ))
+        .execute(&mut *conn)
+        .await?;
+    }
+    for x in SEARCHES {
+        let started = Instant::now();
+        sqlx::query(&format!(
+            "CREATE INDEX {} ON {}.{} {}",
+            x.name, s.schema, x.table, x.sql
+        ))
+        .execute(&mut *conn)
+        .await?;
+        steps.push((format!("search {}", x.name), started.elapsed()));
+        info!(
+            table = x.table,
+            index = x.name,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "search index built"
         );
     }
     if s.vacuum {

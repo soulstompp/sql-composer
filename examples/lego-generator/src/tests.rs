@@ -347,7 +347,7 @@ fn written(w: &World, e: &Everything) -> BTreeMap<&'static str, Written> {
     };
     let added = w.added_themes();
     for name in crate::load::REFERENCE_TABLES {
-        crate::load::encode_reference(name, &w.real.cat, &added, &mut enc);
+        crate::load::encode_reference(name, &w.real.cat, &added, &w.places, &mut enc);
         take(name, &mut enc);
     }
     let pool = &w.real.cat.part_pool;
@@ -424,6 +424,14 @@ const REFERENCES: &[Reference] = &[
         "lego_collection",
         "builder_id, row_no",
     ),
+    ("lego_postcodes", "city_id", "lego_cities", "city_id"),
+    (
+        "lego_streets",
+        "postcode_id",
+        "lego_postcodes",
+        "postcode_id",
+    ),
+    ("lego_builders", "street_id", "lego_streets", "street_id"),
 ];
 
 fn cols(list: &str) -> Vec<&str> {
@@ -563,11 +571,10 @@ fn the_manifest_names_exactly_the_trapped_rows() {
         .flat_map(|x| x.builders.iter())
         .map(|b| (b.builder_id, b))
         .collect();
+    // A builder's zone is their street's city's.
     let zone_of = |p: &world::PurchaseOut| {
-        calendar::zones()
-            .iter()
-            .find(|z| z.name == builders[&p.builder_id].home_zone)
-            .unwrap()
+        let street = builders[&p.builder_id].street_id;
+        &calendar::zones()[w.places.cities[w.places.city_of_street(street)].zone]
     };
     let themes: HashSet<i32> = w.real.cat.themes.iter().map(|t| t.id).collect();
     let parts: HashSet<&str> = w
@@ -578,7 +585,7 @@ fn the_manifest_names_exactly_the_trapped_rows() {
         .map(|p| p.part_num.as_str())
         .collect();
     let local_day = |p: &world::PurchaseOut| match p.ordered_at {
-        Stamp::At { t, offset_min } => (t + i64::from(offset_min) * 60).div_euclid(86_400),
+        Stamp::At { t, offset_min, .. } => (t + i64::from(offset_min) * 60).div_euclid(86_400),
         Stamp::Infinity => unreachable!(),
     };
 
@@ -676,7 +683,11 @@ fn the_manifest_names_exactly_the_trapped_rows() {
                 let p = purchases[&m.row_key];
                 let (d, rest) = p.ordered_local.split_once(' ').unwrap();
                 let ymd: Vec<u32> = d.split('-').map(|x| x.parse().unwrap()).collect();
-                let hm: Vec<u32> = rest.split(':').map(|x| x.parse().unwrap()).collect();
+                let hm: Vec<u32> = rest
+                    .split(':')
+                    .take(2)
+                    .map(|x| x.parse().unwrap())
+                    .collect();
                 let local = calendar::local_secs(
                     calendar::days_from_civil(i64::from(ymd[0]), ymd[1], ymd[2]),
                     hm[0],
@@ -693,7 +704,9 @@ fn the_manifest_names_exactly_the_trapped_rows() {
                 let (uy, um, _) = calendar::civil_from_days(t.div_euclid(86_400));
                 (ly, lm) != (uy, um)
             }
-            Trap::D4 => purchases[&m.row_key].ordered_local.ends_with(" 24:00"),
+            Trap::D4 => purchases[&m.row_key]
+                .ordered_local
+                .ends_with(" 24:00:00.000"),
             Trap::D5 => purchases[&m.row_key].delivered_at == Stamp::Infinity,
             Trap::D6 => {
                 let (_, mo, d) = calendar::civil_from_days(local_day(purchases[&m.row_key]));
@@ -864,10 +877,7 @@ fn every_written_clock_reads_its_instant_but_the_traps_that_write_it_otherwise()
         .iter()
         .flat_map(|x| x.builders.iter())
         .map(|b| {
-            let z = calendar::zones()
-                .iter()
-                .find(|z| z.name == b.home_zone)
-                .unwrap();
+            let z = &calendar::zones()[w.places.cities[w.places.city_of_street(b.street_id)].zone];
             (b.builder_id, z)
         })
         .collect();
@@ -882,13 +892,14 @@ fn every_written_clock_reads_its_instant_but_the_traps_that_write_it_otherwise()
     let (d2, d4) = (trapped(Trap::D2), trapped(Trap::D4));
     assert!(!d2.is_empty() && !d4.is_empty());
     let mut read = 0;
+    let (mut seconds, mut millis) = (HashSet::new(), HashSet::new());
     for p in e.builders.iter().flat_map(|x| x.purchases.iter()) {
         let z = zone[&p.builder_id];
         let key = p.purchase_id.to_string();
-        let Stamp::At { t, offset_min } = p.ordered_at else {
+        let Stamp::At { t, ms, offset_min } = p.ordered_at else {
             panic!("{key}: no instant")
         };
-        let reading = calendar::render_local_minute(t + i64::from(z.offset_min_at(t)) * 60);
+        let reading = calendar::render_local(t + i64::from(z.offset_min_at(t)) * 60, ms);
         let in_force = offset_min == z.offset_min_at(t);
         if d2.contains(&key) {
             assert!(!in_force && p.ordered_local != reading, "{p:?}");
@@ -896,12 +907,70 @@ fn every_written_clock_reads_its_instant_but_the_traps_that_write_it_otherwise()
             assert!(in_force, "{p:?}");
             assert_eq!(p.ordered_local != reading, d4.contains(&key), "{p:?}");
         }
-        if let Stamp::At { t, offset_min } = p.delivered_at {
+        if let Stamp::At { t, offset_min, .. } = p.delivered_at {
             assert_eq!(offset_min, z.offset_min_at(t), "{p:?}");
         }
+        seconds.insert(t.rem_euclid(60));
+        millis.insert(ms);
         read += 1;
     }
     assert!(read > 100, "{read} purchases");
+    // The clocks run to the millisecond.
+    assert!(seconds.len() > 1, "{seconds:?}");
+    assert!(millis.len() > 1, "{millis:?}");
+}
+
+/// Where in its minute a reading falls is drawn apart from the minute: a second draw of it moves
+/// every instant and every reading within its minute, and none out of it.
+#[test]
+fn the_seconds_move_every_reading_within_its_minute_only() {
+    let w = world(3000, 100, "natural:100");
+    let minute = |s: &Stamp| match *s {
+        Stamp::At { t, .. } => Some(t.div_euclid(60)),
+        Stamp::Infinity => None,
+    };
+    let lisbon = ZONE_NAMES
+        .iter()
+        .position(|z| *z == "Europe/Lisbon")
+        .unwrap();
+    let traps = [
+        None,
+        Some(Trap::D1),
+        Some(Trap::D2),
+        Some(Trap::D3),
+        Some(Trap::D4),
+        Some(Trap::D5),
+        Some(Trap::D6),
+        Some(Trap::D7),
+    ];
+    let (mut read, mut moved) = (0, 0);
+    for trap in traps {
+        for k in 0..20 {
+            let times = |s: u64| {
+                w.purchase_times(
+                    lisbon,
+                    trap.map(|t| (t, 0)),
+                    k,
+                    1990,
+                    4,
+                    &mut crate::rng::Rng::new(k),
+                    &mut crate::rng::Rng::new(s),
+                )
+            };
+            let (a, b) = (times(1), times(2));
+            assert_eq!(a.len(), b.len(), "{trap:?}");
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(x.0, y.0, "{trap:?}");
+                assert_eq!(minute(&x.1), minute(&y.1), "{trap:?} {x:?} {y:?}");
+                assert_eq!(x.2[..16], y.2[..16], "{trap:?} {x:?} {y:?}");
+                assert_eq!(minute(&x.3), minute(&y.3), "{trap:?} {x:?} {y:?}");
+                read += 1;
+                moved += usize::from(x.1 != y.1);
+            }
+        }
+    }
+    // D4's midnight is the only reading nothing falls past.
+    assert_eq!(read - moved, 20, "{moved} of {read} moved");
 }
 
 #[test]
@@ -1039,7 +1108,7 @@ fn buying_reaches_almost_every_set_skewed_and_within_each_timeline() {
     let today = calendar::days_from_civil(world::TODAY.0, world::TODAY.1, world::TODAY.2);
     let mut read = 0;
     for p in e.builders.iter().flat_map(|x| x.purchases.iter()) {
-        let (Some(&s), Stamp::At { t, offset_min }) =
+        let (Some(&s), Stamp::At { t, offset_min, .. }) =
             (w.real.set_by_num.get(set_of(p)), p.ordered_at)
         else {
             continue;
@@ -1568,4 +1637,61 @@ fn a_strand_name_past_the_limit_is_cut_to_fit_and_stays_distinct() {
         );
     }
     assert_eq!(names.iter().collect::<HashSet<_>>().len(), names.len());
+}
+
+/// Every synthesized set number, and the eight-digit number it moves to when its bare form is a
+/// real record, is distinct from every other through three times nine million sets; the numbers
+/// below nine million are the ones earlier runs wrote.
+#[test]
+fn set_numbers_stay_distinct_past_nine_million_sets() {
+    let seed = 20_260_926;
+    assert_eq!(world::base_number(seed, 0), 3_260_926);
+    assert_eq!(world::base_number(seed, 8_999_999), 4_606_605);
+    let mut seen = vec![0u64; 1 << 20];
+    for i in 0..27_000_000 {
+        let b = world::base_number(seed, i);
+        for n in [b, b + 9_000_000] {
+            let (word, bit) = ((n / 64) as usize, n % 64);
+            assert!(seen[word] >> bit & 1 == 0, "set {i} repeats the number {n}");
+            seen[word] |= 1 << bit;
+        }
+    }
+}
+
+/// A set count whose inventories would number past the largest integer the tables hold is refused
+/// before anything is generated.
+#[test]
+fn a_set_count_past_the_tables_integers_is_refused() {
+    let sets = 1_100_000_000;
+    let real = Real::new(fixture());
+    let board = Switchboard::new(&real, "natural:100", dials(), sets, 1000).expect("patch");
+    match World::new(real, wiring(sets, 1000), board) {
+        Ok(_) => panic!("{sets} sets were accepted"),
+        Err(e) => assert!(e.contains(&i32::MAX.to_string()), "{e}"),
+    }
+}
+
+/// The build timeout is an hour for every two million sets, and never less than an hour.
+#[test]
+fn the_build_timeout_grows_an_hour_for_every_two_million_sets() {
+    assert_eq!(crate::build_timeout_for(20_000), "3600s");
+    assert_eq!(crate::build_timeout_for(2_000_000), "3600s");
+    assert_eq!(crate::build_timeout_for(8_000_000), "14400s");
+    assert_eq!(crate::build_timeout_for(800_000_000), "1440000s");
+}
+
+/// Every named size is read back from its name, and numbers its inventories within the tables'
+/// integers.
+#[test]
+fn every_named_size_fits_the_tables_integers() {
+    use clap::ValueEnum;
+    let real = Real::new(fixture());
+    for &size in crate::Size::value_variants() {
+        assert_eq!(crate::Size::from_str(&size.name(), false), Ok(size));
+        assert!(
+            world::inventory_ceiling(&real, size.sets()) <= i64::from(i32::MAX),
+            "{}",
+            size.name()
+        );
+    }
 }

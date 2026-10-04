@@ -8,11 +8,11 @@
 
 mod calendar;
 mod catalogue;
-mod chords;
 mod demand;
 mod encode;
 mod load;
 mod oo;
+mod paired;
 mod places;
 mod rng;
 mod switchboard;
@@ -108,7 +108,7 @@ struct Cli {
     #[arg(long, default_value_t = 4)]
     jobs: u32,
     /// The phases of the switchboard, as `<pattern>:<percent>,…`.
-    #[arg(long, default_value = "natural:90,wavy:9,zchord:1")]
+    #[arg(long, default_value = "natural:90,wavy:9,paired:1")]
     patch: String,
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,
@@ -195,7 +195,8 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
     /// Also build the object-oriented tables in this schema, which is dropped and recreated: the
-    /// generated sets, colours and builders, each decomposed by kind with table inheritance.
+    /// generated sets, colours and builders, each split into a hierarchy of tables with table
+    /// inheritance.
     #[arg(long)]
     oo_schema: Option<String>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue

@@ -8,8 +8,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::calendar::{self, LocalTime, Shift, Zone};
 use crate::catalogue::{decade_of, is_release_year, split_version, Real, Theme, DECADE_LO};
-use crate::chords::{self, Z_PAIRS};
 use crate::demand::{self, Alias, Spike, Timeline};
+use crate::paired::{self, YEAR_PAIRS};
 use crate::places::Places;
 use crate::rng::{Purpose, Rng};
 use crate::switchboard::{Pattern, Switchboard};
@@ -180,12 +180,12 @@ pub struct BuilderWave {
     pub bought: Vec<(u64, u32)>,
 }
 
-/// A pack of the `zchord` phase: one of a pair.
+/// A pack of the `paired` phase: one of a pair.
 #[derive(Clone, Debug)]
-pub struct ZRole {
+pub struct PairedPack {
     pub pair: u64,
     pub first: bool,
-    pub class: [i32; 5],
+    pub pattern: [i32; 5],
     pub partner: [i32; 5],
     pub window: i32,
     pub mirrored: bool,
@@ -202,10 +202,10 @@ pub struct Head {
     pub template: u32,
     pub socket: Option<u16>,
     pub trap: Option<(Trap, u64)>,
-    pub zchord: Option<ZRole>,
+    pub paired: Option<PairedPack>,
     /// For a pack of the wavy pattern: the year its children's offsets are measured from, and
     /// whether the offsets are mirrored.
-    pub chord_shift: Option<(i32, bool)>,
+    pub wavy_shift: Option<(i32, bool)>,
 }
 
 const FIRST_NAMES: [&str; 32] = [
@@ -246,8 +246,9 @@ pub struct World {
     /// Per home zone, the clock's folds and gaps from the release of the old sets to today.
     folds: Vec<Vec<Shift>>,
     gaps: Vec<Vec<Shift>>,
-    /// Window starts whose ten years all have real sets.
-    chord_windows: Vec<i32>,
+    /// The first years of the windows a paired pack's children are drawn from: eight years, each
+    /// with five real sets or more.
+    pack_windows: Vec<i32>,
     /// Per real pack, its children's year offsets from its own year, one per nesting row.
     pack_offsets: HashMap<u32, Vec<i32>>,
     /// Per set (a real set by its index, synthesized set `i` at the real sets' count plus `i`), its
@@ -356,7 +357,7 @@ impl World {
                     .partition(|s| s.is_fold())
             })
             .unzip();
-        let chord_windows: Vec<i32> = (DECADE_LO..=LAST_REAL_YEAR - 7)
+        let pack_windows: Vec<i32> = (DECADE_LO..=LAST_REAL_YEAR - 7)
             .filter(|w| {
                 (*w..*w + 8).all(|y| children_by_year.get(&y).is_some_and(|v| v.len() >= 5))
             })
@@ -399,7 +400,7 @@ impl World {
             old_sets,
             folds,
             gaps,
-            chord_windows,
+            pack_windows,
             pack_offsets,
             on_sale: Vec::new(),
             buyable: Vec::new(),
@@ -495,7 +496,7 @@ impl World {
                 let (base, v) = self.plain_number(k);
                 !lettered
                     && !rerelease
-                    && !self.in_zchord(k)
+                    && !self.in_paired(k)
                     && v == 1
                     && !self.real.keys.contains(&base)
                     && (trap != Trap::K4 || !self.real.non_ascii.is_empty())
@@ -525,19 +526,19 @@ impl World {
         (lettered, rerelease)
     }
 
-    fn in_zchord(&self, i: u64) -> bool {
-        self.board.phase_of(i).pattern == zchord_pattern()
+    fn in_paired(&self, i: u64) -> bool {
+        self.board.phase_of(i).pattern == Pattern::Paired
     }
 
     /// Whether synthesized set `i` is the `-2` record of set `i - 1`'s number.
     fn is_rerelease(&self, i: u64) -> bool {
         let (lettered, rerelease) = self.kind_raw(i);
-        if lettered || !rerelease || i == 0 || self.in_zchord(i) || self.set_traps.contains_key(&i)
+        if lettered || !rerelease || i == 0 || self.in_paired(i) || self.set_traps.contains_key(&i)
         {
             return false;
         }
         let (pl, pr) = self.kind_raw(i - 1);
-        !pl && !pr && !self.in_zchord(i - 1) && !self.set_traps.contains_key(&(i - 1))
+        !pl && !pr && !self.in_paired(i - 1) && !self.set_traps.contains_key(&(i - 1))
     }
 
     /// The number a plain synthesized set carries, with its version bumped past any real record. A
@@ -564,8 +565,8 @@ impl World {
         let rerelease = self.is_rerelease(i);
         let phase = self.board.phase_of(i);
 
-        if phase.pattern == zchord_pattern() {
-            return self.zchord_head(i);
+        if self.in_paired(i) {
+            return self.paired_head(i);
         }
 
         // The socket, and the real set this one is modelled on.
@@ -690,7 +691,7 @@ impl World {
 
         // A pack of the wavy pattern: its year moves within its decade with the wave, and its
         // children's year offsets are mirrored on the way back.
-        let mut chord_shift = None;
+        let mut wavy_shift = None;
         if trap.is_none()
             && phase.pattern == Pattern::Wavy
             && self.pack_offsets.contains_key(&template)
@@ -704,8 +705,8 @@ impl World {
                 } else {
                     (2.0 - pos, true)
                 };
-                let class = ((centre * 10.0) as i32).min(9);
-                let moved = y - y.rem_euclid(10) + class;
+                let digit = ((centre * 10.0) as i32).min(9);
+                let moved = y - y.rem_euclid(10) + digit;
                 let offsets = &self.pack_offsets[&template];
                 let fits = offsets.iter().all(|d| {
                     let c = if mirrored { moved - d } else { moved + d };
@@ -713,7 +714,7 @@ impl World {
                 });
                 if fits && (DECADE_LO..=LAST_REAL_YEAR).contains(&moved) && is_release_year(moved) {
                     year = Some(moved);
-                    chord_shift = Some((moved, mirrored));
+                    wavy_shift = Some((moved, mirrored));
                 }
             }
         }
@@ -739,20 +740,20 @@ impl World {
             template,
             socket: socket_final,
             trap,
-            zchord: None,
-            chord_shift,
+            paired: None,
+            wavy_shift,
         }
     }
 
-    fn zchord_head(&self, i: u64) -> Head {
+    fn paired_head(&self, i: u64) -> Head {
         let seed = self.wiring.seed;
         let real = &self.real;
         let phase = self.board.phase_of(i);
         let k = i - phase.start;
         let pair = k / 2;
         let first = k.is_multiple_of(2);
-        let (a, b) = Z_PAIRS[(pair % 3) as usize];
-        let (class, partner) = if first { (a, b) } else { (b, a) };
+        let (a, b) = YEAR_PAIRS[(pair % 3) as usize];
+        let (pattern, partner) = if first { (a, b) } else { (b, a) };
         let wave = (pair * 2) / self.board.chunk;
         let period = self.board.dials.wavy_period.max(1);
         let pos = (wave % (2 * period)) as f64 / period as f64;
@@ -761,14 +762,14 @@ impl World {
         } else {
             (2.0 - pos, true)
         };
-        let window = if self.chord_windows.is_empty() {
+        let window = if self.pack_windows.is_empty() {
             DECADE_LO
         } else {
-            let n = self.chord_windows.len();
-            self.chord_windows[((centre * n as f64) as usize).min(n - 1)]
+            let n = self.pack_windows.len();
+            self.pack_windows[((centre * n as f64) as usize).min(n - 1)]
         };
-        let notes = chords::placed(&class, mirrored);
-        let pack_year = window + notes.iter().copied().max().unwrap_or(0);
+        let offsets = paired::placed(&pattern, mirrored);
+        let pack_year = window + offsets.iter().copied().max().unwrap_or(0);
         let mut rt = Rng::stream(seed, Purpose::SetTemplate, i);
         let pool = self
             .templates_by_year
@@ -808,15 +809,15 @@ impl World {
             template,
             socket,
             trap: None,
-            zchord: Some(ZRole {
+            paired: Some(PairedPack {
                 pair,
                 first,
-                class,
+                pattern,
                 partner,
                 window,
                 mirrored,
             }),
-            chord_shift: None,
+            wavy_shift: None,
         }
     }
 
@@ -1159,9 +1160,9 @@ impl World {
             let mut nests: Vec<NestOut> = Vec::new();
             let mut rc = Rng::stream(seed, Purpose::SetCord, i ^ 0x5eed);
             let mut taken: HashSet<u32> = HashSet::new();
-            if let Some(z) = &h.zchord {
-                for note in chords::placed(&z.class, z.mirrored) {
-                    if let Some(c) = self.child_for(root, z.window + note, &mut rc, &taken) {
+            if let Some(p) = &h.paired {
+                for offset in paired::placed(&p.pattern, p.mirrored) {
+                    if let Some(c) = self.child_for(root, p.window + offset, &mut rc, &taken) {
                         taken.insert(c);
                         nests.push(NestOut {
                             inventory_id: inv_id,
@@ -1174,7 +1175,7 @@ impl World {
                 let offsets = self.pack_offsets.get(&t);
                 for (k, n) in real.nests(inv.id).iter().enumerate() {
                     let d = offsets.map_or(0, |o| o[k]);
-                    let child_year = match (h.chord_shift, h.year) {
+                    let child_year = match (h.wavy_shift, h.year) {
                         (Some((moved, mirrored)), _) => {
                             Some(if mirrored { moved - d } else { moved + d })
                         }
@@ -1247,7 +1248,7 @@ impl World {
             let mut lines = merged.len() as u64;
             // A second, revised inventory: one line's count corrected.
             if h.trap.is_none()
-                && h.zchord.is_none()
+                && h.paired.is_none()
                 && rl.chance_ppm(self.wiring.second_version_ppm)
                 && !merged.is_empty()
             {
@@ -1345,7 +1346,7 @@ impl World {
                     ));
                 }
             }
-            if let Some(z) = &h.zchord {
+            if let Some(p) = &h.paired {
                 out.manifest.push(manifest(
                     Trap::O5,
                     Origin::Synthetic,
@@ -1355,15 +1356,13 @@ impl World {
                     wave_no,
                     sock_label.clone(),
                     format!(
-                        "pair={} member={} class={} partner={} window={} mirrored={} gaps={} consecutive={}",
-                        z.pair,
-                        if z.first { "first" } else { "second" },
-                        chords::class_label(&z.class),
-                        chords::class_label(&z.partner),
-                        z.window,
-                        z.mirrored,
-                        chords::class_label(&chords::gap_counts(&chords::placed(&z.class, z.mirrored)).map(|g| g as i32)),
-                        chords::consecutive_triples(&chords::placed(&z.class, z.mirrored))
+                        "pair={} member={} offsets={} partner_offsets={} window={} mirrored={}",
+                        p.pair,
+                        if p.first { "first" } else { "second" },
+                        paired::label(&p.pattern),
+                        paired::label(&p.partner),
+                        p.window,
+                        p.mirrored,
                     ),
                 ));
             }
@@ -2100,11 +2099,6 @@ fn into_minute(t: i64, into: i64, offset_min: i32) -> Stamp {
 /// The wall clock `into` milliseconds past the whole minute `local`.
 fn reading(local: i64, into: i64) -> String {
     calendar::render_local(local + into / 1000, (into % 1000) as u16)
-}
-
-/// The `zchord` phase's pattern.
-pub fn zchord_pattern() -> Pattern {
-    Pattern::Zchord
 }
 
 /// A synthesized set's number: seven digits for the first nine million sets, then each further

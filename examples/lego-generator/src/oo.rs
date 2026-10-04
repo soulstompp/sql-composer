@@ -1,7 +1,7 @@
-//! The object-oriented tables (`--oo-schema`): the generated sets, colours and builders, each
-//! decomposed by kind into a hierarchy of tables with PostgreSQL's table inheritance, in a schema of
-//! their own. The other tables are not decomposed: read the classes with the generated schema behind
-//! them on the `search_path`.
+//! The object-oriented tables (`--oo-schema`): the generated sets, colours and builders, each split
+//! into a hierarchy of tables with PostgreSQL's table inheritance, in a schema of their own. The
+//! other tables are not split: read the classes with the generated schema behind them on the
+//! `search_path`.
 //!
 //! Every row is written to the table of its most specific class, unchanged. A class's CHECK reads
 //! the row's own columns only:
@@ -11,18 +11,18 @@
 //! - a builder by the country of their home zone, with a class per zone where a country has more
 //!   than one.
 //!
-//! A CHECK its descendants inherit says what the whole class holds. A class that also holds rows of
-//! its own leaves out its descendants' rows with a `NO INHERIT` CHECK. A table with two parents is a
-//! thing of both kinds, and a query through either parent reads it once.
+//! A CHECK the child tables inherit says what the class and all its children hold. A class that
+//! also has rows of its own leaves out its children's rows with a `NO INHERIT` CHECK. A table with
+//! two parents is a row of both, and a query through either parent reads it once.
 //!
-//! Every class has the generated table's primary key, and every class that holds rows each of the
-//! generated table's strands, reading time through the generated schema's `clock`.
+//! Every class has the generated table's primary key, and every class with rows of its own each of
+//! the generated table's composite indexes, reading time through the generated schema's `clock`.
 //!
-//! After the build, a certificate reads every class's CHECKs back from the catalogue:
-//! - each hierarchy holds exactly the generated table's rows;
+//! After the build, a placement check reads every class's CHECKs back from the catalogue:
+//! - each hierarchy has exactly the generated table's rows;
 //! - every row satisfying a class's CHECKs lies in that class or below it;
 //! - every row of a class satisfies its CHECKs;
-//! - a class meant to hold no rows of its own holds none.
+//! - a class meant to have no rows of its own has none.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ use sqlx::PgConnection;
 use tracing::info;
 
 use crate::calendar::{ZONE_COUNTRIES, ZONE_NAMES};
-use crate::load::{strand_name, Strand, STRANDS};
+use crate::load::{index_name, CompositeIndex, COMPOSITE_INDEXES};
 
 /// The root themes of licensed sets, by name.
 pub const LICENSED: [&str; 10] = [
@@ -110,30 +110,30 @@ impl Test {
     }
 }
 
-/// One class: its table, the tables it inherits from, the CHECK its descendants inherit, the CHECK
-/// on its own rows alone, and whether rows are written to it.
+/// One class: its table, the tables it inherits from, the CHECK its children inherit, the
+/// `NO INHERIT` CHECK on the rows of the table itself, and whether rows are written to it.
 #[derive(Clone, Debug)]
 pub struct Class {
     pub name: String,
     pub parents: Vec<String>,
     pub check: Option<Test>,
-    pub own: Option<Test>,
-    pub holds: bool,
+    pub no_inherit: Option<Test>,
+    pub has_rows: bool,
 }
 
 fn class(
     name: &str,
     parents: &[&str],
     check: Option<Test>,
-    own: Option<Test>,
-    holds: bool,
+    no_inherit: Option<Test>,
+    has_rows: bool,
 ) -> Class {
     Class {
         name: name.into(),
         parents: parents.iter().map(|p| p.to_string()).collect(),
         check,
-        own,
-        holds,
+        no_inherit,
+        has_rows,
     }
 }
 
@@ -155,12 +155,13 @@ impl Hierarchy {
             .unwrap_or_else(|| panic!("no class {name}"))
     }
 
-    /// The tests a row of `name`'s own must pass: its CHECKs and every ancestor's inherited one.
+    /// The tests a row written to `name` itself must pass: its CHECKs and every ancestor's
+    /// inherited one.
     pub fn tests(&self, name: &str) -> Vec<&Test> {
         let mut seen = BTreeSet::new();
         let mut todo = vec![name.to_string()];
         let mut out = Vec::new();
-        let own = self.get(name).own.as_ref();
+        let no_inherit = self.get(name).no_inherit.as_ref();
         while let Some(n) = todo.pop() {
             if !seen.insert(n.clone()) {
                 continue;
@@ -169,17 +170,17 @@ impl Hierarchy {
             out.extend(c.check.as_ref());
             todo.extend(c.parents.iter().cloned());
         }
-        out.extend(own);
+        out.extend(no_inherit);
         out
     }
 
-    /// The strands class `c` carries: every strand of the generated table on a class that holds
-    /// rows, and none on a class that holds none.
-    pub fn strands(&self, c: &Class) -> Vec<&'static Strand> {
-        if !c.holds {
+    /// The composite indexes class `c` has: every composite index of the generated table on a
+    /// class with rows of its own, and none on a class without.
+    pub fn composite_indexes(&self, c: &Class) -> Vec<&'static CompositeIndex> {
+        if !c.has_rows {
             return Vec::new();
         }
-        STRANDS.iter().filter(|s| s.table == self.table).collect()
+        COMPOSITE_INDEXES.iter().filter(|s| s.table == self.table).collect()
     }
 
     fn predicate(&self, name: &str) -> String {
@@ -363,12 +364,12 @@ pub fn colours(schema: &str) -> Hierarchy {
         ),
     ];
     // the places as a list, which the planner can compare with a query's own places
-    for (kind, places) in [
+    for (group, places) in [
         ("primary", vec![0, 4, 8]),
         ("secondary", vec![2, 6, 10]),
         ("tertiary", vec![1, 3, 5, 7, 9, 11]),
     ] {
-        let parent = format!("lego_colors_{kind}");
+        let parent = format!("lego_colors_{group}");
         let list = places
             .iter()
             .map(|p: &usize| p.to_string())
@@ -489,7 +490,7 @@ $wheel$"
     )
 }
 
-/// What the build did: each step's time, and the rows each class holds of its own.
+/// What the build did: each step's time, and the rows each class has of its own.
 pub struct Built {
     pub steps: Vec<(String, Duration)>,
     pub rows: Vec<(String, i64)>,
@@ -511,7 +512,8 @@ async fn count(conn: &mut PgConnection, sql: &str) -> Result<i64, String> {
         .map_err(|e| format!("{e}: {sql}"))
 }
 
-/// Builds the classes in `oo` from the generated tables in `generated`, then certifies them.
+/// Builds the classes in `oo` from the generated tables in `generated`, then runs the placement
+/// check on them.
 pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result<Built, String> {
     let mut steps = Vec::new();
     let started = Instant::now();
@@ -549,11 +551,11 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
             } else {
                 let mut checks = Vec::new();
                 if let Some(t) = &c.check {
-                    checks.push(format!("CONSTRAINT {}_kind CHECK ({})", c.name, t.sql()));
+                    checks.push(format!("CONSTRAINT {}_check CHECK ({})", c.name, t.sql()));
                 }
-                if let Some(t) = &c.own {
+                if let Some(t) = &c.no_inherit {
                     checks.push(format!(
-                        "CONSTRAINT {}_own CHECK ({}) NO INHERIT",
+                        "CONSTRAINT {}_no_inherit_check CHECK ({}) NO INHERIT",
                         c.name,
                         t.sql()
                     ));
@@ -572,7 +574,7 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
             };
             exec(conn, &create).await?;
         }
-        for c in h.classes.iter().filter(|c| c.holds) {
+        for c in h.classes.iter().filter(|c| c.has_rows) {
             exec(
                 conn,
                 &format!(
@@ -590,11 +592,11 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
                 &format!("ALTER TABLE {oo}.{} ADD PRIMARY KEY ({})", c.name, h.key),
             )
             .await?;
-            for s in h.strands(c) {
+            for ix in h.composite_indexes(c) {
                 let on = format!("{oo}.{}", c.name);
                 exec(
                     conn,
-                    &s.create_sql(&strand_name(&c.name, s.parts), &on, generated),
+                    &ix.create_sql(&index_name(&c.name, ix.parts), &on, generated),
                 )
                 .await?;
             }
@@ -604,9 +606,28 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
     steps.push(("oo build".to_string(), started.elapsed()));
 
     let started = Instant::now();
+    let rows = check_placement(conn, generated, oo, &hierarchies).await?;
+    steps.push(("oo placement check".to_string(), started.elapsed()));
+    info!(
+        schema = oo,
+        classes = rows.len(),
+        "object-oriented tables built, every row in its place"
+    );
+    Ok(Built { steps, rows })
+}
+
+/// The placement check: each hierarchy has exactly the generated table's rows, and each row lies
+/// in the class its CHECKs, read back from the catalogue, name. Returns the rows each class has of
+/// its own, or every way the classes fail.
+async fn check_placement(
+    conn: &mut PgConnection,
+    generated: &str,
+    oo: &str,
+    hierarchies: &[Hierarchy],
+) -> Result<Vec<(String, i64)>, String> {
     let mut broken = Vec::new();
     let mut rows = Vec::new();
-    for h in &hierarchies {
+    for h in hierarchies {
         let table = h.table;
         let extra = count(
             conn,
@@ -662,28 +683,22 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
                     "{oo}.{name}: {failing} of its rows do not satisfy its checks"
                 ));
             }
-            let own = count(conn, &format!("SELECT count(*) FROM ONLY {oo}.{name}")).await?;
-            if !c.holds && own != 0 {
+            let only = count(conn, &format!("SELECT count(*) FROM ONLY {oo}.{name}")).await?;
+            if !c.has_rows && only != 0 {
                 broken.push(format!(
-                    "{oo}.{name}: holds {own} rows of its own, and is meant to hold none"
+                    "{oo}.{name}: has {only} rows of its own, and is meant to have none"
                 ));
             }
-            rows.push((name.clone(), own));
+            rows.push((name.clone(), only));
         }
     }
-    steps.push(("oo certificate".to_string(), started.elapsed()));
     if !broken.is_empty() {
         return Err(format!(
-            "the object-oriented tables failed their certificate: {}",
+            "the object-oriented tables failed the placement check: {}",
             broken.join("; ")
         ));
     }
-    info!(
-        schema = oo,
-        classes = rows.len(),
-        "object-oriented tables built and certified"
-    );
-    Ok(Built { steps, rows })
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -730,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn every_set_lands_in_exactly_one_class_that_holds_sets() {
+    fn every_set_lands_in_exactly_one_class_with_rows() {
         let t = themes();
         let h = sets(&t).unwrap();
         let unknown = t.iter().map(|(i, _, _)| *i).max().unwrap() + 100;
@@ -743,7 +758,7 @@ mod tests {
             let homes: Vec<&str> = h
                 .classes
                 .iter()
-                .filter(|c| c.holds)
+                .filter(|c| c.has_rows)
                 .filter(|c| h.tests(&c.name).iter().all(|test| test.holds_for(theme)))
                 .map(|c| c.name.as_str())
                 .collect();
@@ -762,7 +777,7 @@ mod tests {
         let home = |theme: Option<i32>| {
             h.classes
                 .iter()
-                .filter(|c| c.holds && h.tests(&c.name).iter().all(|test| test.holds_for(theme)))
+                .filter(|c| c.has_rows && h.tests(&c.name).iter().all(|test| test.holds_for(theme)))
                 .map(|c| c.name.clone())
                 .next()
                 .unwrap()
@@ -822,7 +837,7 @@ mod tests {
             let homes: Vec<&str> = h
                 .classes
                 .iter()
-                .filter(|c| c.holds)
+                .filter(|c| c.has_rows)
                 .filter(|c| {
                     h.tests(&c.name).iter().all(|t| {
                         let (a, b) = range(t);
@@ -836,17 +851,17 @@ mod tests {
         assert!(h
             .classes
             .iter()
-            .any(|c| c.name == "lego_builders_us_new_york" && c.holds));
+            .any(|c| c.name == "lego_builders_us_new_york" && c.has_rows));
         assert!(h
             .classes
             .iter()
-            .any(|c| c.name == "lego_builders_us" && !c.holds));
+            .any(|c| c.name == "lego_builders_us" && !c.has_rows));
     }
 
     #[test]
     fn the_colour_classes_cover_the_wheel_once() {
         let h = colours("oo");
-        let leaves: Vec<&Class> = h.classes.iter().filter(|c| c.holds).collect();
+        let leaves: Vec<&Class> = h.classes.iter().filter(|c| c.has_rows).collect();
         assert_eq!(leaves.len(), 13);
         for (place, hue) in HUES.iter().enumerate() {
             let named: Vec<&str> = leaves
@@ -858,42 +873,51 @@ mod tests {
         }
     }
 
-    /// A class that holds rows carries every strand of its table, and a class that holds none carries
+    /// A class with rows of its own has every composite index of its table, and a class without has
     /// none. The index names are unique within each schema, and fit the server's limit.
     #[test]
-    fn a_class_that_holds_rows_carries_every_strand_of_its_table() {
+    fn a_class_with_rows_has_every_composite_index_of_its_table() {
         use crate::load::NAME_BYTES;
-        let generated: BTreeSet<String> = STRANDS
+        let generated: BTreeSet<String> = COMPOSITE_INDEXES
             .iter()
-            .map(|s| strand_name(s.table, s.parts))
+            .map(|s| index_name(s.table, s.parts))
             .collect();
-        assert_eq!(generated.len(), STRANDS.len());
+        assert_eq!(generated.len(), COMPOSITE_INDEXES.len());
         assert!(generated.iter().all(|n| n.len() <= NAME_BYTES));
         let mut names = BTreeSet::new();
-        let mut carried = 0;
+        let mut built = 0;
         for h in [
             sets(&themes()).unwrap(),
             colours("oo"),
             builders(&streets()),
         ] {
-            let of_table: Vec<&Strand> = STRANDS.iter().filter(|s| s.table == h.table).collect();
+            let of_table: Vec<&CompositeIndex> = COMPOSITE_INDEXES
+                .iter()
+                .filter(|s| s.table == h.table)
+                .collect();
             for c in &h.classes {
-                let want = if c.holds {
+                let want = if c.has_rows {
                     of_table.clone()
                 } else {
                     Vec::new()
                 };
-                assert_eq!(h.strands(c), want, "{}", c.name);
+                assert_eq!(h.composite_indexes(c), want, "{}", c.name);
                 for s in want {
-                    let n = strand_name(&c.name, s.parts);
+                    let n = index_name(&c.name, s.parts);
                     assert!(n.len() <= NAME_BYTES, "{n}");
                     assert!(names.insert(n.clone()), "{n} twice");
-                    carried += 1;
+                    built += 1;
                 }
             }
         }
-        // The sets' table has more than one strand, so a class carrying only one shows here.
-        assert!(STRANDS.iter().filter(|s| s.table == "lego_sets").count() > 1);
-        assert!(carried > 0);
+        // The sets' table has more than one composite index, so a class with only one shows here.
+        assert!(
+            COMPOSITE_INDEXES
+                .iter()
+                .filter(|s| s.table == "lego_sets")
+                .count()
+                > 1
+        );
+        assert!(built > 0);
     }
 }

@@ -1,6 +1,6 @@
 -- The composite indexes a DBA gives the dump's tables for the joins the example's queries make.
--- Each is led by the column the join into its table fixes, and ends on, or carries, the column the
--- next join reads. The primary keys stay as they are. Safe to run again.
+-- Each is led by the column the join into its table fixes, and ends on the column the next join
+-- reads or holds it in INCLUDE. The primary keys stay as they are. Safe to run again.
 
 CREATE INDEX IF NOT EXISTS lego_themes_parent_id_id_idx ON lego_themes (parent_id, id);
 CREATE INDEX IF NOT EXISTS lego_sets_theme_id_set_num_idx ON lego_sets (theme_id, set_num);

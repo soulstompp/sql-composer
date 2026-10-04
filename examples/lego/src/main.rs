@@ -389,7 +389,7 @@ async fn cmd_migrate(pool: &PgPool) {
     let migrations = [
         include_str!("../migrations/20240101000000_example_tables.sql"),
         include_str!("../migrations/20260926000000_versions.sql"),
-        include_str!("../migrations/20260930000000_strands.sql"),
+        include_str!("../migrations/20260930000000_composite_indexes.sql"),
     ];
     for migration_sql in migrations {
         sqlx::raw_sql(migration_sql)

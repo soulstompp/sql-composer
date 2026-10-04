@@ -86,8 +86,9 @@ pub const TABLES: [TableDef; 16] = [
 /// The zone the schema's `clock` reads an instant in.
 pub const CLOCK_ZONE: &str = "UTC";
 
-/// `<schema>.clock(timestamptz)`: an instant as the wall clock of `CLOCK_ZONE`. The strands read
-/// time through it, and so do queries that mean to use them.
+/// `<schema>.clock(timestamptz)`: an instant as the wall clock of `CLOCK_ZONE`. It is declared
+/// `IMMUTABLE`, so an index can hold an expression over it, such as a purchase's month; a query
+/// reads time through the same function to use that index.
 pub fn clock_function(schema: &str) -> String {
     format!(
         "CREATE FUNCTION {schema}.clock(timestamptz) RETURNS timestamp \
@@ -95,36 +96,24 @@ pub fn clock_function(schema: &str) -> String {
     )
 }
 
-/// One level of a strand's key.
+/// One column of a composite index's key: a column of the table, or an expression over it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     /// A column of the table.
     Column(&'static str),
-    /// A cycle read off the clock: its name, and its expression, in which `{clock}` stands for the
-    /// schema's `clock` function.
-    Cycle {
+    /// An expression: the name it gives the index's name, and its SQL, in which `{clock}` stands
+    /// for the schema's `clock` function.
+    Expression {
         label: &'static str,
         sql: &'static str,
     },
-    /// A column of instants, read through the schema's `clock`.
-    Line(&'static str),
 }
 
 impl Part {
-    /// Where the part's kind stands in a key: columns first, then cycles, then the line.
-    #[cfg(test)]
-    pub fn rank(&self) -> u8 {
-        match self {
-            Part::Column(_) => 0,
-            Part::Cycle { .. } => 1,
-            Part::Line(_) => 2,
-        }
-    }
-
     fn label(&self) -> &'static str {
         match self {
-            Part::Column(c) | Part::Line(c) => c,
-            Part::Cycle { label, .. } => label,
+            Part::Column(c) => c,
+            Part::Expression { label, .. } => label,
         }
     }
 
@@ -132,35 +121,33 @@ impl Part {
     pub fn key_sql(&self, schema: &str) -> String {
         match self {
             Part::Column(c) => c.to_string(),
-            Part::Cycle { sql, .. } => {
+            Part::Expression { sql, .. } => {
                 format!("({})", sql.replace("{clock}", &format!("{schema}.clock")))
             }
-            Part::Line(c) => format!("({schema}.clock({c}))"),
         }
     }
 }
 
-/// A composite index built after the load: its table, its key, and the columns it carries beside
-/// the key.
+/// A composite index built after the load: its table, its key, and its `INCLUDE` columns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Strand {
+pub struct CompositeIndex {
     pub table: &'static str,
     pub parts: &'static [Part],
     pub include: &'static [&'static str],
 }
 
-impl Strand {
-    /// The key and the columns carried, as `CREATE INDEX` writes them after the table's name.
+impl CompositeIndex {
+    /// The key and the `INCLUDE` columns, as `CREATE INDEX` writes them after the table's name.
     pub fn definition(&self, clock_schema: &str) -> String {
         let key: Vec<String> = self.parts.iter().map(|p| p.key_sql(clock_schema)).collect();
         match self.include {
             [] => format!("({})", key.join(", ")),
-            carried => format!("({}) INCLUDE ({})", key.join(", "), carried.join(", ")),
+            include => format!("({}) INCLUDE ({})", key.join(", "), include.join(", ")),
         }
     }
 
-    /// The strand built as index `name` on table `on`, which may be another table of the same
-    /// columns, the clock read from `clock_schema`.
+    /// The index built as `name` on table `on`, which may be another table of the same columns,
+    /// the clock read from `clock_schema`.
     pub fn create_sql(&self, name: &str, on: &str, clock_schema: &str) -> String {
         format!(
             "CREATE INDEX {name} ON {on} {}",
@@ -169,32 +156,39 @@ impl Strand {
     }
 }
 
-const MONTH: Part = Part::Cycle {
+/// A purchase's month, on UTC's wall clock.
+const MONTH: Part = Part::Expression {
     label: "month",
     sql: "extract(month FROM {clock}(ordered_at))::smallint",
 };
-const ORDERED_AT: Part = Part::Line("ordered_at");
+/// A purchase's instant, on UTC's wall clock.
+const ORDERED_AT: Part = Part::Expression {
+    label: "ordered_at",
+    sql: "{clock}(ordered_at)",
+};
 
 /// The composite indexes built after the load, by table: each led by the columns the join into its
-/// table fixes, ending on or carrying the column the next join reads, and carrying the columns the
-/// queries read from the table, so that a query answered through the index need not read the table.
-pub const STRANDS: &[Strand] = &[
-    Strand {
+/// table fixes, ending on the column the next join reads or holding it in `INCLUDE`, and holding in
+/// `INCLUDE` the columns the queries read from the table, so that a query answered through the
+/// index need not read the table. The purchases have two expression indexes, by month and then
+/// instant: one within each collection row, and one across all of them.
+pub const COMPOSITE_INDEXES: &[CompositeIndex] = &[
+    CompositeIndex {
         table: "lego_themes",
         parts: &[Part::Column("parent_id"), Part::Column("id")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_sets",
         parts: &[Part::Column("theme_id"), Part::Column("set_num")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_sets",
         parts: &[Part::Column("theme_id"), Part::Column("year")],
         include: &["set_num"],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_inventories",
         parts: &[
             Part::Column("set_num"),
@@ -203,12 +197,12 @@ pub const STRANDS: &[Strand] = &[
         ],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_inventory_sets",
         parts: &[Part::Column("inventory_id"), Part::Column("set_num")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_inventory_parts",
         parts: &[
             Part::Column("inventory_id"),
@@ -217,12 +211,12 @@ pub const STRANDS: &[Strand] = &[
         ],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_parts",
         parts: &[Part::Column("part_cat_id"), Part::Column("part_num")],
         include: &["name"],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_collection",
         parts: &[
             Part::Column("set_num"),
@@ -231,12 +225,12 @@ pub const STRANDS: &[Strand] = &[
         ],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_collection",
         parts: &[Part::Column("builder_id"), Part::Column("row_no")],
         include: &["set_num"],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_purchases",
         parts: &[
             Part::Column("builder_id"),
@@ -246,27 +240,27 @@ pub const STRANDS: &[Strand] = &[
         ],
         include: &["ordered_at", "purchase_id"],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_purchases",
         parts: &[MONTH, ORDERED_AT],
         include: &["builder_id", "row_no", "ordered_at", "purchase_id"],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_cities",
         parts: &[Part::Column("zone"), Part::Column("city_id")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_postcodes",
         parts: &[Part::Column("city_id"), Part::Column("postcode_id")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_streets",
         parts: &[Part::Column("postcode_id"), Part::Column("street_id")],
         include: &[],
     },
-    Strand {
+    CompositeIndex {
         table: "lego_builders",
         parts: &[Part::Column("street_id"), Part::Column("builder_id")],
         include: &[],
@@ -278,9 +272,9 @@ pub const STRANDS: &[Strand] = &[
 pub const UNIQUE_KEYS: &[(&str, &str, &str)] =
     &[("lego_postcodes", "lego_postcodes_code_key", "code")];
 
-/// An index a DBA adds beside the strands, for a search they do not serve: a code by its prefix, a
-/// home by its distance, a name by its words or by a pattern. `sql` is what follows `ON <table>`,
-/// and `extensions` are created in the database, in `public`, before it is built.
+/// An index a DBA adds beside the composite indexes, for a search they do not serve: a code by its
+/// prefix, a home by its distance, a name by its words or by a pattern. `sql` is what follows
+/// `ON <table>`, and `extensions` are created in the database, in `public`, before it is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Search {
     pub name: &'static str,
@@ -325,9 +319,9 @@ pub const SEARCHES: &[Search] = &[
 /// The longest name the server keeps, in bytes.
 pub const NAME_BYTES: usize = 63;
 
-/// The name of a strand's index on `table` over `parts`: the table and the parts' names, or, where
+/// The name of a composite index on `table` over `parts`: the table and the parts' names, or, where
 /// that is longer than `NAME_BYTES`, its front and a digest of the whole.
-pub fn strand_name(table: &str, parts: &[Part]) -> String {
+pub fn index_name(table: &str, parts: &[Part]) -> String {
     let labels: Vec<&str> = parts.iter().map(Part::label).collect();
     let full = format!("{table}_{}_idx", labels.join("_"));
     if full.len() <= NAME_BYTES {
@@ -343,13 +337,13 @@ pub fn strand_name(table: &str, parts: &[Part]) -> String {
     format!("{}_{digest:08x}", &full[..cut])
 }
 
-/// What `generator_run` records of the indexes: the clock's zone, and each strand's, unique key's
-/// and search index's definition by its name.
+/// What `generator_run` records of the clock function and the indexes: each one's definition by its
+/// name.
 pub fn roster_rows(schema: &str) -> Vec<(String, String)> {
-    let mut rows = vec![("clock_zone".to_string(), CLOCK_ZONE.to_string())];
-    for s in STRANDS {
+    let mut rows = vec![("function_clock".to_string(), clock_function(schema))];
+    for s in COMPOSITE_INDEXES {
         rows.push((
-            format!("strand_{}", strand_name(s.table, s.parts)),
+            format!("composite_{}", index_name(s.table, s.parts)),
             format!("{} {}", s.table, s.definition(schema)),
         ));
     }
@@ -982,8 +976,8 @@ pub async fn watch_progress(
     }
 }
 
-/// After the load: keys (when built after), autovacuum back on, the clock and then the strands, the
-/// unique keys and the search indexes, statistics, the visibility map.
+/// After the load: keys (when built after), autovacuum back on, the clock function and then the
+/// composite indexes, the unique keys and the search indexes, statistics, the visibility map.
 pub async fn finish(
     conn: &mut PgConnection,
     s: &Settings,
@@ -1018,19 +1012,19 @@ pub async fn finish(
     sqlx::query(&clock_function(&s.schema))
         .execute(&mut *conn)
         .await?;
-    for st in STRANDS {
+    for ix in COMPOSITE_INDEXES {
         let started = Instant::now();
-        let name = strand_name(st.table, st.parts);
-        let on = format!("{}.{}", s.schema, st.table);
-        sqlx::query(&st.create_sql(&name, &on, &s.schema))
+        let name = index_name(ix.table, ix.parts);
+        let on = format!("{}.{}", s.schema, ix.table);
+        sqlx::query(&ix.create_sql(&name, &on, &s.schema))
             .execute(&mut *conn)
             .await?;
-        steps.push((format!("strand {name}"), started.elapsed()));
+        steps.push((format!("composite {name}"), started.elapsed()));
         info!(
-            table = st.table,
+            table = ix.table,
             index = %name,
             elapsed_ms = started.elapsed().as_millis() as u64,
-            "strand built"
+            "composite index built"
         );
     }
     for (table, name, columns) in UNIQUE_KEYS {

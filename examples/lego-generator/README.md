@@ -52,16 +52,18 @@ waves are written at once, each on its own session.
 
 Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for the
 text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are built
-after the load (`--index-timing before` builds them first). So are the strands: the composite
-indexes a DBA gives the tables for the joins between them, each led by the columns the join into its
-table fixes (`STRANDS` in `src/load.rs`). A strand's key holds columns, then cycles read off the
-clock (the month), then the line, the instant itself. The clock is `<schema>.clock(timestamptz)`, an
-instant as the wall clock of UTC, which the load creates before the strands; a query that means to
-use a strand reads time through the same function. Beside the strands the load builds what a DBA
-adds for the searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the
-postcodes' unique code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders'
-homes by distance (`ll_to_earth`), and GINs on part names by their words and on part and set names
-by trigrams. It creates the extensions they need (`cube`, `earthdistance`, `pg_trgm`) in `public`.
+after the load (`--index-timing before` builds them first). So are the composite indexes a DBA gives
+the tables for the joins between them, each led by the columns the join into its table fixes, with
+the columns the queries read in `INCLUDE` (`COMPOSITE_INDEXES` in `src/load.rs`). Two of them are
+expression indexes on the purchases, by month and then instant, one within each collection row and
+one across all of them. They read the instant through `<schema>.clock(timestamptz)`, a function
+declared `IMMUTABLE` that gives an instant as the wall clock of UTC, which makes an instant's month
+indexable; the load creates it before the indexes, and a query that means to use them reads time
+through the same function. Beside the composite indexes the load builds what a DBA adds for the
+searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the postcodes' unique
+code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders' homes by
+distance (`ll_to_earth`), and GINs on part names by their words and on part and set names by
+trigrams. It creates the extensions they need (`cube`, `earthdistance`, `pg_trgm`) in `public`.
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
 leaves it on); then the tables are vacuumed and analysed. `--unlogged` creates unlogged tables for
 scratch runs, and `--synchronous-commit` sets the loading sessions' commit mode (off by default).
@@ -91,9 +93,13 @@ weight is its real sets plus the releases of its modelled years. The patch
 - `wavy`: a wave travelling over the sockets, forward then back (`--wavy-period`, `--wavy-amplitude`);
 - `hotspot`: one socket takes a share of the sets (`--hotspot-share`, `--hotspot-socket`);
 - `swing`: waves alternate between two groups of sockets (`--swing-a`, `--swing-b`, `--swing-period`);
-- `zchord`: packs written in pairs, their child sets chosen by release year so that the years, read
-  by their last digit round the decade, lie the same distances apart two at a time, but not three at
-  a time. Each pack is listed in `trap_manifest` under O5.
+- `paired`: packs written in pairs, their child sets chosen by release year so that the two packs'
+  sets' years match two at a time and differ in a run of three, which a planner reading columns two
+  at a time cannot tell apart. The years come from three pairs of patterns (`YEAR_PAIRS` in
+  `src/paired.rs`), placed from a window of real release years that moves with the wave, and
+  mirrored on its way back. Each pack is listed in `trap_manifest` under O5, its detail naming its
+  pair, whether it is the first or second member, its offsets, its partner's offsets, the window and
+  whether it is mirrored.
 
 The relationships between sets (the cords) each have a dial for how often they cross from one socket
 to another: nesting (`--cross-nesting`), versions (`--cross-versions`), twins (`--cross-twins`) and
@@ -174,10 +180,11 @@ statements then running, is logged every `--log-progress-every` seconds.
 
 On standard output, the lines starting `SUMMARY` hold the run's figures: the resolved configuration,
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
-the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the sets,
-most bought first), the WAL written and each table's final size. The same configuration is written to the table
-`generator_run`, with the clock's zone (`clock_zone`) and each strand's, unique key's and search
-index's definition, keyed by its name (`strand_<name>`, `unique_<name>`, `search_<name>`).
+the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the
+sets, most bought first), the WAL written and each table's final size. The same configuration is
+written to the table `generator_run`, with the definitions of the clock function (`function_clock`)
+and of each composite index, unique key and search index, keyed by its name (`composite_<name>`,
+`unique_<name>`, `search_<name>`).
 
 ## Object-oriented tables
 
@@ -206,9 +213,12 @@ table of its most specific class. Every class's CHECK reads the row's own column
   with two home zones (the United States) has a class per zone under it. A builder's class is read
   off their own `street_id`: the streets of one zone, and of one country, are one run of ids.
 
-Each class has the generated table's primary key, and each class that holds rows every one of the
-generated table's strands. Every class is vacuumed and analysed. Read a hierarchy through its root,
-with the generated schema behind it for the other tables:
+A class's CHECK, which its children inherit, is named `<class>_check`. A class that has rows of its
+own beside its children's leaves theirs out with a `NO INHERIT` CHECK named
+`<class>_no_inherit_check`. Each class has the generated table's primary key, and each class with
+rows of its own every one of the generated table's composite indexes. Every class is vacuumed and
+analysed. Read a hierarchy through its root, with the generated schema behind it for the other
+tables:
 
 ```sql
 SET search_path = lego_oo, lego;
@@ -220,15 +230,15 @@ A query that names a class's own condition, such as a theme, a street or a wheel
 the classes that can hold it. The planner leaves out the others, as long as the value is a constant
 when the statement is planned.
 
-After the build, a certificate reads every class's CHECKs back from the catalogue and checks four
-things. The build fails if any does not hold:
+After the build, a placement check reads every class's CHECKs back from the catalogue and checks
+four things. The build fails if any does not hold:
 
-- each hierarchy holds exactly the generated table's rows;
+- each hierarchy has exactly the generated table's rows;
 - every row satisfying a class's CHECKs lies in that class or below it;
 - every row of a class satisfies its CHECKs;
-- a class meant to hold no rows of its own holds none.
+- a class meant to have no rows of its own has none.
 
-The `SUMMARY oo` lines give the rows each class holds of its own.
+The `SUMMARY oo` lines give the rows each class has of its own.
 
 ## Tests
 

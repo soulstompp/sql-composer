@@ -124,7 +124,7 @@ To run rustfmt tests locally:
 
 2. Run clippy:
    ```
-   cargo clippy --workspace -- -D warnings
+   cargo clippy --workspace --all-targets -- -D warnings
    ```
    Each PR needs to compile without warnings.
 

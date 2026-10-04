@@ -48,6 +48,27 @@ also checks it, against Mozilla's root certificates, bundled, and any file `&ssl
 names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
 offer it.
 
+## Data and licences
+
+The generator is under the MIT licence, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE).
+
+It ships none of the real catalogue: the LEGO example's `setup` downloads it to your
+machine. It is Neon's sample dump, `lego.sql` in
+[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
+repository under the MIT licence, whose README gives the data's source as Kaggle's
+[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
+public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
+terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
+use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
+you use it. The same terms forbid using any Rebrickable content to train AI models. The generated
+schema holds the real catalogue's own rows, and the synthesized sets take their names and contents
+from them.
+
+The cities in `data/cities.tsv` are Natural Earth's populated places, public domain. The time zones
+are the IANA time zone database, bundled through the `jiff` crate, public domain.
+
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
+
 ## Loading
 
 The load is hierarchical. A wave is `--chunk` root records (sets, or builders), written in one

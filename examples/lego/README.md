@@ -46,6 +46,20 @@ The subcommands read the templates from `--sqlc-dir`, `examples/lego/sqlc` by de
 relative to the directory the command runs in, so run them from the repository root, or name the
 directory.
 
+### Data and licences
+
+The example ships none of the Lego data: `setup` downloads it to your machine. It is Neon's sample
+dump, `lego.sql` in
+[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
+repository under the MIT licence, whose README gives the data's source as Kaggle's
+[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
+public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
+terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
+use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
+you use it. The same terms forbid using any Rebrickable content to train AI models.
+
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
+
 ### Compose templates (optional)
 
 Generate `.sql` files from `.sqlc` templates to see the composed output:

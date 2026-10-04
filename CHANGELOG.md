@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### examples
+
+- **Lego example's composed statements refreshed** — The committed `.sql` files had fallen behind their templates: several differed, and those of the newer templates were missing. They are composed again, and CI checks them with `cargo sqlc compose --verify`. A line with no category, part name or colour name now sorts after the named ones, and a set with no part count first within its year, on every database: each `ORDER BY` says so with an `IS NULL` term, since databases disagree on where a NULL sorts.
+- **Composite indexes migration** — `migrations/20260930000000_composite_indexes.sql` gives the dump's tables the composite indexes a DBA adds for the example's joins, each led by the column the join into its table fixes and ending on the column the next join reads, or holding it in `INCLUDE`. `setup` and `migrate` run it, and it is safe to run again.
+- **TLS** — The Lego example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
+- **Lego catalogue generator** — Its changes are in its own changelog, [`examples/lego-generator/CHANGELOG.md`](examples/lego-generator/CHANGELOG.md).
+
 ## 0.0.4
 
 ### sql-composer

@@ -817,4 +817,4 @@ This project is under active development. The core API (`Template`, `Composer`, 
 
 ## License
 
-MIT
+MIT, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE). Each crate carries the same file.

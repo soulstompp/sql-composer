@@ -1,7 +1,8 @@
-# LEGO catalogue generator
+# sqlc-brickgen
 
-Builds a large LEGO catalogue from a real one and loads it into Postgres, together with builders,
-their collections and their purchase logs.
+`sqlc-brickgen` builds a large LEGO-style catalogue from a real one and loads it into Postgres,
+together with builders, their collections and their purchase logs. LEGO® is a trademark of the LEGO
+Group, which does not sponsor, authorise or endorse this project.
 
 The real catalogue is the eight `lego_*` tables (colours, themes, part categories, parts, sets,
 inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them once,
@@ -17,8 +18,12 @@ database it names. Name the same database in both commands. From the repository 
 
 ```sh
 cargo run -p lego-example -- --database-url postgres://localhost:5432/sqlc_lego setup
-cargo run --release -p lego-generator -- --database-url postgres://localhost:5432/sqlc_lego --size small
+cargo run --release -p sqlc-brickgen -- --database-url postgres://localhost:5432/sqlc_lego --size small
 ```
+
+Without `--size`, the generator builds `huge`: about 2 million synthesized sets, with their
+builders and purchases, which is a long load. `--size small`, 20 thousand sets, makes a quick first
+one.
 
 `setup` needs `psql` on the `PATH`, and ends with "Setup complete!". It creates the database before
 it loads the catalogue, so a `setup` that stops early leaves an empty database behind. The generator
@@ -34,9 +39,36 @@ postcodes, names, stores and calendar stay the same at every size, so a bigger s
 The same `--sets`, `--seed` and wiring flags give the same rows. Each key, statistics and vacuum
 build may run an hour for every two million sets unless `--build-timeout` says otherwise.
 
-The database URL can also come from `LEGO_GENERATOR_DATABASE_URL`, never from the general
+The database URL can also come from `SQLC_BRICKGEN_DATABASE_URL`, never from the general
 `DATABASE_URL`: the target schema is dropped and recreated, so the database has to be named on
 purpose.
+
+Both programs speak TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
+`?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
+also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
+names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
+offer it.
+
+## Data and licences
+
+The generator is under the MIT licence, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE).
+
+It ships none of the real catalogue: the LEGO example's `setup` downloads it to your
+machine. It is Neon's sample dump, `lego.sql` in
+[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
+repository under the MIT licence, whose README gives the data's source as Kaggle's
+[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
+public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
+terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
+use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
+you use it. The same terms forbid using any Rebrickable content to train AI models. The generated
+schema holds the real catalogue's own rows, and the synthesized sets take their names and contents
+from them.
+
+The cities in `data/cities.tsv` are Natural Earth's populated places, public domain. The time zones
+are the IANA time zone database, bundled through the `jiff` crate, public domain.
+
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
 
 ## Loading
 
@@ -52,19 +84,40 @@ waves are written at once, each on its own session.
 
 Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for the
 text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are built
-after the load (`--index-timing before` builds them first). So are the strands: the composite
-indexes a DBA gives the tables for the joins between them, each led by the columns the join into its
-table fixes (`STRANDS` in `src/load.rs`). A strand's key holds columns, then cycles read off the
-clock (the month), then the line, the instant itself. The clock is `<schema>.clock(timestamptz)`, an
-instant as the wall clock of UTC, which the load creates before the strands; a query that means to
-use a strand reads time through the same function. Beside the strands the load builds what a DBA
-adds for the searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the
-postcodes' unique code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders'
-homes by distance (`ll_to_earth`), and GINs on part names by their words and on part and set names
-by trigrams. It creates the extensions they need (`cube`, `earthdistance`, `pg_trgm`) in `public`.
+after the load (`--index-timing before` builds them first). So are the composite indexes a DBA gives
+the tables for the joins between them, each led by the columns the join into its table fixes, with
+the columns the queries read in `INCLUDE` (`COMPOSITE_INDEXES` in `src/load.rs`). Two of them are
+expression indexes on the purchases, by month and then instant, one within each collection row and
+one across all of them. They read the instant through `<schema>.clock(timestamptz)`, a function
+declared `IMMUTABLE` that gives an instant as the wall clock of UTC, which makes an instant's month
+indexable; the load creates it before the indexes, and a query that means to use them reads time
+through the same function. Beside the composite indexes the load builds the unique keys the tables
+declare besides their primary keys (`UNIQUE_KEYS` in `src/load.rs`): the postcodes' `code`, and the
+natural keys of the inventory lines, `(inventory_id, part_num, color_id, is_spare)`, and of the
+nested sets, `(inventory_id, set_num)`, which have no primary key. It also builds what a DBA adds
+for the searches the other indexes do not serve (`SEARCHES`): a `text_pattern_ops` key for a
+postcode by its prefix, a GiST on the builders' homes by distance (`ll_to_earth`), and GINs on part
+names by their words and on part and set names by trigrams.
+
+The generator writes its own lines and nested sets merged on those keys, and the real catalogue's
+unchanged. So when the keys or partitions are asked for, it first checks that the real catalogue
+repeats neither key, and stops before writing anything if it does.
+
+`--indexes` says which of these are built: `keys` (the primary keys and the unique keys),
+`composite` and `search`, as a list, or `none`. All three are built by default; the clock function
+is created whatever the list. The search indexes need the extensions `cube`, `earthdistance` and
+`pg_trgm`. When `search` is in the list, the generator creates each one in `public` before it writes
+anything, unless the database has it already, in any schema; each search index names the schema its
+extension is in. `earthdistance` is not a trusted extension, so only a superuser can create it: a
+role that is not one needs a superuser to run `CREATE EXTENSION earthdistance CASCADE` in the
+database first, or leaves `search` out of `--indexes`.
+
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
-leaves it on); then the tables are vacuumed and analysed. `--unlogged` creates unlogged tables for
-scratch runs, and `--synchronous-commit` sets the loading sessions' commit mode (off by default).
+leaves it on); then the tables are vacuumed and analysed. `--vacuum off` leaves out the vacuum, and
+`--analyze off` the statistics; with both off the tables are left as loaded. The object-oriented
+classes and the partitioned copies are vacuumed and analysed whatever they say. `--unlogged`
+creates unlogged tables for scratch runs, and `--synchronous-commit` sets the loading sessions'
+commit mode (off by default).
 
 ## Years
 
@@ -91,9 +144,14 @@ weight is its real sets plus the releases of its modelled years. The patch
 - `wavy`: a wave travelling over the sockets, forward then back (`--wavy-period`, `--wavy-amplitude`);
 - `hotspot`: one socket takes a share of the sets (`--hotspot-share`, `--hotspot-socket`);
 - `swing`: waves alternate between two groups of sockets (`--swing-a`, `--swing-b`, `--swing-period`);
-- `zchord`: packs written in pairs, their child sets chosen by release year so that the years, read
-  by their last digit round the decade, lie the same distances apart two at a time, but not three at
-  a time. Each pack is listed in `trap_manifest` under O5.
+- `paired`: packs written in pairs, their child sets chosen by release year so that the two packs
+  of a pair hold as many pairs of consecutive years, and a different number of runs of three
+  consecutive years: counting their years two at a time cannot tell the two packs apart. The years
+  come from three pairs of patterns (`YEAR_PAIRS` in `src/paired.rs`, which a test holds to this),
+  placed from a window of real release years that moves with the wave, and mirrored on its way
+  back. Each pack is listed in `trap_manifest` under O5, its detail naming its
+  pair, whether it is the first or second member, its offsets, its partner's offsets, the window and
+  whether it is mirrored.
 
 The relationships between sets (the cords) each have a dial for how often they cross from one socket
 to another: nesting (`--cross-nesting`), versions (`--cross-versions`), twins (`--cross-twins`) and
@@ -157,6 +215,14 @@ the collation or on ties, and dates across clock changes. Every planted row is l
 `trap_manifest`, with the phase, wave and socket it came from. The program prints each trap, its rate
 and how many it planted when it starts.
 
+`--traps` says which traps are planted: `all` (the default), `none`, or a list such as `K1,K3,D5`.
+Only the traps planted at a rate and O5, which the `paired` phase writes, can be left out; naming
+any other is refused. The others arise from the real catalogue, from the rows of other traps, or
+from how every wave is written, and are there whatever `--traps` says: so are the purchases that
+fall in a clock change or across a month by themselves. Without O5, the `paired` phase writes its
+sets as `natural` does. D5's pre-orders name a set that is not out yet, which only B2 and B5 plant,
+so D5 is refused without one of them.
+
 Every reference in the generated tables names a row its table holds, traps included:
 
 - a set of trap B3 with a theme the real catalogue's theme list does not hold carries a root theme
@@ -169,15 +235,22 @@ Every reference in the generated tables names a row its table holds, traps inclu
 ## Output
 
 Logs go to standard error: `RUST_LOG` filters them, and `--log-format json` writes JSON. Every
-session names itself `lego-loader/<n>` in `application_name`. A progress line, with the COPY
-statements then running, is logged every `--log-progress-every` seconds.
+loading session names itself `sqlc-brickgen/<n>` in `application_name`, and the session that builds
+the keys and indexes after the load `sqlc-brickgen/build`, so `pg_stat_activity` shows which
+sessions are the generator's. A progress line, with the COPY statements then running, is logged
+every `--log-progress-every` seconds.
 
 On standard output, the lines starting `SUMMARY` hold the run's figures: the resolved configuration,
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
-the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the sets,
-most bought first), the WAL written and each table's final size. The same configuration is written to the table
-`generator_run`, with the clock's zone (`clock_zone`) and each strand's, unique key's and search
-index's definition, keyed by its name (`strand_<name>`, `unique_<name>`, `search_<name>`).
+the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the
+sets, most bought first), the WAL written and each table's final size. The same configuration is
+written to the table `generator_run`. Each wiring flag is keyed by its own name, in underscores
+(`--hotspot-share` is `hotspot_share`, `--swing-a` is `swing_a`), with the value the run used:
+`upto_phase` is the number of the patch's phases when the flag is left out, and the hot socket is
+`hotspot`. So are the load's flags `copy_format`, `method`, `index_timing`, `indexes`, `unlogged`,
+`synchronous_commit`, `freeze` and `autovacuum_during_load`. Beside them are the definitions of the
+clock function (`function_clock`) and of each composite index, unique key and search index, keyed
+by its name (`composite_<name>`, `unique_<name>`, `search_<name>`).
 
 ## Object-oriented tables
 
@@ -185,7 +258,15 @@ index's definition, keyed by its name (`strand_<name>`, `unique_<name>`, `search
 PostgreSQL's table inheritance, in a schema of their own. That schema is dropped and recreated, and
 may not name `--schema` or `--source-schema`. Each hierarchy's root table keeps the generated
 table's name and columns. The rows are the generated rows, unchanged, and each is written to the
-table of its most specific class. Every class's CHECK reads the row's own columns:
+table of its most specific class.
+
+`--classes` says which hierarchies are built: `none`, or a list of `sets`, `colors` and `builders`.
+All three are built when it is left out. A list without `--oo-schema` is refused, since the classes
+need a schema of their own, and so is `--classes none` with it, since that schema would keep the
+classes of an earlier load: name the classes, or leave out `--oo-schema`. Nothing is dropped when
+either is refused.
+
+Every class's CHECK reads the row's own columns:
 
 - **Sets, by the root theme of their theme:**
   - `licensed`, holding the licensed sets, with `star_wars` under it;
@@ -206,9 +287,12 @@ table of its most specific class. Every class's CHECK reads the row's own column
   with two home zones (the United States) has a class per zone under it. A builder's class is read
   off their own `street_id`: the streets of one zone, and of one country, are one run of ids.
 
-Each class has the generated table's primary key, and each class that holds rows every one of the
-generated table's strands. Every class is vacuumed and analysed. Read a hierarchy through its root,
-with the generated schema behind it for the other tables:
+A class's CHECK, which its children inherit, is named `<class>_check`. A class that has rows of its
+own beside its children's leaves theirs out with a `NO INHERIT` CHECK named
+`<class>_no_inherit_check`. As `--indexes` asks, each class has the generated table's primary key,
+and each class with rows of its own every one of the generated table's composite indexes. Every
+class is vacuumed and analysed. Read a hierarchy through its root, with the generated schema
+behind it for the other tables:
 
 ```sql
 SET search_path = lego_oo, lego;
@@ -220,18 +304,120 @@ A query that names a class's own condition, such as a theme, a street or a wheel
 the classes that can hold it. The planner leaves out the others, as long as the value is a constant
 when the statement is planned.
 
-After the build, a certificate reads every class's CHECKs back from the catalogue and checks four
-things. The build fails if any does not hold:
+After the build, a placement check reads every class's CHECKs back from the catalogue and checks
+four things. The build fails if any does not hold:
 
-- each hierarchy holds exactly the generated table's rows;
+- each hierarchy has exactly the generated table's rows;
 - every row satisfying a class's CHECKs lies in that class or below it;
 - every row of a class satisfies its CHECKs;
-- a class meant to hold no rows of its own holds none.
+- a class meant to have no rows of its own has none.
 
-The `SUMMARY oo` lines give the rows each class holds of its own.
+The `SUMMARY oo` lines give the rows each class has of its own.
+
+## Partitioned copies
+
+`--partitioning` also copies the generated tables, after the load, into tables partitioned by the
+leading column of their natural key, the unique key over the table's own attributes. Each method
+gets a schema of its own, named `<schema>_<method>` (`lego_inheritance`, `lego_range`,
+`lego_hash`). Every run drops all three before the load, asked for or not, so no copy keeps an
+earlier load's rows:
+
+- `inheritance`: child tables below an empty parent, each holding one range of the column under a
+  CHECK named `<child>_check`, as tables were partitioned before declarative partitioning. Nothing
+  routes a row written later.
+- `range`: `PARTITION BY RANGE`, with a `DEFAULT` partition for rows written later.
+- `hash`: `PARTITION BY HASH`.
+
+`--partitioning` takes `none` (the default) or a list of the three, so one load can build all of
+them. `--partition-tables` names the tables to copy. Its default, `all`, is every generated table
+but the run's own, `generator_run` and `trap_manifest`, which can still be named. `--partitions`
+gives the number of partitions, 8 by default. Both are refused without `--partitioning`, and so
+is any method's schema that would name `--source-schema` or `--oo-schema`. The partitions are named
+`<table>_p0`, `<table>_p1`, …
+
+A key is what a table declares, never what one load's rows happen to hold. A table's natural key
+is its primary key: the catalogue's ids are the catalogue's own identifiers, and a generated id is
+the generator's identity for what it generates. Only a table that declares two unique keys picks
+one, and the tables with no primary key take the unique key they declare:
+
+| table | natural key | partition column |
+|---|---|---|
+| `lego_inventory_parts` (no primary key) | `(inventory_id, part_num, color_id, is_spare)` | `inventory_id` |
+| `lego_inventory_sets` (no primary key) | `(inventory_id, set_num)` | `inventory_id` |
+| `lego_postcodes` | `(code)`, beside the primary key `postcode_id` | `code` |
+
+The ranges are of equal width between the column's minimum and maximum, read after the load. A
+table is left out when it has no natural key (`trap_manifest`), or when its key holds an expression
+or a nullable column. Under the two range methods, so is a table whose key leads with text
+(`lego_sets`, `lego_parts`, `lego_postcodes`, `generator_run`), since text has no equal-width
+ranges; `hash` partitions those too. Read a method's schema with the generated schema behind it,
+for the tables it leaves out:
+
+```sql
+SET search_path = lego_range, lego;
+EXPLAIN SELECT * FROM lego_purchases WHERE purchase_id = 400000;  -- one partition
+```
+
+Each inheritance table is filled in one pass over the generated table, with no temporary files.
+Its children start as the partitions of a declarative table, `<table>_load`, each already under its
+CHECK, and that table routes every row to its child. Then each child is detached and made a child of
+the parent with `INHERIT`, and `<table>_load` is dropped.
+
+Each schema gets the indexes `--indexes` asks for. On a declarative table they are created on the
+parent, which makes them on every partition. Under inheritance they are created on each child,
+since an index covers one table, and not on the empty parent; the planner leaves out a child whose
+CHECK a query's condition contradicts. A key that holds the partition column stays unique across
+the whole table. A declarative table enforces it. Under inheritance, two rows equal on such a key
+are equal on the partition column, so they fall in one child, and that child's unique index refuses
+the second. A row written to the parent itself is checked by nothing. The natural key always holds
+the partition column. Any other key cannot be unique across the table, so it is built as a plain
+index: the postcodes' primary key, `postcode_id`, is one.
+
+With `--unlogged`, the partitions and the inheritance tables are unlogged. A declarative parent
+is not, since PostgreSQL refuses an unlogged partitioned table, and it holds no rows of its own.
+PostgreSQL also refuses any storage parameter on a partitioned table, and autovacuum never
+analyses one, so the build vacuums and analyses each table it makes.
+
+After the build, the run checks that each row lies in one partition and each key is unique. It
+counts each table's rows across its partitions against the generated table, and sees that an
+inheritance parent holds none of its own. It reads every range back from the catalogue to see that
+none overlaps another. And it sees that no value of a key that holds the partition column appears
+twice. Where a valid unique index enforces the key on the copy, the index does that, and the rows
+are not counted. Where nothing enforces it, as without `keys` in `--indexes`, they are counted.
+The build fails if any of these does not hold. The `SUMMARY partition` lines give each partition's
+rows, and the `SUMMARY size` lines each copied table's size with all its partitions.
+
+`generator_run` records:
+- the methods (`partitioning`), the tables (`partition_tables`) and the count (`partitions`);
+- each table's natural key and column (`partition_key_<table>`, `partition_column_<table>`);
+- for each method, its schema, the tables it partitions, and the ones it leaves out with the
+  reason (`partition_<method>_schema`, `partition_<method>_tables`, `partition_<method>_left_out`);
+- when the keys are built, every key that is no longer unique across its table
+  (`unique_lost_<method>_<key>`).
+
+## Other flags
+
+- `--lettered-ppm` (30000): synthesized sets per million whose number leads with a letter prefix,
+  one of the real catalogue's, drawn in its proportions.
+- `--rerelease-ppm` (20000): synthesized sets per million drawn as a re-release, the next version
+  of the set before them under its number (`-2` after its `-1`).
+- `--second-version-ppm` (700): synthesized sets per million given a second inventory, version 2,
+  with one line's quantity corrected.
+- `--recolour-ppm` (150000): lines per million of a synthesized set's inventory whose colour is
+  drawn again, from the colours the real catalogue's lines give its part.
+- `--wave-timeout` (`300s`): the `statement_timeout` of each wave's statements.
+- `--maintenance-work-mem` (`1GB`) and `--parallel-maintenance-workers` (4): the
+  `maintenance_work_mem` and `max_parallel_maintenance_workers` of the session that builds the keys
+  and indexes and vacuums after the load.
+- `--freeze`: loads the reference tables with `COPY … FREEZE`, which PostgreSQL allows because each
+  is created in the transaction that loads it. Every other table is written by many transactions,
+  so it is loaded as usual, and the run says so.
+- `--vacuum on|off` and `--analyze on|off` (both `on`): see Loading.
+- `--dry-run`: generates and encodes every wave and writes nothing. It still connects, to read the
+  real catalogue.
 
 ## Tests
 
 ```sh
-cargo test -p lego-generator
+cargo test -p sqlc-brickgen
 ```

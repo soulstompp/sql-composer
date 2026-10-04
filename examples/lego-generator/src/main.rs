@@ -8,11 +8,12 @@
 
 mod calendar;
 mod catalogue;
-mod chords;
 mod demand;
 mod encode;
 mod load;
 mod oo;
+mod paired;
+mod partitions;
 mod places;
 mod rng;
 mod switchboard;
@@ -79,13 +80,13 @@ enum LogFormat {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "lego",
-    about = "Generate a large LEGO catalogue and load it into Postgres in hierarchical waves"
+    name = "sqlc-brickgen",
+    about = "Generate a large LEGO-style catalogue and load it into Postgres in hierarchical waves"
 )]
 struct Cli {
     /// Postgres connection URL. Its own variable, never the general `DATABASE_URL`, because the
     /// target schema is dropped and recreated.
-    #[arg(long, env = "LEGO_GENERATOR_DATABASE_URL", hide_env_values = true)]
+    #[arg(long, env = "SQLC_BRICKGEN_DATABASE_URL", hide_env_values = true)]
     database_url: String,
     /// Schema holding the real `lego_*` tables to draw from.
     #[arg(long, default_value = "public")]
@@ -99,6 +100,8 @@ struct Cli {
     /// Synthesized sets; overrides `--size`.
     #[arg(long)]
     sets: Option<u64>,
+    /// The seed every random draw starts from: the same seed, `--sets` and wiring flags give the
+    /// same rows.
     #[arg(long, default_value_t = 20_260_926)]
     seed: u64,
     /// Root records (sets; builders) per wave.
@@ -108,17 +111,23 @@ struct Cli {
     #[arg(long, default_value_t = 4)]
     jobs: u32,
     /// The phases of the switchboard, as `<pattern>:<percent>,…`.
-    #[arg(long, default_value = "natural:90,wavy:9,zchord:1")]
+    #[arg(long, default_value = "natural:90,wavy:9,paired:1")]
     patch: String,
+    /// Waves the `wavy` pattern's travelling wave takes to cross the socket order one way; it then
+    /// comes back over as many.
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,
+    /// Width of the `wavy` pattern's travelling wave, as a share of the socket order.
     #[arg(long, default_value_t = 0.25)]
     wavy_amplitude: f64,
+    /// Share of a `hotspot` phase's sets that go to the hot socket; the rest are drawn as
+    /// `natural` draws them.
     #[arg(long, default_value_t = 0.9)]
     hotspot_share: f64,
     /// The hot socket as `r<root>/<decade>s`; the heaviest socket when absent.
     #[arg(long)]
     hotspot_socket: Option<String>,
+    /// Waves a `swing` phase draws from one group before it turns to the other.
     #[arg(long, default_value_t = 4)]
     swing_period: u64,
     /// First swing group: root theme ids and a half-open year range (the classic play themes of the classic era).
@@ -142,15 +151,27 @@ struct Cli {
     /// Collection rows outside the builder's home socket.
     #[arg(long, default_value_t = 0.6)]
     cross_collections: f64,
+    /// Synthesized sets per million whose number leads with a letter prefix, one of the real
+    /// catalogue's, drawn in its proportions.
     #[arg(long, default_value_t = 30_000)]
     lettered_ppm: u32,
+    /// Synthesized sets per million drawn as a re-release: the next version of the set before
+    /// them, under its number (`-2` after its `-1`).
     #[arg(long, default_value_t = 20_000)]
     rerelease_ppm: u32,
+    /// Synthesized sets per million given a second inventory, version 2, with one line's quantity
+    /// corrected.
     #[arg(long, default_value_t = 700)]
     second_version_ppm: u32,
+    /// Lines per million of a synthesized set's inventory whose colour is drawn again, from the
+    /// colours the real catalogue's lines give its part.
     #[arg(long, default_value_t = 150_000)]
     recolour_ppm: u32,
-    /// COPY payload format.
+    /// The traps planted: `all`, `none`, or a list of traps (`K1,D3,…`). Only the traps planted
+    /// at a rate or written by a phase can be left out; the others arise from the real catalogue.
+    #[arg(long, default_value = "all")]
+    traps: String,
+    /// COPY payload format: `binary` or `text`.
     #[arg(long, default_value = "binary")]
     copy_format: String,
     /// `copy` or `unnest`.
@@ -159,6 +180,11 @@ struct Cli {
     /// Build the primary keys `before` or `after` the load.
     #[arg(long, default_value = "after")]
     index_timing: String,
+    /// The generator's indexes to build: `none`, or a list of `keys` (the primary and unique keys),
+    /// `composite` (the composite indexes for the joins) and `search` (the search indexes, with the
+    /// extensions they need).
+    #[arg(long, default_value = "keys,composite,search")]
+    indexes: String,
     /// Create the tables UNLOGGED (for scratch runs).
     #[arg(long)]
     unlogged: bool,
@@ -172,15 +198,21 @@ struct Cli {
     /// sets when absent.
     #[arg(long)]
     build_timeout: Option<String>,
+    /// `maintenance_work_mem` for the session that builds the keys and indexes and vacuums after
+    /// the load.
     #[arg(long, default_value = "1GB")]
     maintenance_work_mem: String,
+    /// `max_parallel_maintenance_workers` for the session that builds the keys and indexes and
+    /// vacuums after the load.
     #[arg(long, default_value_t = 4)]
     parallel_maintenance_workers: u32,
     /// COPY FREEZE for the reference tables (created in the loading transaction).
     #[arg(long)]
     freeze: bool,
+    /// Analyse the generated tables after the load: `on` or `off`.
     #[arg(long, default_value = "on")]
     analyze: String,
+    /// Vacuum the generated tables after the load: `on` or `off`.
     #[arg(long, default_value = "on")]
     vacuum: String,
     /// Leave autovacuum on for the loaded tables while they load (off by default, and on again after).
@@ -189,15 +221,33 @@ struct Cli {
     /// Seconds between progress lines; 0 for none.
     #[arg(long, default_value_t = 10)]
     log_progress_every: u64,
+    /// The logs on standard error, as `pretty` text or as `json`.
     #[arg(long, value_enum, default_value = "pretty")]
     log_format: LogFormat,
     /// Generate and encode every wave, write nothing.
     #[arg(long)]
     dry_run: bool,
     /// Also build the object-oriented tables in this schema, which is dropped and recreated: the
-    /// generated sets, colours and builders, each decomposed by kind with table inheritance.
+    /// generated sets, colours and builders, each split into a hierarchy of tables with table
+    /// inheritance.
     #[arg(long)]
     oo_schema: Option<String>,
+    /// The hierarchies built in `--oo-schema`: `none`, or a list of `sets`, `colors` and
+    /// `builders`. All three when absent and `--oo-schema` is given; none without it.
+    #[arg(long)]
+    classes: Option<String>,
+    /// Also copy the generated tables, after the load, into tables partitioned by the leading
+    /// column of their natural key, one schema per method, `<schema>_<method>`, dropped and
+    /// recreated: `none`, or a list of `inheritance` (children holding ranges under CHECKs),
+    /// `range` and `hash` (declarative).
+    #[arg(long, default_value = "none")]
+    partitioning: String,
+    /// The generated tables `--partitioning` copies: `all`, or a list of their names.
+    #[arg(long)]
+    partition_tables: Option<String>,
+    /// How many partitions each copied table is split into; 8 when absent.
+    #[arg(long)]
+    partitions: Option<u32>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
     /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
     #[arg(long)]
@@ -277,6 +327,33 @@ async fn run(cli: Cli) -> Result<(), String> {
             ));
         }
     }
+    let classes = oo::Classes::resolve(cli.classes.as_deref(), cli.oo_schema.as_deref())?;
+    let methods = partitions::parse_methods(&cli.partitioning)?;
+    if methods.is_empty() && (cli.partition_tables.is_some() || cli.partitions.is_some()) {
+        return Err("--partition-tables and --partitions need --partitioning, the methods".into());
+    }
+    let partition_tables =
+        partitions::parse_tables(cli.partition_tables.as_deref().unwrap_or("all"))?;
+    let partition_count = cli.partitions.unwrap_or(8);
+    if partition_count == 0 {
+        return Err("--partitions: want one partition or more".into());
+    }
+    // Every run drops every method's schema, so none may name a schema the run keeps or builds.
+    for m in partitions::Method::ALL {
+        let s = partitions::method_schema(&cli.schema, m);
+        let taken = [Some(&cli.source_schema), cli.oo_schema.as_ref()];
+        if taken
+            .into_iter()
+            .flatten()
+            .any(|other| same_schema(&s, other))
+        {
+            return Err(format!(
+                "{s}, the schema of --partitioning {}, names the --source-schema or the \
+                 --oo-schema, and every run drops it",
+                m.name()
+            ));
+        }
+    }
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let build_timeout = cli
         .build_timeout
@@ -295,6 +372,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 ))
             }
         },
+        indexes: load::Indexes::parse(&cli.indexes)?,
         unlogged: cli.unlogged,
         synchronous_commit: on(&cli.synchronous_commit)?,
         wave_timeout: cli.wave_timeout.clone(),
@@ -332,6 +410,17 @@ async fn run(cli: Cli) -> Result<(), String> {
         let cat = Catalogue::read(&mut conn, &cli.source_schema)
             .await
             .map_err(|e| format!("reading {}: {e}", cli.source_schema))?;
+        // The catalogue's own lines and nesting rows are written unchanged, so they hold the
+        // natural keys only if the catalogue does.
+        let repeated = cat.repeated_keys();
+        if (settings.indexes.keys || !methods.is_empty()) && !repeated.is_empty() {
+            return Err(format!(
+                "schema {} repeats a natural key the generated tables declare unique: {}. Leave \
+                 keys out of --indexes and --partitioning out to load it",
+                cli.source_schema,
+                repeated.join(", ")
+            ));
+        }
         sqlx::query(&format!("SET statement_timeout = '{}'", cli.wave_timeout))
             .execute(&mut *conn)
             .await
@@ -345,6 +434,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         lines = real.cat.lines.len(),
         "real catalogue read"
     );
+    let extension_schemas = if cli.dry_run {
+        load::ExtensionSchemas::new()
+    } else {
+        load::create_extensions(&pool, &settings).await?
+    };
 
     let builders = builders_for(sets + real.cat.sets.len() as u64);
     let wiring = Wiring {
@@ -363,6 +457,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         cross_versions: cli.cross_versions.unwrap_or(real.version_crossing.rate()),
         cross_twins: cli.cross_twins.unwrap_or(real.twin_crossing.rate()),
         cross_collections: cli.cross_collections,
+        traps: traps::parse_list(&cli.traps)?,
     };
     let dials = Dials {
         wavy_period: cli.wavy_period,
@@ -385,12 +480,22 @@ async fn run(cli: Cli) -> Result<(), String> {
         ("chunk".into(), wiring.chunk.to_string()),
         ("jobs".into(), cli.jobs.to_string()),
         ("patch".into(), world.board.to_string()),
+        (
+            "upto_phase".into(),
+            cli.upto_phase
+                .unwrap_or(world.board.phases.len())
+                .to_string(),
+        ),
         ("wavy_period".into(), cli.wavy_period.to_string()),
         ("wavy_amplitude".into(), cli.wavy_amplitude.to_string()),
         (
             "hotspot".into(),
             world.real.sockets[usize::from(world.board.hot_socket())].label(),
         ),
+        ("hotspot_share".into(), cli.hotspot_share.to_string()),
+        ("swing_period".into(), cli.swing_period.to_string()),
+        ("swing_a".into(), cli.swing_a.clone()),
+        ("swing_b".into(), cli.swing_b.clone()),
         ("real_sets".into(), world.real.cat.sets.len().to_string()),
         ("real_lines".into(), world.real.cat.lines.len().to_string()),
         ("sockets".into(), world.real.sockets.len().to_string()),
@@ -498,12 +603,14 @@ async fn run(cli: Cli) -> Result<(), String> {
             cli.second_version_ppm.to_string(),
         ),
         ("recolour_ppm".into(), cli.recolour_ppm.to_string()),
+        ("traps".into(), traps::list_name(&wiring.traps)),
         ("copy_format".into(), settings.format.name().into()),
         ("method".into(), cli.method.clone()),
         ("index_timing".into(), cli.index_timing.clone()),
+        ("indexes".into(), settings.indexes.name()),
         ("unlogged".into(), cli.unlogged.to_string()),
         ("synchronous_commit".into(), cli.synchronous_commit.clone()),
-        ("freeze_reference_tables".into(), cli.freeze.to_string()),
+        ("freeze".into(), cli.freeze.to_string()),
         (
             "autovacuum_during_load".into(),
             cli.autovacuum_during_load.clone(),
@@ -512,7 +619,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             "oo_schema".into(),
             cli.oo_schema.clone().unwrap_or_default(),
         ),
+        ("classes".into(), classes.name()),
     ];
+    run_rows.extend(partitions::run_rows(
+        &cli.schema,
+        &methods,
+        &partition_tables,
+        partition_count,
+        settings.indexes,
+    ));
     for d in DECLS {
         let planted = world
             .planted
@@ -527,7 +642,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             ),
         ));
     }
-    run_rows.extend(load::roster_rows(&settings.schema));
+    run_rows.extend(load::roster_rows(
+        &settings.schema,
+        settings.indexes,
+        &extension_schemas,
+    ));
     for (k, v) in &server {
         run_rows.push((format!("server_{k}"), v.clone()));
     }
@@ -569,6 +688,13 @@ async fn run(cli: Cli) -> Result<(), String> {
 
     if !cli.dry_run {
         let t = Instant::now();
+        for m in partitions::Method::ALL {
+            let s = partitions::method_schema(&cli.schema, m);
+            sqlx::query(&format!("DROP SCHEMA IF EXISTS {s} CASCADE"))
+                .execute(&pool)
+                .await
+                .map_err(|e| format!("dropping {s}: {e}"))?;
+        }
         load::create_schema(&pool, &settings)
             .await
             .map_err(|e| format!("create schema: {e}"))?;
@@ -706,17 +832,33 @@ async fn run(cli: Cli) -> Result<(), String> {
 
     let mut steps = Vec::new();
     let mut oo_rows = Vec::new();
+    let mut partition_rows = Vec::new();
     if !cli.dry_run {
         let mut conn = load::build_session(&cli.database_url, &settings)
             .await
             .map_err(|e| format!("build session: {e}"))?;
-        steps = load::finish(&mut conn, &settings)
+        steps = load::finish(&mut conn, &settings, &extension_schemas)
             .await
             .map_err(|e| format!("finish: {e}"))?;
-        if let Some(oo) = &cli.oo_schema {
-            let built = oo::build(&mut conn, &cli.schema, oo).await?;
+        if let (Some(oo), true) = (&cli.oo_schema, classes.any()) {
+            let built = oo::build(&mut conn, &cli.schema, oo, classes, settings.indexes).await?;
             steps.extend(built.steps);
             oo_rows = built.rows;
+        }
+        if !methods.is_empty() {
+            let built = partitions::build(
+                &mut conn,
+                &cli.schema,
+                &methods,
+                &partition_tables,
+                partition_count,
+                cli.unlogged,
+                settings.indexes,
+                &extension_schemas,
+            )
+            .await?;
+            steps.extend(built.steps);
+            partition_rows = built.rows;
         }
     }
 
@@ -726,6 +868,9 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     for (class, rows) in &oo_rows {
         summary(&[&"oo", class, rows]);
+    }
+    for (schema, table, part, rows) in &partition_rows {
+        summary(&[&"partition", schema, table, part, rows]);
     }
     {
         let levels = metrics.levels.lock().expect("metrics lock");
@@ -813,6 +958,12 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         for (t, n) in load::sizes(&pool, &settings.schema).await {
             summary(&[&"size", &t, &n]);
+        }
+        for &m in &methods {
+            let schema = partitions::method_schema(&cli.schema, m);
+            for (t, n) in load::sizes(&pool, &schema).await {
+                summary(&[&"size", &format!("{schema}.{t}"), &n]);
+            }
         }
     }
     summary(&[&"waves", &total_waves]);

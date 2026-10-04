@@ -9,9 +9,9 @@ use crate::catalogue::{
     Colour, InvRec, LineRec, NestRec, Part, Real, SetRec, Theme, GROWTH_FACTOR, MODELLED,
     MODEL_FIT,
 };
-use crate::chords;
 use crate::encode::{Enc, Format};
-use crate::load::{strand_name, Part as KeyPart, Strand, NAME_BYTES, STRANDS};
+use crate::load::{index_name, CompositeIndex, KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
+use crate::paired;
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
 use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
@@ -225,6 +225,7 @@ fn wiring(sets: u64, chunk: u64) -> Wiring {
         cross_versions: 0.2,
         cross_twins: 0.0,
         cross_collections: 0.6,
+        traps: crate::traps::all_planted(),
     }
 }
 
@@ -241,9 +242,21 @@ fn dials() -> Dials {
 }
 
 fn world(sets: u64, chunk: u64, patch: &str) -> World {
+    world_planting(sets, chunk, patch, crate::traps::all_planted()).expect("world")
+}
+
+/// A world that plants only `traps` of the traps `--traps` can leave out.
+fn world_planting(
+    sets: u64,
+    chunk: u64,
+    patch: &str,
+    traps: BTreeSet<Trap>,
+) -> Result<World, String> {
     let real = Real::new(fixture());
     let board = Switchboard::new(&real, patch, dials(), sets, chunk).expect("patch");
-    World::new(real, wiring(sets, chunk), board).expect("world")
+    let mut wiring = wiring(sets, chunk);
+    wiring.traps = traps;
+    World::new(real, wiring, board)
 }
 
 struct Everything {
@@ -460,7 +473,7 @@ fn sorted<T: Ord + Clone>(v: impl Iterator<Item = T>) -> Vec<T> {
 
 #[test]
 fn the_same_wiring_generates_the_same_rows() {
-    let patch = "natural:60,wavy:20,interleaved:10,zchord:10";
+    let patch = "natural:60,wavy:20,interleaved:10,paired:10";
     let a = generate(&world(3000, 100, patch));
     let b = generate(&world(3000, 100, patch));
     for (x, y) in a.sets.iter().zip(&b.sets) {
@@ -518,7 +531,7 @@ fn a_different_seed_generates_different_rows() {
 /// carries a trap the generator classifies is in the manifest.
 #[test]
 fn the_manifest_names_exactly_the_trapped_rows() {
-    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
     let e = generate(&w);
     let pool = &w.real.cat.part_pool;
     let sets: HashMap<String, &world::SetOut> = e
@@ -1028,7 +1041,7 @@ fn the_modelled_years_grow_at_the_factor_times_the_fitted_rate() {
 /// sets reach every modelled year.
 #[test]
 fn no_set_is_released_in_a_gap_and_the_modelled_years_are_reached() {
-    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
     let e = generate(&w);
     let fixture_years: HashMap<String, i32> = fixture()
         .sets
@@ -1203,11 +1216,12 @@ fn a_target_schema_is_refused_when_it_names_the_source_schema() {
     assert!(!crate::same_schema("lego", "public"));
 }
 
-/// The paired packs: equal counts of year gaps between their child sets, different counts of three
-/// consecutive child years.
+/// The paired packs: each pair is a first and a second pack, whose offsets are the two patterns of
+/// a declared pair and name each other as partner, drawn from one window, mirrored alike. Each
+/// pack's child sets are released in the years its offsets place from the window, one to a year.
 #[test]
-fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
-    let w = world(3000, 100, "natural:80,zchord:20");
+fn paired_packs_hold_the_years_their_manifest_rows_name() {
+    let w = world(3000, 100, "natural:80,paired:20");
     let e = generate(&w);
     let years: HashMap<&str, i32> = w
         .real
@@ -1216,7 +1230,17 @@ fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
         .iter()
         .filter_map(|s| s.year.map(|y| (s.set_num.as_str(), y)))
         .collect();
-    let mut packs: BTreeMap<u64, Vec<(String, Vec<i32>)>> = BTreeMap::new();
+    let offsets = |s: &str| -> Vec<i32> { s.split(',').map(|x| x.parse().unwrap()).collect() };
+    // Per pair, each member's manifest fields and its child sets' years, in the order written.
+    struct Member {
+        member: String,
+        offsets: Vec<i32>,
+        partner: Vec<i32>,
+        window: i32,
+        mirrored: bool,
+        years: Vec<i32>,
+    }
+    let mut packs: BTreeMap<u64, Vec<Member>> = BTreeMap::new();
     for wave in &e.sets {
         let inv_of: HashMap<i32, &str> = wave
             .inventories
@@ -1230,98 +1254,83 @@ fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
                 .push(years[n.set_num.as_str()]);
         }
         for m in wave.manifest.iter().filter(|m| m.trap == Trap::O5) {
-            let pair: u64 = m
-                .detail
-                .split_whitespace()
-                .next()
-                .unwrap()
-                .trim_start_matches("pair=")
-                .parse()
-                .unwrap();
-            let class = m
-                .detail
-                .split_whitespace()
-                .find(|w| w.starts_with("class="))
-                .unwrap()
-                .to_string();
+            let field = |name: &str| -> String {
+                m.detail
+                    .split_whitespace()
+                    .find_map(|f| f.strip_prefix(name))
+                    .unwrap_or_else(|| panic!("{}: no {name}", m.detail))
+                    .to_string()
+            };
+            let mut ys = kids[m.row_key.as_str()].clone();
+            ys.sort_unstable();
             packs
-                .entry(pair)
+                .entry(field("pair=").parse().unwrap())
                 .or_default()
-                .push((class, kids[m.row_key.as_str()].clone()));
+                .push(Member {
+                    member: field("member="),
+                    offsets: offsets(&field("offsets=")),
+                    partner: offsets(&field("partner_offsets=")),
+                    window: field("window=").parse().unwrap(),
+                    mirrored: field("mirrored=").parse().unwrap(),
+                    years: ys,
+                });
         }
     }
     assert!(packs.len() >= 3);
-    let triples_by_class: HashMap<&str, u32> = [
-        ("0,1,2,5,7", 1),
-        ("0,1,3,5,6", 0),
-        ("0,1,2,4,7", 1),
-        ("0,1,3,4,6", 0),
-        ("0,1,2,3,6", 2),
-        ("0,1,2,4,5", 1),
-    ]
-    .into_iter()
-    .collect();
-    // A year pattern's key, read from the years alone: each year by its last digit, and the least of
-    // the pattern's turns round the decade and their mirror images.
-    let pattern_key = |ys: &[i32]| -> String {
-        let pcs: Vec<i32> = ys.iter().map(|y| y.rem_euclid(10)).collect();
-        let mut best: Option<Vec<i32>> = None;
-        for inv in [false, true] {
-            for n in 0..10 {
-                let mut img: Vec<i32> = pcs
-                    .iter()
-                    .map(|&x| ((if inv { -x } else { x }) + n).rem_euclid(10))
-                    .collect();
-                img.sort_unstable();
-                img.dedup();
-                if best.as_ref().is_none_or(|b| img < *b) {
-                    best = Some(img);
-                }
-            }
-        }
-        best.unwrap()
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    let z_pairs: Vec<(String, String)> = chords::Z_PAIRS
+    let declared: Vec<(Vec<i32>, Vec<i32>)> = paired::YEAR_PAIRS
         .iter()
-        .map(|(a, b)| (chords::class_label(a), chords::class_label(b)))
+        .map(|(a, b)| (a.to_vec(), b.to_vec()))
         .collect();
     for (pair, members) in &packs {
         assert_eq!(members.len(), 2, "pair {pair}");
-        let pcs = |ys: &[i32]| ys.iter().map(|y| y.rem_euclid(10)).collect::<Vec<_>>();
-        assert_eq!(members[0].1.len(), 5);
+        let (a, b) = (&members[0], &members[1]);
         assert_eq!(
-            chords::gap_counts(&pcs(&members[0].1)),
-            chords::gap_counts(&pcs(&members[1].1)),
+            (a.member.as_str(), b.member.as_str()),
+            ("first", "second"),
             "pair {pair}"
         );
-        let (c0, c1) = (pattern_key(&members[0].1), pattern_key(&members[1].1));
+        assert_eq!(
+            (&a.partner, &b.partner),
+            (&b.offsets, &a.offsets),
+            "pair {pair}"
+        );
         assert!(
-            z_pairs
-                .iter()
-                .any(|(a, b)| (a == &c0 && b == &c1) || (a == &c1 && b == &c0)),
-            "pair {pair}: {c0} and {c1} are not a declared pair"
+            declared.contains(&(a.offsets.clone(), b.offsets.clone())),
+            "pair {pair}: {:?} and {:?} are not a declared pair",
+            a.offsets,
+            b.offsets
         );
-        for (class, ys) in members {
-            assert_eq!(
-                class.trim_start_matches("class="),
-                pattern_key(ys),
-                "pair {pair}: the manifest's pattern is the years' pattern"
-            );
-            assert_eq!(
-                chords::consecutive_triples(ys),
-                triples_by_class[pattern_key(ys).as_str()],
-                "pair {pair} class {class}"
-            );
-        }
-        assert_ne!(
-            chords::consecutive_triples(&members[0].1),
-            chords::consecutive_triples(&members[1].1),
+        assert_eq!(
+            (a.window, a.mirrored),
+            (b.window, b.mirrored),
             "pair {pair}"
         );
+        for m in members {
+            let placed: Vec<i32> = paired::placed(&m.offsets, m.mirrored)
+                .iter()
+                .map(|o| m.window + o)
+                .collect();
+            assert_eq!(m.years, placed, "pair {pair} {}", m.member);
+        }
+    }
+}
+
+/// The two patterns of each declared pair hold as many pairs of consecutive years, and a different
+/// number of runs of three consecutive years, as written and mirrored.
+#[test]
+fn each_year_pair_agrees_on_consecutive_pairs_and_differs_on_runs_of_three() {
+    let runs = |years: &[i32], length: i32| {
+        years
+            .iter()
+            .filter(|&&y| (1..length).all(|k| years.contains(&(y + k))))
+            .count()
+    };
+    for (a, b) in paired::YEAR_PAIRS {
+        for mirrored in [false, true] {
+            let (a, b) = (paired::placed(&a, mirrored), paired::placed(&b, mirrored));
+            assert_eq!(runs(&a, 2), runs(&b, 2), "{a:?} and {b:?}");
+            assert_ne!(runs(&a, 3), runs(&b, 3), "{a:?} and {b:?}");
+        }
     }
 }
 
@@ -1331,7 +1340,7 @@ fn paired_packs_agree_on_gaps_and_differ_on_consecutive_years() {
 /// under B10, every one of them real.
 #[test]
 fn every_reference_lands_in_a_row_of_its_owner() {
-    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
     let e = generate(&w);
     let db = written(&w, &e);
     let manifest = manifest_rows(&db);
@@ -1346,32 +1355,32 @@ fn every_reference_lands_in_a_row_of_its_owner() {
     assert!(!declared.is_empty(), "no line names an unlisted part");
     for &(table, columns, owner, key) in REFERENCES {
         let o = &db[owner];
-        let boxes: HashSet<Vec<String>> = o
+        let owner_keys: HashSet<Vec<String>> = o
             .rows
             .iter()
             .filter_map(|r| o.project(r, &cols(key)))
             .collect();
         let t = &db[table];
-        let (mut balls, mut strays) = (0, BTreeSet::new());
+        let (mut naming, mut dangling) = (0, BTreeSet::new());
         for r in &t.rows {
-            let Some(ball) = t.project(r, &cols(columns)) else {
+            let Some(named) = t.project(r, &cols(columns)) else {
                 continue;
             };
-            balls += 1;
-            if !boxes.contains(&ball) {
-                strays.insert(manifest_key(t, table, r).unwrap_or_else(|| ball.join("|")));
+            naming += 1;
+            if !owner_keys.contains(&named) {
+                dangling.insert(manifest_key(t, table, r).unwrap_or_else(|| named.join("|")));
             }
         }
         let refers = format!("{table} ({columns}) -> {owner} ({key})");
-        assert!(balls > 0, "{refers}: no row names one");
+        assert!(naming > 0, "{refers}: no row names one");
         let allowed = if (table, columns) == ("lego_inventory_parts", "part_num") {
             declared.clone()
         } else {
             BTreeSet::new()
         };
         assert_eq!(
-            strays, allowed,
-            "{refers}: the rows, of {balls}, that name no row of the owner"
+            dangling, allowed,
+            "{refers}: the rows, of {naming}, that name no row of the owner"
         );
     }
     let mut keys: HashMap<&str, HashSet<String>> = HashMap::new();
@@ -1398,7 +1407,7 @@ fn every_reference_lands_in_a_row_of_its_owner() {
 /// on every row that no trap lists, unless the column holds one value throughout.
 #[test]
 fn no_column_repeats_a_value_its_references_decide() {
-    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,zchord:10");
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
     let e = generate(&w);
     let db = written(&w, &e);
     let listed: HashSet<(String, String)> =
@@ -1499,44 +1508,48 @@ fn no_column_repeats_a_value_its_references_decide() {
     assert!(repeats.is_empty(), "{repeats:#?}");
 }
 
-/// Each strand reads only its own table: every column its parts, its cycles' expressions and the
-/// columns it carries name is a column of the strand's table.
-#[test]
-fn each_strand_reads_only_its_own_table() {
-    // The words of SQL the cycles' expressions use beside column names.
+/// The column names an expression in an index's key reads, without the words of SQL beside them.
+fn expression_columns(sql: &str) -> Vec<String> {
     const SQL_WORDS: [&str; 4] = ["extract", "month", "from", "smallint"];
-    for s in STRANDS {
+    sql.replace("{clock}", " ")
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .filter(|w| !w.is_empty() && !w.bytes().all(|b| b.is_ascii_digit()))
+        .map(str::to_ascii_lowercase)
+        .filter(|w| !SQL_WORDS.contains(&w.as_str()))
+        .collect()
+}
+
+/// Each composite index reads only its own table: every column its key names, directly or in an
+/// expression, and every column of its `INCLUDE` list is a column of the index's table.
+#[test]
+fn each_composite_index_reads_only_its_own_table() {
+    for s in COMPOSITE_INDEXES {
         let columns = cols(crate::load::table(s.table).columns);
         let mut named: Vec<String> = s.include.iter().map(|c| c.to_string()).collect();
         for p in s.parts {
             match p {
-                KeyPart::Column(c) | KeyPart::Line(c) => named.push(c.to_string()),
-                KeyPart::Cycle { sql, .. } => named.extend(
-                    sql.replace("{clock}", " ")
-                        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-                        .filter(|w| !w.is_empty() && !w.bytes().all(|b| b.is_ascii_digit()))
-                        .map(str::to_ascii_lowercase)
-                        .filter(|w| !SQL_WORDS.contains(&w.as_str())),
-                ),
+                KeyPart::Column(c) => named.push(c.to_string()),
+                KeyPart::Expression { sql, .. } => named.extend(expression_columns(sql)),
             }
         }
         for n in &named {
             assert!(
                 columns.contains(&n.as_str()),
                 "{} names {n}, which is not a column of {}",
-                strand_name(s.table, s.parts),
+                index_name(s.table, s.parts),
                 s.table
             );
         }
     }
 }
 
-/// A column a strand's key reads only through an expression (a cycle, or a line through the clock)
-/// is also carried as the column itself, so the index returns what a query on that column reads.
+/// A column a composite index's key reads only through an expression is also in the index as the
+/// column itself, in its key or its `INCLUDE` list, so the index returns what a query on that
+/// column reads. Some index has an expression to check.
 #[test]
-fn each_strand_carries_the_columns_its_expressions_read() {
-    const SQL_WORDS: [&str; 4] = ["extract", "month", "from", "smallint"];
-    for s in STRANDS {
+fn each_composite_index_includes_the_columns_its_expressions_read() {
+    let mut expressions = 0;
+    for s in COMPOSITE_INDEXES {
         let plain: Vec<&str> = s
             .parts
             .iter()
@@ -1547,47 +1560,64 @@ fn each_strand_carries_the_columns_its_expressions_read() {
             .chain(s.include.iter().copied())
             .collect();
         for p in s.parts {
-            let read: Vec<String> = match p {
-                KeyPart::Column(_) => Vec::new(),
-                KeyPart::Line(c) => vec![c.to_string()],
-                KeyPart::Cycle { sql, .. } => sql
-                    .replace("{clock}", " ")
-                    .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-                    .filter(|w| !w.is_empty() && !w.bytes().all(|b| b.is_ascii_digit()))
-                    .map(str::to_ascii_lowercase)
-                    .filter(|w| !SQL_WORDS.contains(&w.as_str()))
-                    .collect(),
+            let KeyPart::Expression { sql, .. } = p else {
+                continue;
             };
-            for c in read {
+            expressions += 1;
+            for c in expression_columns(sql) {
                 assert!(
                     plain.contains(&c.as_str()),
-                    "{} reads {c} through an expression and does not carry it",
-                    strand_name(s.table, s.parts)
+                    "{} reads {c} through an expression and does not include it",
+                    index_name(s.table, s.parts)
                 );
             }
         }
     }
+    assert!(expressions > 0);
 }
 
-/// Each strand's key holds its columns first, then its cycles, then at most one line, last.
+/// Each composite index lists its plain columns before its expressions: no column of the table
+/// follows an expression in its key. Some index has an expression, so the order is checked on one.
 #[test]
-fn each_strand_holds_its_columns_then_its_cycles_then_the_line() {
-    for s in STRANDS {
-        let ranks: Vec<u8> = s.parts.iter().map(KeyPart::rank).collect();
-        let name = strand_name(s.table, s.parts);
-        assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "{name}: {ranks:?}");
-        assert!(ranks.iter().filter(|&&r| r == 2).count() <= 1, "{name}");
+fn each_composite_index_lists_its_plain_columns_before_its_expressions() {
+    let mut with_expressions = 0;
+    for s in COMPOSITE_INDEXES {
+        let first_expression = s
+            .parts
+            .iter()
+            .position(|p| matches!(p, KeyPart::Expression { .. }));
+        let Some(at) = first_expression else {
+            continue;
+        };
+        with_expressions += 1;
+        assert!(
+            s.parts[at..]
+                .iter()
+                .all(|p| matches!(p, KeyPart::Expression { .. })),
+            "{} lists a column after an expression",
+            index_name(s.table, s.parts)
+        );
     }
-    assert!(STRANDS
-        .iter()
-        .any(|s| s.parts.iter().any(|p| matches!(p, KeyPart::Cycle { .. }))));
+    assert!(with_expressions > 0);
 }
 
-/// The example's migration builds on the dump's tables exactly the strands the generator builds on
-/// them, in the same order and under the same names, with no cycle or line, since it makes no clock.
+/// The example's migration builds on the dump's tables exactly the composite indexes the generator
+/// builds on them, in the same order and under the same names, none with an expression, since the
+/// example makes no clock function. The migration is the LEGO example's, beside this crate in the
+/// repository; where it is absent, as in the packaged crate, the test has nothing to compare and
+/// says so.
 #[test]
-fn the_example_migration_builds_the_strands_of_the_dump_tables() {
-    let sql = include_str!("../../lego/migrations/20260930000000_strands.sql");
+fn the_example_migration_builds_the_composite_indexes_of_the_dump_tables() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lego/migrations/20260930000000_composite_indexes.sql");
+    let sql = match std::fs::read_to_string(&path) {
+        Ok(sql) => sql,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipped: no LEGO example migration at {}", path.display());
+            return;
+        }
+        Err(e) => panic!("reading {}: {e}", path.display()),
+    };
     let text = sql
         .lines()
         .filter(|l| !l.trim_start().starts_with("--"))
@@ -1598,7 +1628,7 @@ fn the_example_migration_builds_the_strands_of_the_dump_tables() {
         .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|s| !s.is_empty())
         .collect();
-    let dump: Vec<&Strand> = STRANDS
+    let dump: Vec<&CompositeIndex> = COMPOSITE_INDEXES
         .iter()
         .filter(|s| crate::catalogue::TABLES.contains(&s.table))
         .collect();
@@ -1610,7 +1640,7 @@ fn the_example_migration_builds_the_strands_of_the_dump_tables() {
         .map(|s| {
             format!(
                 "CREATE INDEX IF NOT EXISTS {} ON {} {}",
-                strand_name(s.table, s.parts),
+                index_name(s.table, s.parts),
                 s.table,
                 s.definition("public")
             )
@@ -1619,15 +1649,15 @@ fn the_example_migration_builds_the_strands_of_the_dump_tables() {
     assert_eq!(built, expected);
 }
 
-/// A strand's name longer than the server keeps is cut to fit, keeps its front, and stays apart from
-/// the names of the table's other strands.
+/// A composite index's name longer than the server keeps is cut to fit, keeps its front, and stays
+/// apart from the names of the table's other composite indexes.
 #[test]
-fn a_strand_name_past_the_limit_is_cut_to_fit_and_stays_distinct() {
+fn an_index_name_past_the_limit_is_cut_to_fit_and_stays_distinct() {
     let long = "lego_sets_a_class_whose_name_is_long_enough_to_pass_the_limit";
-    let names: Vec<String> = STRANDS
+    let names: Vec<String> = COMPOSITE_INDEXES
         .iter()
         .filter(|s| s.table == "lego_sets")
-        .map(|s| strand_name(long, s.parts))
+        .map(|s| index_name(long, s.parts))
         .collect();
     assert!(names.len() > 1);
     for n in &names {
@@ -1694,4 +1724,137 @@ fn every_named_size_fits_the_tables_integers() {
             size.name()
         );
     }
+}
+
+/// A trap left out of `--traps` is planted on no row, and every other trap is planted as often as
+/// when all are. Each left out trap is planted when all are, so the run has something to leave out.
+#[test]
+fn a_trap_left_out_is_planted_nowhere_and_every_other_as_often() {
+    let patch = "natural:60,wavy:20,interleaved:10,paired:10";
+    let left_out = [Trap::K3, Trap::K7, Trap::B3, Trap::D3, Trap::O5];
+    let mut traps = crate::traps::all_planted();
+    for t in left_out {
+        assert!(traps.remove(&t), "{t}");
+    }
+    let all = world(3000, 100, patch);
+    let some = world_planting(3000, 100, patch, traps).expect("world");
+    let planted = |w: &World, trap: Trap| w.planted.iter().find(|p| p.0 == trap).map(|p| p.1);
+    for d in DECLS {
+        let (a, s) = (planted(&all, d.trap), planted(&some, d.trap));
+        if left_out.contains(&d.trap) && d.trap != Trap::O5 {
+            assert!(a.unwrap() > 0, "{}", d.trap);
+            assert_eq!(s, Some(0), "{}", d.trap);
+        } else {
+            assert_eq!(s, a, "{}", d.trap);
+        }
+    }
+    for (trap, _) in some.set_traps.values().chain(some.row_traps.values()) {
+        assert!(!left_out.contains(trap), "{trap} planted");
+    }
+    assert!(!all.added_themes().is_empty());
+    assert!(some.added_themes().is_empty());
+    let o5 = |w: &World| {
+        let e = generate(w);
+        e.sets
+            .iter()
+            .flat_map(|wave| wave.manifest.iter())
+            .filter(|m| m.trap == Trap::O5)
+            .count()
+    };
+    assert!(o5(&all) > 0);
+    assert_eq!(o5(&some), 0);
+    let db = written(&some, &generate(&some));
+    let c = &db["lego_collection"];
+    let typed = c.at("typed_name");
+    assert!(c.rows.iter().all(|r| r[typed].is_none()));
+}
+
+/// With no trap planted, no row is picked for one and the paired phase writes no pair, while the
+/// real catalogue's own trapped rows are listed exactly as when every trap is planted.
+#[test]
+fn with_no_trap_planted_the_real_catalogue_keeps_its_own_trapped_rows() {
+    let patch = "natural:90,paired:10";
+    let all = world(1500, 100, patch);
+    let none = world_planting(1500, 100, patch, BTreeSet::new()).expect("world");
+    assert!(none.set_traps.is_empty() && none.row_traps.is_empty());
+    assert!(none.planted.iter().all(|p| p.1 == 0));
+    let rows = |w: &World| manifest_rows(&written(w, &generate(w)));
+    let (all_rows, none_rows) = (rows(&all), rows(&none));
+    assert!(!none_rows.iter().any(|m| m.0 == "O5"));
+    let real = |rows: &[(String, String, String, String)]| {
+        sorted(rows.iter().filter(|m| m.1 == "real").cloned())
+    };
+    assert!(!real(&none_rows).is_empty());
+    assert_eq!(real(&none_rows), real(&all_rows));
+}
+
+/// Pre-orders (D5) name a set that is not out yet, which only traps B2 and B5 plant, so D5 alone is
+/// refused before anything is generated.
+#[test]
+fn pre_orders_without_an_unreleased_set_are_refused() {
+    let only_d5: BTreeSet<Trap> = [Trap::D5].into_iter().collect();
+    match world_planting(500, 100, "natural:100", only_d5) {
+        Ok(_) => panic!("D5 was planted without an unreleased set"),
+        Err(e) => assert!(e.contains("B2") && e.contains("--traps"), "{e}"),
+    }
+    let with_b2: BTreeSet<Trap> = [Trap::D5, Trap::B2].into_iter().collect();
+    assert!(world_planting(500, 100, "natural:100", with_b2).is_ok());
+}
+
+/// A catalogue that repeats a line's or a nesting row's natural key is found when it is read, by
+/// the line and the row that repeat; the fixture repeats neither.
+#[test]
+fn a_catalogue_repeating_a_natural_key_is_found() {
+    assert!(fixture().repeated_keys().is_empty());
+    let mut cat = fixture();
+    let line = cat.lines[3];
+    cat.lines.insert(4, line);
+    let nest = cat.nests[0].clone();
+    cat.nests.insert(1, nest.clone());
+    let found = cat.repeated_keys();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].starts_with(&format!("lego_inventory_parts ({}, ", line.inventory_id)));
+    assert_eq!(
+        found[1],
+        format!(
+            "lego_inventory_sets ({}, {})",
+            nest.inventory_id, nest.set_num
+        )
+    );
+}
+
+/// Every key a generated table declares, its primary key and the unique keys the load adds, holds
+/// on every row the load writes, the synthesized rows of every pattern among them. The run's own
+/// `generator_run` is written apart, from the run's settings.
+#[test]
+fn every_declared_key_holds_on_every_written_row() {
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
+    let db = written(&w, &generate(&w));
+    let mut checked = 0;
+    for t in crate::load::TABLES
+        .iter()
+        .filter(|t| t.name != "generator_run")
+    {
+        let declared = t.key.into_iter().chain(
+            crate::load::UNIQUE_KEYS
+                .iter()
+                .filter(|u| u.0 == t.name)
+                .map(|u| u.2),
+        );
+        for key in declared {
+            let rows = &db[t.name];
+            let mut seen = HashSet::new();
+            for r in &rows.rows {
+                let value = rows.project(r, &cols(key)).expect("a key has no NULL");
+                assert!(
+                    seen.insert(value.clone()),
+                    "{} repeats ({key}) = {value:?}",
+                    t.name
+                );
+            }
+            assert!(!seen.is_empty(), "{} has no rows", t.name);
+            checked += 1;
+        }
+    }
+    assert!(checked >= crate::load::UNIQUE_KEYS.len());
 }

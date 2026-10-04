@@ -4,27 +4,61 @@ A full showcase of sql-composer features using the [Lego database](https://raw.g
 
 ## Setup
 
-Make sure PostgreSQL is running, then:
+Make sure PostgreSQL is running and `psql` is on the `PATH`, then, from the repository root:
 
 ```sh
 cargo run -p lego-example -- setup
 ```
 
 This single command will:
-1. Download the [lego SQL dump](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql) to `~/.cache/sql-composer/` (cached for future runs)
-2. Create the `sqlc_lego` database via `createdb`
-3. Load the lego data via `psql`
+1. Download the [lego SQL dump](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql) to `~/.cache/sql-composer/` (`$XDG_CACHE_HOME/sql-composer/` when that is set), cached for future runs
+2. Connect to the server's `postgres` database, end every other session on the database the URL
+   names, drop that database if it exists, and create it again
+3. Load the lego data with `psql`
 4. Run migrations to create the extra tables (`set_category_summary`, `inventory_tracking`) and the
    composite indexes for the joins between the dump's tables
 
-`setup` drops and recreates the database the URL names, after disconnecting its sessions: point it
-only at a database the example owns. The load stops at the first failed statement.
+`setup` drops and recreates the database the URL names: point it only at a database the example
+owns. The load stops at the first failed statement.
 
-To use a different database URL:
+`migrate` runs step 4 alone, on a database that already holds the dump. Each migration is safe to
+run again.
+
+### Connecting
+
+The database is the one `--database-url` names, or `SQLC_LEGO_DATABASE_URL` when the flag is left
+out. With neither, it is `postgres:///sqlc_lego`: the database `sqlc_lego` on the local server,
+through its Unix socket, as the current user.
 
 ```sh
 cargo run -p lego-example -- --database-url postgres://user@host/dbname setup
+SQLC_LEGO_DATABASE_URL=postgres://user@host/dbname cargo run -p lego-example -- all
 ```
+
+The example speaks TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
+`?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
+also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
+names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
+offer it. `setup` hands the same URL to `psql`, whose libpq checks a `verify-full` certificate
+against `sslrootcert`, or `~/.postgresql/root.crt` without it, not against the bundled roots.
+
+The subcommands read the templates from `--sqlc-dir`, `examples/lego/sqlc` by default. That path is
+relative to the directory the command runs in, so run them from the repository root, or name the
+directory.
+
+### Data and licences
+
+The example ships none of the Lego data: `setup` downloads it to your machine. It is Neon's sample
+dump, `lego.sql` in
+[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
+repository under the MIT licence, whose README gives the data's source as Kaggle's
+[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
+public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
+terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
+use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
+you use it. The same terms forbid using any Rebrickable content to train AI models.
+
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
 
 ### Compose templates (optional)
 

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, revamp]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,7 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: Format
@@ -93,3 +93,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p cargo-sqlc
+
+  test-sqlc-brickgen:
+    name: Test sqlc-brickgen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p sqlc-brickgen
+
+  verify-lego:
+    name: Verify the lego example's composed SQL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify

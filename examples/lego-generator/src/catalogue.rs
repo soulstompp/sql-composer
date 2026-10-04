@@ -1,10 +1,9 @@
 //! The real LEGO catalogue the generator draws from: reference tables, sets, inventories, inventory lines
 //! and nesting, read once from the source schema, with the indices synthesis needs.
 //!
-//! A SOCKET is one cell of the product of the root themes and the half-open decades
-//! `[1950, 1960) … [2020, 2030)`: the place a set lands in a root-theme partition, in a decade
-//! partition, and in the product of the two. The sockets are read from the reference tables, every root
-//! theme times every decade, whether or not a real set sits there.
+//! A SOCKET is one root theme in one decade, the decades running from 1950–1959 to 2020–2029. The
+//! sockets are read from the reference tables, every root theme in every decade, whether or not a
+//! real set sits there.
 //!
 //! No set is released in the years of `NO_RELEASE`: a real set of one of them is re-dated to the
 //! nearest year outside them. The years after the real catalogue (`MODELLED`) are modelled on its
@@ -193,6 +192,34 @@ pub async fn missing(
 }
 
 impl Catalogue {
+    /// The lines and nesting rows that repeat the natural key of an earlier one, the lines'
+    /// `(inventory_id, part_num, color_id, is_spare)` and the nesting rows' `(inventory_id,
+    /// set_num)`. Both are read in the order of those keys, so a repeat follows its first.
+    pub fn repeated_keys(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let line_key = |l: &LineRec| (l.inventory_id, l.part, l.color_id, l.is_spare);
+        for w in self.lines.windows(2) {
+            if line_key(&w[0]) == line_key(&w[1]) {
+                out.push(format!(
+                    "lego_inventory_parts ({}, {}, {}, {})",
+                    w[1].inventory_id,
+                    self.part_pool[w[1].part as usize],
+                    w[1].color_id,
+                    w[1].is_spare
+                ));
+            }
+        }
+        for w in self.nests.windows(2) {
+            if (w[0].inventory_id, &w[0].set_num) == (w[1].inventory_id, &w[1].set_num) {
+                out.push(format!(
+                    "lego_inventory_sets ({}, {})",
+                    w[1].inventory_id, w[1].set_num
+                ));
+            }
+        }
+        out
+    }
+
     /// Whether the parts table holds part-number pool entry `part`. The pool holds the parts table's
     /// numbers first, then the numbers only lines name.
     pub fn lists_part(&self, part: u32) -> bool {
@@ -337,11 +364,11 @@ pub fn intern(pool: &mut Vec<String>, index: &mut HashMap<String, u32>, s: &str)
     i
 }
 
-/// One cell of root theme × decade.
+/// One root theme in one decade.
 #[derive(Clone, Debug)]
 pub struct Socket {
     pub root: i32,
-    /// 0 for `[1950, 1960)`, up to `DECADES - 1` for `[2020, 2030)`.
+    /// 0 for 1950–1959, up to `DECADES - 1` for 2020–2029.
     pub decade: u8,
     /// Real sets with an inventory whose root theme and year place them here.
     pub templates: Vec<u32>,

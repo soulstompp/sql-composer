@@ -89,8 +89,11 @@ impl Composer {
         }
         self.view_registry = Some(resolved);
 
-        let registered: Vec<(PathBuf, String)> =
-            self.views.iter().map(|(p, n)| (p.clone(), n.clone())).collect();
+        let registered: Vec<(PathBuf, String)> = self
+            .views
+            .iter()
+            .map(|(p, n)| (p.clone(), n.clone()))
+            .collect();
         for (path, view) in registered {
             let template = parser::parse_template_file(&path)?;
             match self.compose(&template) {
@@ -1037,14 +1040,18 @@ fn cte_name_before(sql: &str) -> Option<String> {
 /// `CREATE [OR REPLACE] VIEW <name> AS`, when `AS` is the last word before the compose.
 fn view_name_before(sql: &str) -> Option<String> {
     let upper = sql.to_ascii_uppercase();
-    let at = upper.rfind(" VIEW ").or_else(|| upper.strip_prefix("VIEW ").map(|_| 0))?;
+    let at = upper
+        .rfind(" VIEW ")
+        .or_else(|| upper.strip_prefix("VIEW ").map(|_| 0))?;
     let head = upper[..at].trim_end();
     if !(head.ends_with("CREATE") || head.ends_with("CREATE OR REPLACE")) {
         return None;
     }
     let rest = sql[at..].trim_start().get(4..)?.trim();
     let (name, tail) = rest.split_once(char::is_whitespace)?;
-    tail.trim().eq_ignore_ascii_case("AS").then(|| name.to_string())
+    tail.trim()
+        .eq_ignore_ascii_case("AS")
+        .then(|| name.to_string())
 }
 
 #[cfg(test)]
@@ -1850,7 +1857,11 @@ mod tests {
     fn view_fixture() -> (TempDir, Composer) {
         let dir = TempDir::new().unwrap();
         write_temp_file(&dir, "grand.sqlc", "SELECT y FROM t");
-        write_temp_file(&dir, "child.sqlc", "SELECT * FROM (\n:compose(grand.sqlc)\n) g");
+        write_temp_file(
+            &dir,
+            "child.sqlc",
+            "SELECT * FROM (\n:compose(grand.sqlc)\n) g",
+        );
         write_temp_file(
             &dir,
             "parent.sqlc",
@@ -1865,7 +1876,9 @@ mod tests {
         );
         let mut composer = Composer::new(Dialect::Postgres);
         composer.add_search_path(dir.path().to_path_buf());
-        composer.load_view_registry(Path::new("views.sqlc")).unwrap();
+        composer
+            .load_view_registry(Path::new("views.sqlc"))
+            .unwrap();
         (dir, composer)
     }
 
@@ -1884,7 +1897,10 @@ mod tests {
     #[test]
     fn test_view_is_referenced_wherever_it_is_composed() {
         let (dir, composer) = view_fixture();
-        let sql = composer.compose(&file_template(&dir, "parent.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "parent.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(
             sql,
             "SELECT * FROM (\nSELECT * FROM v.child\n) a JOIN (\nSELECT * FROM v.child\n) b USING (y) \
@@ -1895,7 +1911,10 @@ mod tests {
     #[test]
     fn test_registry_defines_each_view_one_level_deep() {
         let (dir, composer) = view_fixture();
-        let sql = composer.compose(&file_template(&dir, "views.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "views.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(
             sql,
             "CREATE SCHEMA v;\nCREATE VIEW v.grand AS SELECT y FROM t;\n\
@@ -1908,7 +1927,10 @@ mod tests {
         let (dir, composer) = view_fixture();
         write_temp_file(&dir, "other.sqlc", "SELECT 1 AS y");
         write_temp_file(&dir, "all.sqlc", ":union(ALL grand.sqlc, other.sqlc)");
-        let sql = composer.compose(&file_template(&dir, "all.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "all.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(sql, "SELECT * FROM v.grand\nUNION ALL\nSELECT 1 AS y");
     }
 
@@ -1917,7 +1939,10 @@ mod tests {
         let (dir, _) = view_fixture();
         let mut composer = Composer::new(Dialect::Postgres);
         composer.add_search_path(dir.path().to_path_buf());
-        let sql = composer.compose(&file_template(&dir, "child.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "child.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(sql, "SELECT * FROM (\nSELECT y FROM t\n) g");
     }
 
@@ -1925,10 +1950,17 @@ mod tests {
     fn test_a_view_with_an_open_slot_is_refused() {
         let dir = TempDir::new().unwrap();
         write_temp_file(&dir, "shape.sqlc", "SELECT * FROM (:compose(@part)) x");
-        write_temp_file(&dir, "views.sqlc", "CREATE VIEW v.shape AS :define(shape.sqlc);");
+        write_temp_file(
+            &dir,
+            "views.sqlc",
+            "CREATE VIEW v.shape AS :define(shape.sqlc);",
+        );
         let mut composer = Composer::new(Dialect::Postgres);
         composer.add_search_path(dir.path().to_path_buf());
-        match composer.load_view_registry(Path::new("views.sqlc")).unwrap_err() {
+        match composer
+            .load_view_registry(Path::new("views.sqlc"))
+            .unwrap_err()
+        {
             Error::ViewTakesArguments { view, reason, .. } => {
                 assert_eq!(view, "v.shape");
                 assert!(reason.contains("@part"), "{reason}");
@@ -1941,10 +1973,17 @@ mod tests {
     fn test_a_view_that_binds_is_refused() {
         let dir = TempDir::new().unwrap();
         write_temp_file(&dir, "bound.sqlc", "SELECT * FROM t WHERE id = :bind(id)");
-        write_temp_file(&dir, "views.sqlc", "CREATE VIEW v.bound AS :define(bound.sqlc);");
+        write_temp_file(
+            &dir,
+            "views.sqlc",
+            "CREATE VIEW v.bound AS :define(bound.sqlc);",
+        );
         let mut composer = Composer::new(Dialect::Postgres);
         composer.add_search_path(dir.path().to_path_buf());
-        match composer.load_view_registry(Path::new("views.sqlc")).unwrap_err() {
+        match composer
+            .load_view_registry(Path::new("views.sqlc"))
+            .unwrap_err()
+        {
             Error::ViewTakesArguments { view, reason, .. } => {
                 assert_eq!(view, "v.bound");
                 assert!(reason.contains("id"), "{reason}");
@@ -1956,7 +1995,10 @@ mod tests {
     #[test]
     fn test_view_name_before_reads_the_create_view_it_ends() {
         assert_eq!(view_name_before("CREATE VIEW s.x AS "), Some("s.x".into()));
-        assert_eq!(view_name_before(";\ncreate or replace view s.y as\n"), Some("s.y".into()));
+        assert_eq!(
+            view_name_before(";\ncreate or replace view s.y as\n"),
+            Some("s.y".into())
+        );
         assert_eq!(view_name_before("SELECT * FROM ("), None);
         assert_eq!(view_name_before("CREATE VIEW s.z AS SELECT 1 UNION "), None);
     }
@@ -1964,9 +2006,18 @@ mod tests {
     #[test]
     fn test_cte_name_before_reads_the_with_clause_it_ends() {
         assert_eq!(cte_name_before("WITH grand AS ("), Some("grand".into()));
-        assert_eq!(cte_name_before("WITH grand AS MATERIALIZED (\n"), Some("grand".into()));
-        assert_eq!(cte_name_before(",\n     child AS NOT MATERIALIZED ("), Some("child".into()));
-        assert_eq!(cte_name_before("with grand as materialized ("), Some("grand".into()));
+        assert_eq!(
+            cte_name_before("WITH grand AS MATERIALIZED (\n"),
+            Some("grand".into())
+        );
+        assert_eq!(
+            cte_name_before(",\n     child AS NOT MATERIALIZED ("),
+            Some("child".into())
+        );
+        assert_eq!(
+            cte_name_before("with grand as materialized ("),
+            Some("grand".into())
+        );
         // A subquery is not a definition, and neither is a name with nothing in front of it.
         assert_eq!(cte_name_before("SELECT * FROM ("), None);
         assert_eq!(cte_name_before("WITH grand AS "), None);
@@ -1984,7 +2035,10 @@ mod tests {
             "statement.sqlc",
             "WITH grand AS MATERIALIZED (\n:define(grand.sqlc)\n)\n:compose(parent.sqlc)",
         );
-        let sql = composer.compose(&file_template(&dir, "statement.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "statement.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(
             sql,
             "WITH grand AS MATERIALIZED (\nSELECT y FROM t\n)\n\
@@ -1992,7 +2046,10 @@ mod tests {
              USING (y) WHERE EXISTS (\nSELECT * FROM grand\n)"
         );
         // The declaration is the statement's own: the next composition is unaffected.
-        let after = composer.compose(&file_template(&dir, "parent.sqlc")).unwrap().sql;
+        let after = composer
+            .compose(&file_template(&dir, "parent.sqlc"))
+            .unwrap()
+            .sql;
         assert!(after.contains("SELECT * FROM v.grand"), "{after}");
         assert!(!after.contains("FROM grand"), "{after}");
     }
@@ -2007,7 +2064,10 @@ mod tests {
             "statement.sqlc",
             "WITH child AS NOT MATERIALIZED (\n:define(child.sqlc)\n)\n:compose(parent.sqlc)",
         );
-        let sql = composer.compose(&file_template(&dir, "statement.sqlc")).unwrap().sql;
+        let sql = composer
+            .compose(&file_template(&dir, "statement.sqlc"))
+            .unwrap()
+            .sql;
         assert_eq!(
             sql,
             "WITH child AS NOT MATERIALIZED (\nSELECT * FROM (\nSELECT * FROM v.grand\n) g\n)\n\
@@ -2021,14 +2081,28 @@ mod tests {
         let (dir, composer) = view_fixture();
         // Same relation, same place, the two directives: `:compose` says which relation, and
         // `:define` says where its body goes.
-        write_temp_file(&dir, "named.sqlc", "SELECT * FROM (\n:compose(grand.sqlc)\n) g");
-        write_temp_file(&dir, "defined.sqlc", "SELECT * FROM (\n:define(grand.sqlc)\n) g");
+        write_temp_file(
+            &dir,
+            "named.sqlc",
+            "SELECT * FROM (\n:compose(grand.sqlc)\n) g",
+        );
+        write_temp_file(
+            &dir,
+            "defined.sqlc",
+            "SELECT * FROM (\n:define(grand.sqlc)\n) g",
+        );
         assert_eq!(
-            composer.compose(&file_template(&dir, "named.sqlc")).unwrap().sql,
+            composer
+                .compose(&file_template(&dir, "named.sqlc"))
+                .unwrap()
+                .sql,
             "SELECT * FROM (\nSELECT * FROM v.grand\n) g"
         );
         assert_eq!(
-            composer.compose(&file_template(&dir, "defined.sqlc")).unwrap().sql,
+            composer
+                .compose(&file_template(&dir, "defined.sqlc"))
+                .unwrap()
+                .sql,
             "SELECT * FROM (\nSELECT y FROM t\n) g"
         );
     }
@@ -2038,13 +2112,27 @@ mod tests {
         // With nothing named, the two directives are the same splice, which is the ground the
         // proof that a name and its definition agree stands on.
         let (dir, _) = view_fixture();
-        write_temp_file(&dir, "named.sqlc", "SELECT * FROM (\n:compose(child.sqlc)\n) g");
-        write_temp_file(&dir, "defined.sqlc", "SELECT * FROM (\n:define(child.sqlc)\n) g");
+        write_temp_file(
+            &dir,
+            "named.sqlc",
+            "SELECT * FROM (\n:compose(child.sqlc)\n) g",
+        );
+        write_temp_file(
+            &dir,
+            "defined.sqlc",
+            "SELECT * FROM (\n:define(child.sqlc)\n) g",
+        );
         let mut composer = Composer::new(Dialect::Postgres);
         composer.add_search_path(dir.path().to_path_buf());
         assert_eq!(
-            composer.compose(&file_template(&dir, "named.sqlc")).unwrap().sql,
-            composer.compose(&file_template(&dir, "defined.sqlc")).unwrap().sql
+            composer
+                .compose(&file_template(&dir, "named.sqlc"))
+                .unwrap()
+                .sql,
+            composer
+                .compose(&file_template(&dir, "defined.sqlc"))
+                .unwrap()
+                .sql
         );
     }
 

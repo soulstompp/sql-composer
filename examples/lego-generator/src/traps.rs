@@ -3,6 +3,7 @@
 //! smallest run still holds some, or arises naturally from the real catalogue; either way every
 //! trapped row is written to the manifest.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -103,7 +104,7 @@ pub const DECLS: &[Decl] = &[
     Decl { trap: Trap::O2, title: "lettered set numbers in byte order against linguistic order", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O3, title: "a range on set numbers whose split point moves with the collation", population: Population::Natural, per_million: 0, floor: 0 },
     Decl { trap: Trap::O4, title: "sets tied on their brick count at a top-N cut", population: Population::Natural, per_million: 0, floor: 0 },
-    Decl { trap: Trap::O5, title: "pairs of packs whose child sets' release years, read by their last digit round the decade, lie the same distances apart two at a time, but not three at a time", population: Population::Phase, per_million: 0, floor: 0 },
+    Decl { trap: Trap::O5, title: "pairs of packs whose sets' release years hold as many consecutive pairs and a different number of runs of three", population: Population::Phase, per_million: 0, floor: 0 },
     Decl { trap: Trap::D1, title: "two purchases in the hour a fall-back clock reads twice", population: Population::CollectionRows, per_million: 2_000, floor: 2 },
     Decl { trap: Trap::D2, title: "a receipt printed in standard time inside a spring-forward gap", population: Population::CollectionRows, per_million: 2_000, floor: 2 },
     Decl { trap: Trap::D3, title: "a purchase whose local month is not its UTC month", population: Population::CollectionRows, per_million: 5_000, floor: 4 },
@@ -119,4 +120,90 @@ pub fn decl(trap: Trap) -> &'static Decl {
         .iter()
         .find(|d| d.trap == trap)
         .expect("every trap is declared")
+}
+
+/// Whether `--traps` can leave the trap out: it is planted at a rate, or written by a phase of the
+/// patch. The others arise from the real catalogue, from other traps' rows or from how every wave
+/// is written, and are there whatever `--traps` says.
+pub fn can_leave_out(trap: Trap) -> bool {
+    !matches!(decl(trap).population, Population::Natural)
+}
+
+/// Every trap `--traps all` plants.
+pub fn all_planted() -> BTreeSet<Trap> {
+    DECLS
+        .iter()
+        .map(|d| d.trap)
+        .filter(|&t| can_leave_out(t))
+        .collect()
+}
+
+/// The traps `--traps` asks for: `all`, `none`, or a comma-separated list of trap names (`K1`,
+/// `D3`, …) of the traps it can leave out.
+pub fn parse_list(s: &str) -> Result<BTreeSet<Trap>, String> {
+    match s.trim() {
+        "all" => return Ok(all_planted()),
+        "none" => return Ok(BTreeSet::new()),
+        _ => {}
+    }
+    let mut out = BTreeSet::new();
+    for item in s.split(',') {
+        let item = item.trim();
+        let trap = DECLS
+            .iter()
+            .map(|d| d.trap)
+            .find(|t| t.to_string().eq_ignore_ascii_case(item))
+            .ok_or_else(|| format!("--traps: want all, none or a list of traps, not `{item}`"))?;
+        if !can_leave_out(trap) {
+            return Err(format!(
+                "--traps: {trap} ({}) is not planted: it arises from the real catalogue, from \
+                 other traps' rows or from how every wave is written, and is there whatever \
+                 --traps says",
+                decl(trap).title
+            ));
+        }
+        out.insert(trap);
+    }
+    Ok(out)
+}
+
+/// The list as `--traps` takes it: `all`, `none`, or the traps' names.
+pub fn list_name(traps: &BTreeSet<Trap>) -> String {
+    if *traps == all_planted() {
+        "all".into()
+    } else if traps.is_empty() {
+        "none".into()
+    } else {
+        traps
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn traps_are_all_none_or_a_list_of_the_traps_that_can_be_left_out() {
+        let all = parse_list("all").unwrap();
+        assert!(all.contains(&Trap::K1) && all.contains(&Trap::D8) && all.contains(&Trap::O5));
+        assert!(!all.contains(&Trap::B7) && !all.contains(&Trap::O1));
+        assert_eq!(list_name(&all), "all");
+        assert_eq!(parse_list("none"), Ok(BTreeSet::new()));
+        assert_eq!(list_name(&BTreeSet::new()), "none");
+        let two = parse_list(" d3 , K1 ").unwrap();
+        assert_eq!(two, [Trap::K1, Trap::D3].into_iter().collect());
+        assert_eq!(list_name(&two), "K1,D3");
+        let natural = parse_list("K1,B7").unwrap_err();
+        assert!(
+            natural.contains("B7") && natural.contains("not planted"),
+            "{natural}"
+        );
+        for bad in ["K9", "", "all,K1"] {
+            assert!(parse_list(bad).is_err(), "{bad} was accepted");
+        }
+    }
 }

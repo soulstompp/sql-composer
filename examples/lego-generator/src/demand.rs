@@ -49,7 +49,11 @@ impl Burst {
                 let (a, b) = ((lo - start).max(0) as f64, (hi - start).max(0) as f64);
                 amount * ((-a / tau).exp() - (-b / tau).exp())
             }
-            Burst::Even { start, days, amount } => {
+            Burst::Even {
+                start,
+                days,
+                amount,
+            } => {
                 let (a, b) = (lo.max(start), hi.min(start + days));
                 if b > a {
                     amount * (b - a) as f64 / days as f64

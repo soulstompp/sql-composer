@@ -11,8 +11,8 @@
 //! - `wavy`: a wave travelling over the ordered sockets, forward then back, over and over;
 //! - `hotspot`: one socket takes a fixed share of the sets;
 //! - `swing`: waves alternate between two groups of sockets;
-//! - `zchord`: packs written in pairs whose child sets' release years, read by their last digit
-//!   round the decade, lie the same distances apart two at a time, but not three at a time.
+//! - `paired`: packs written in pairs, whose child sets' release years hold as many pairs of
+//!   consecutive years and a different number of runs of three (see `paired`).
 //!
 //! Every pattern except `natural` keeps the real weights along the socket order, and changes
 //! only which wave a set arrives in. A WAVE is one chunk of the loader.
@@ -30,8 +30,8 @@ pub enum Pattern {
     Wavy,
     Hotspot,
     Swing,
-    /// Packs in pairs (see `chords`), placed by their child sets' release years, not by a socket.
-    Zchord,
+    /// Packs in pairs (see `paired`), placed by their child sets' release years, not by a socket.
+    Paired,
 }
 
 impl Pattern {
@@ -43,7 +43,7 @@ impl Pattern {
             "wavy" => Pattern::Wavy,
             "hotspot" => Pattern::Hotspot,
             "swing" => Pattern::Swing,
-            "zchord" => Pattern::Zchord,
+            "paired" => Pattern::Paired,
             other => return Err(format!("unknown pattern `{other}`")),
         })
     }
@@ -56,7 +56,7 @@ impl Pattern {
             Pattern::Wavy => "wavy",
             Pattern::Hotspot => "hotspot",
             Pattern::Swing => "swing",
-            Pattern::Zchord => "zchord",
+            Pattern::Paired => "paired",
         }
     }
 }
@@ -289,7 +289,7 @@ impl Switchboard {
         let n = (ph.end - ph.start).max(1);
         let wave = k / self.chunk;
         match ph.pattern {
-            Pattern::Natural | Pattern::Zchord => self.all.at(rng.unit()),
+            Pattern::Natural | Pattern::Paired => self.all.at(rng.unit()),
             Pattern::Sorted => self.all.at((k as f64 + 0.5) / n as f64),
             Pattern::Interleaved => {
                 const GOLDEN: f64 = 0.618_033_988_749_894_9;

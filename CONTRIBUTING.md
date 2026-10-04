@@ -49,7 +49,8 @@ Thank you! We'll try to respond as quickly as possible.
 
 3. Clone this repository and open it in your favorite editor.
 
-4. The project uses a Cargo workspace under `crates/`:
+4. The project uses a Cargo workspace of the crates under `crates/` and the examples under
+   `examples/`:
 
    ```
    crates/
@@ -60,6 +61,9 @@ Thank you! We'll try to respond as quickly as possible.
      sql-composer-mysql/     # MySQL driver (sync + async)
      sql-composer-sqlx/      # sqlx integration
      cargo-sqlc/             # CLI tool
+   examples/
+     lego/                   # Runnable example on the Lego database (lego-example)
+     lego-generator/         # Large catalogue generator for Postgres (lego-generator)
    ```
 
 5. **Database setup for integration tests** (optional)
@@ -83,7 +87,7 @@ Thank you! We'll try to respond as quickly as possible.
 6. Run the tests:
 
    ```bash
-   # Run all workspace tests (core + rusqlite + duckdb + driver unit tests)
+   # Run all workspace tests (core + rusqlite + duckdb + driver unit tests + examples)
    cargo test --workspace
 
    # Run tests for a specific crate
@@ -94,7 +98,16 @@ Thank you! We'll try to respond as quickly as possible.
    cargo test -p sql-composer-mysql
    cargo test -p sql-composer-sqlx --features validate
    cargo test -p cargo-sqlc
+
+   # The catalogue generator's tests, which need no database
+   cargo test -p lego-generator
+
+   # Check that the lego example's committed .sql files are what its templates compose to
+   cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify
    ```
+
+   After changing a template under `examples/lego/sqlc`, compose the example again (the same
+   command without `--verify`, with `--skip-prepare`) and commit the `.sql` files with it.
 
 [rustup]: https://rustup.rs/
 

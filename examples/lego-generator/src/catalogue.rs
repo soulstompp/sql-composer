@@ -192,6 +192,34 @@ pub async fn missing(
 }
 
 impl Catalogue {
+    /// The lines and nesting rows that repeat the natural key of an earlier one, the lines'
+    /// `(inventory_id, part_num, color_id, is_spare)` and the nesting rows' `(inventory_id,
+    /// set_num)`. Both are read in the order of those keys, so a repeat follows its first.
+    pub fn repeated_keys(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let line_key = |l: &LineRec| (l.inventory_id, l.part, l.color_id, l.is_spare);
+        for w in self.lines.windows(2) {
+            if line_key(&w[0]) == line_key(&w[1]) {
+                out.push(format!(
+                    "lego_inventory_parts ({}, {}, {}, {})",
+                    w[1].inventory_id,
+                    self.part_pool[w[1].part as usize],
+                    w[1].color_id,
+                    w[1].is_spare
+                ));
+            }
+        }
+        for w in self.nests.windows(2) {
+            if (w[0].inventory_id, &w[0].set_num) == (w[1].inventory_id, &w[1].set_num) {
+                out.push(format!(
+                    "lego_inventory_sets ({}, {})",
+                    w[1].inventory_id, w[1].set_num
+                ));
+            }
+        }
+        out
+    }
+
     /// Whether the parts table holds part-number pool entry `part`. The pool holds the parts table's
     /// numbers first, then the numbers only lines name.
     pub fn lists_part(&self, part: u32) -> bool {

@@ -65,13 +65,19 @@ expression indexes on the purchases, by month and then instant, one within each 
 one across all of them. They read the instant through `<schema>.clock(timestamptz)`, a function
 declared `IMMUTABLE` that gives an instant as the wall clock of UTC, which makes an instant's month
 indexable; the load creates it before the indexes, and a query that means to use them reads time
-through the same function. Beside the composite indexes the load builds what a DBA adds for the
-searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the postcodes' unique
-code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders' homes by
-distance (`ll_to_earth`), and GINs on part names by their words and on part and set names by
-trigrams.
+through the same function. Beside the composite indexes the load builds the unique keys the tables
+declare besides their primary keys (`UNIQUE_KEYS` in `src/load.rs`): the postcodes' `code`, and the
+natural keys of the inventory lines, `(inventory_id, part_num, color_id, is_spare)`, and of the
+nested sets, `(inventory_id, set_num)`, which have no primary key. It also builds what a DBA adds
+for the searches the other indexes do not serve (`SEARCHES`): a `text_pattern_ops` key for a
+postcode by its prefix, a GiST on the builders' homes by distance (`ll_to_earth`), and GINs on part
+names by their words and on part and set names by trigrams.
 
-`--indexes` says which of these are built: `keys` (the primary keys and the unique key),
+The generator writes its own lines and nested sets merged on those keys, and the real catalogue's
+unchanged. So when the keys or partitions are asked for, it first checks that the real catalogue
+repeats neither key, and stops before writing anything if it does.
+
+`--indexes` says which of these are built: `keys` (the primary keys and the unique keys),
 `composite` and `search`, as a list, or `none`. All three are built by default; the clock function
 is created whatever the list. The search indexes need the extensions `cube`, `earthdistance` and
 `pg_trgm`. When `search` is in the list, the generator creates each one in `public` before it writes
@@ -271,6 +277,87 @@ four things. The build fails if any does not hold:
 - a class meant to have no rows of its own has none.
 
 The `SUMMARY oo` lines give the rows each class has of its own.
+
+## Partitions by id
+
+`--partitioning` also copies the generated tables, after the load, into tables partitioned by the
+leading column of their natural key, the unique key over the table's own attributes. Each method
+gets a schema of its own, named `<schema>_<method>` (`lego_inheritance`, `lego_range`,
+`lego_hash`). Every run drops all three before the load, asked for or not, so no copy keeps an
+earlier load's rows:
+
+- `inheritance`: child tables below an empty parent, each holding one range of the column under a
+  CHECK named `<child>_check`, as tables were partitioned before declarative partitioning. Nothing
+  routes a row written later.
+- `range`: `PARTITION BY RANGE`, with a `DEFAULT` partition for rows written later.
+- `hash`: `PARTITION BY HASH`.
+
+`--partitioning` takes `none` (the default) or a list of the three, so one load can build all of
+them. `--partition-tables` names the tables to copy. Its default, `all`, is every generated table
+but the run's own, `generator_run` and `trap_manifest`, which can still be named. `--partitions`
+gives the number of partitions, 8 by default. Both are refused without `--partitioning`, and so
+is any method's schema that would name `--source-schema` or `--oo-schema`. The partitions are named
+`<table>_p0`, `<table>_p1`, …
+
+A key is what a table declares, never what one load's rows happen to hold. A table's natural key
+is its primary key: the catalogue's ids are the catalogue's own identifiers, and a generated id is
+the generator's identity for what it generates. Only a table that declares two unique keys picks
+one, and the tables with no primary key take the unique key they declare:
+
+| table | natural key | partition column |
+|---|---|---|
+| `lego_inventory_parts` (no primary key) | `(inventory_id, part_num, color_id, is_spare)` | `inventory_id` |
+| `lego_inventory_sets` (no primary key) | `(inventory_id, set_num)` | `inventory_id` |
+| `lego_postcodes` | `(code)`, beside the primary key `postcode_id` | `code` |
+
+The ranges are of equal width between the column's minimum and maximum, read after the load. A
+table is left out when it has no natural key (`trap_manifest`), or when its key holds an expression
+or a nullable column. Under the two range methods, so is a table whose key leads with text
+(`lego_sets`, `lego_parts`, `lego_postcodes`, `generator_run`), since text has no equal-width
+ranges; `hash` partitions those too. Read a method's schema with the generated schema behind it,
+for the tables it leaves out:
+
+```sql
+SET search_path = lego_range, lego;
+EXPLAIN SELECT * FROM lego_purchases WHERE purchase_id = 400000;  -- one partition
+```
+
+Each inheritance table is filled in one pass over the generated table, with no temporary files.
+Its children start as the partitions of a declarative table, `<table>_load`, each already under its
+CHECK, and that table routes every row to its child. Then each child is detached and made a child of
+the parent with `INHERIT`, and `<table>_load` is dropped.
+
+Each schema gets the indexes `--indexes` asks for. On a declarative table they are created on the
+parent, which makes them on every partition. Under inheritance they are created on each child,
+since an index covers one table, and not on the empty parent; the planner leaves out a child whose
+CHECK a query's condition contradicts. A key that holds the partition column stays unique across
+the whole table. A declarative table enforces it. Under inheritance, two rows equal on such a key
+are equal on the partition column, so they fall in one child, and that child's unique index refuses
+the second. A row written to the parent itself is checked by nothing. The natural key always holds
+the partition column. Any other key cannot be unique across the table, so it is built as a plain
+index: the postcodes' primary key, `postcode_id`, is one.
+
+With `--unlogged`, the partitions and the inheritance tables are unlogged. A declarative parent
+is not, since PostgreSQL refuses an unlogged partitioned table, and it holds no rows of its own.
+PostgreSQL also refuses any storage parameter on a partitioned table, and autovacuum never
+analyses one, so the build vacuums and analyses each table it makes.
+
+After the build, the run checks that each row lies in one partition and each key is unique. It
+counts each table's rows across its partitions against the generated table, and sees that an
+inheritance parent holds none of its own. It reads every range back from the catalogue to see that
+none overlaps another. And it sees that no value of a key that holds the partition column appears
+twice. Where a valid unique index enforces the key on the copy, the index does that, and the rows
+are not counted. Where nothing enforces it, as without `keys` in `--indexes`, they are counted.
+The build fails if any of these does not hold. The `SUMMARY partition` lines give each partition's
+rows, and the `SUMMARY size` lines each copied table's size with all its partitions.
+
+`generator_run` records:
+- the methods (`partitioning`), the tables (`partition_tables`) and the count (`partitions`);
+- each table's natural key and column (`partition_key_<table>`, `partition_column_<table>`);
+- for each method, its schema, the tables it partitions, and the ones it leaves out with the
+  reason (`partition_<method>_schema`, `partition_<method>_tables`, `partition_<method>_left_out`);
+- when the keys are built, every key that is no longer unique across its table
+  (`unique_lost_<method>_<key>`).
 
 ## Tests
 

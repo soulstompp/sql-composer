@@ -13,6 +13,7 @@ mod encode;
 mod load;
 mod oo;
 mod paired;
+mod partitions;
 mod places;
 mod rng;
 mod switchboard;
@@ -212,6 +213,18 @@ struct Cli {
     /// `builders`. All three when absent and `--oo-schema` is given; none without it.
     #[arg(long)]
     classes: Option<String>,
+    /// Also copy the generated tables, after the load, into tables partitioned by the leading
+    /// column of their primary key, one schema per method, `<schema>_<method>`, dropped and
+    /// recreated: `none`, or a list of `inheritance` (children holding ranges under CHECKs),
+    /// `range` and `hash` (declarative).
+    #[arg(long, default_value = "none")]
+    partitioning: String,
+    /// The generated tables `--partitioning` copies: `all`, or a list of their names.
+    #[arg(long)]
+    partition_tables: Option<String>,
+    /// How many partitions each copied table is split into; 8 when absent.
+    #[arg(long)]
+    partitions: Option<u32>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
     /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
     #[arg(long)]
@@ -292,6 +305,28 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     let classes = oo::Classes::resolve(cli.classes.as_deref(), cli.oo_schema.as_deref())?;
+    let methods = partitions::parse_methods(&cli.partitioning)?;
+    if methods.is_empty() && (cli.partition_tables.is_some() || cli.partitions.is_some()) {
+        return Err("--partition-tables and --partitions need --partitioning, the methods".into());
+    }
+    let partition_tables =
+        partitions::parse_tables(cli.partition_tables.as_deref().unwrap_or("all"))?;
+    let partition_count = cli.partitions.unwrap_or(8);
+    if partition_count == 0 {
+        return Err("--partitions: want one partition or more".into());
+    }
+    // Every run drops every method's schema, so none may name a schema the run keeps or builds.
+    for m in partitions::Method::ALL {
+        let s = partitions::method_schema(&cli.schema, m);
+        let taken = [Some(&cli.source_schema), cli.oo_schema.as_ref()];
+        if taken.into_iter().flatten().any(|other| same_schema(&s, other)) {
+            return Err(format!(
+                "{s}, the schema of --partitioning {}, names the --source-schema or the \
+                 --oo-schema, and every run drops it",
+                m.name()
+            ));
+        }
+    }
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let build_timeout = cli
         .build_timeout
@@ -348,6 +383,17 @@ async fn run(cli: Cli) -> Result<(), String> {
         let cat = Catalogue::read(&mut conn, &cli.source_schema)
             .await
             .map_err(|e| format!("reading {}: {e}", cli.source_schema))?;
+        // The catalogue's own lines and nesting rows are written unchanged, so they hold the
+        // natural keys only if the catalogue does.
+        let repeated = cat.repeated_keys();
+        if (settings.indexes.keys || !methods.is_empty()) && !repeated.is_empty() {
+            return Err(format!(
+                "schema {} repeats a natural key the generated tables declare unique: {}. Leave \
+                 keys out of --indexes and --partitioning out to load it",
+                cli.source_schema,
+                repeated.join(", ")
+            ));
+        }
         sqlx::query(&format!("SET statement_timeout = '{}'", cli.wave_timeout))
             .execute(&mut *conn)
             .await
@@ -538,6 +584,13 @@ async fn run(cli: Cli) -> Result<(), String> {
         ),
         ("classes".into(), classes.name()),
     ];
+    run_rows.extend(partitions::run_rows(
+        &cli.schema,
+        &methods,
+        &partition_tables,
+        partition_count,
+        settings.indexes,
+    ));
     for d in DECLS {
         let planted = world
             .planted
@@ -598,6 +651,13 @@ async fn run(cli: Cli) -> Result<(), String> {
 
     if !cli.dry_run {
         let t = Instant::now();
+        for m in partitions::Method::ALL {
+            let s = partitions::method_schema(&cli.schema, m);
+            sqlx::query(&format!("DROP SCHEMA IF EXISTS {s} CASCADE"))
+                .execute(&pool)
+                .await
+                .map_err(|e| format!("dropping {s}: {e}"))?;
+        }
         load::create_schema(&pool, &settings)
             .await
             .map_err(|e| format!("create schema: {e}"))?;
@@ -735,6 +795,7 @@ async fn run(cli: Cli) -> Result<(), String> {
 
     let mut steps = Vec::new();
     let mut oo_rows = Vec::new();
+    let mut partition_rows = Vec::new();
     if !cli.dry_run {
         let mut conn = load::build_session(&cli.database_url, &settings)
             .await
@@ -747,6 +808,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             steps.extend(built.steps);
             oo_rows = built.rows;
         }
+        if !methods.is_empty() {
+            let built = partitions::build(
+                &mut conn,
+                &cli.schema,
+                &methods,
+                &partition_tables,
+                partition_count,
+                cli.unlogged,
+                settings.indexes,
+                &extension_schemas,
+            )
+            .await?;
+            steps.extend(built.steps);
+            partition_rows = built.rows;
+        }
     }
 
     // The summary.
@@ -755,6 +831,9 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     for (class, rows) in &oo_rows {
         summary(&[&"oo", class, rows]);
+    }
+    for (schema, table, part, rows) in &partition_rows {
+        summary(&[&"partition", schema, table, part, rows]);
     }
     {
         let levels = metrics.levels.lock().expect("metrics lock");
@@ -842,6 +921,12 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         for (t, n) in load::sizes(&pool, &settings.schema).await {
             summary(&[&"size", &t, &n]);
+        }
+        for &m in &methods {
+            let schema = partitions::method_schema(&cli.schema, m);
+            for (t, n) in load::sizes(&pool, &schema).await {
+                summary(&[&"size", &format!("{schema}.{t}"), &n]);
+            }
         }
     }
     summary(&[&"waves", &total_waves]);

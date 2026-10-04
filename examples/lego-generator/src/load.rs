@@ -331,9 +331,21 @@ pub const COMPOSITE_INDEXES: &[CompositeIndex] = &[
 ];
 
 /// A unique key besides the primary key, added as a constraint after the load: its table, its name
-/// and its columns.
-pub const UNIQUE_KEYS: &[(&str, &str, &str)] =
-    &[("lego_postcodes", "lego_postcodes_code_key", "code")];
+/// and its columns. The inventory lines and nested sets have no primary key; their natural keys are
+/// declared here.
+pub const UNIQUE_KEYS: &[(&str, &str, &str)] = &[
+    ("lego_postcodes", "lego_postcodes_code_key", "code"),
+    (
+        "lego_inventory_parts",
+        "lego_inventory_parts_natural_key",
+        "inventory_id, part_num, color_id, is_spare",
+    ),
+    (
+        "lego_inventory_sets",
+        "lego_inventory_sets_natural_key",
+        "inventory_id, set_num",
+    ),
+];
 
 /// An index a DBA adds beside the composite indexes, for a search they do not serve: a code by its
 /// prefix, a home by its distance, a name by its words or by a pattern. `sql` is what follows
@@ -1258,12 +1270,25 @@ pub async fn wal_bytes(pool: &PgPool, from: &str, to: &str) -> Option<i64> {
         .map(|r| r.0)
 }
 
+/// Each table of `schema` that is no other's partition or child, with the size on disk of it and of
+/// every partition or child below it: a partitioned table has no files of its own, so
+/// `pg_total_relation_size` counts nothing for it and nothing of its partitions.
 pub async fn sizes(pool: &PgPool, schema: &str) -> Vec<(String, i64)> {
+    let name = match schema.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        Some(quoted) => quoted.replace("\"\"", "\""),
+        None => schema.to_ascii_lowercase(),
+    };
     sqlx::query_as::<_, (String, i64)>(
-        "SELECT c.relname::text, pg_total_relation_size(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
-         WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY 1",
+        "WITH RECURSIVE tree (root, rel) AS ( \
+           SELECT c.oid, c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') \
+             AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid) \
+           UNION \
+           SELECT t.root, i.inhrelid FROM tree t JOIN pg_inherits i ON i.inhparent = t.rel) \
+         SELECT r.relname::text, sum(pg_total_relation_size(t.rel))::bigint \
+         FROM tree t JOIN pg_class r ON r.oid = t.root GROUP BY r.relname ORDER BY 1",
     )
-    .bind(schema)
+    .bind(name)
     .fetch_all(pool)
     .await
     .unwrap_or_default()

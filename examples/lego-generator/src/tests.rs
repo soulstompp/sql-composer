@@ -1758,3 +1758,51 @@ fn pre_orders_without_an_unreleased_set_are_refused() {
     let with_b2: BTreeSet<Trap> = [Trap::D5, Trap::B2].into_iter().collect();
     assert!(world_planting(500, 100, "natural:100", with_b2).is_ok());
 }
+
+/// A catalogue that repeats a line's or a nesting row's natural key is found when it is read, by
+/// the line and the row that repeat; the fixture repeats neither.
+#[test]
+fn a_catalogue_repeating_a_natural_key_is_found() {
+    assert!(fixture().repeated_keys().is_empty());
+    let mut cat = fixture();
+    let line = cat.lines[3];
+    cat.lines.insert(4, line);
+    let nest = cat.nests[0].clone();
+    cat.nests.insert(1, nest.clone());
+    let found = cat.repeated_keys();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].starts_with(&format!("lego_inventory_parts ({}, ", line.inventory_id)));
+    assert_eq!(
+        found[1],
+        format!("lego_inventory_sets ({}, {})", nest.inventory_id, nest.set_num)
+    );
+}
+
+/// Every key a generated table declares, its primary key and the unique keys the load adds, holds
+/// on every row the load writes, the synthesized rows of every pattern among them. The run's own
+/// `generator_run` is written apart, from the run's settings.
+#[test]
+fn every_declared_key_holds_on_every_written_row() {
+    let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
+    let db = written(&w, &generate(&w));
+    let mut checked = 0;
+    for t in crate::load::TABLES.iter().filter(|t| t.name != "generator_run") {
+        let declared = t.key.into_iter().chain(
+            crate::load::UNIQUE_KEYS
+                .iter()
+                .filter(|u| u.0 == t.name)
+                .map(|u| u.2),
+        );
+        for key in declared {
+            let rows = &db[t.name];
+            let mut seen = HashSet::new();
+            for r in &rows.rows {
+                let value = rows.project(r, &cols(key)).expect("a key has no NULL");
+                assert!(seen.insert(value.clone()), "{} repeats ({key}) = {value:?}", t.name);
+            }
+            assert!(!seen.is_empty(), "{} has no rows", t.name);
+            checked += 1;
+        }
+    }
+    assert!(checked >= crate::load::UNIQUE_KEYS.len());
+}

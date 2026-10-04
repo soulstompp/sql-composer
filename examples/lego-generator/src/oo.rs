@@ -587,7 +587,7 @@ pub struct Built {
     pub rows: Vec<(String, i64)>,
 }
 
-async fn exec(conn: &mut PgConnection, sql: &str) -> Result<(), String> {
+pub(crate) async fn exec(conn: &mut PgConnection, sql: &str) -> Result<(), String> {
     sqlx::query(sql)
         .execute(&mut *conn)
         .await
@@ -595,7 +595,7 @@ async fn exec(conn: &mut PgConnection, sql: &str) -> Result<(), String> {
         .map_err(|e| format!("{e}: {sql}"))
 }
 
-async fn count(conn: &mut PgConnection, sql: &str) -> Result<i64, String> {
+pub(crate) async fn count(conn: &mut PgConnection, sql: &str) -> Result<i64, String> {
     sqlx::query_as::<_, (i64,)>(sql)
         .fetch_one(&mut *conn)
         .await

@@ -198,7 +198,10 @@ mod tests {
         assert_eq!(two, [Trap::K1, Trap::D3].into_iter().collect());
         assert_eq!(list_name(&two), "K1,D3");
         let natural = parse_list("K1,B7").unwrap_err();
-        assert!(natural.contains("B7") && natural.contains("not planted"), "{natural}");
+        assert!(
+            natural.contains("B7") && natural.contains("not planted"),
+            "{natural}"
+        );
         for bad in ["K9", "", "all,K1"] {
             assert!(parse_list(bad).is_err(), "{bad} was accepted");
         }

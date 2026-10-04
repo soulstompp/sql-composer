@@ -271,7 +271,10 @@ impl Hierarchy {
         if !c.has_rows {
             return Vec::new();
         }
-        COMPOSITE_INDEXES.iter().filter(|s| s.table == self.table).collect()
+        COMPOSITE_INDEXES
+            .iter()
+            .filter(|s| s.table == self.table)
+            .collect()
     }
 
     fn predicate(&self, name: &str) -> String {
@@ -702,7 +705,11 @@ pub async fn build(
                 )
                 .await?;
             }
-            for ix in h.composite_indexes(c).into_iter().filter(|_| indexes.composite) {
+            for ix in h
+                .composite_indexes(c)
+                .into_iter()
+                .filter(|_| indexes.composite)
+            {
                 let on = format!("{oo}.{}", c.name);
                 exec(
                     conn,

@@ -92,7 +92,11 @@ pub fn methods_name(methods: &BTreeSet<Method>) -> String {
     if methods.is_empty() {
         return "none".into();
     }
-    methods.iter().map(|m| m.name()).collect::<Vec<_>>().join(",")
+    methods
+        .iter()
+        .map(|m| m.name())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// The run's own tables, which `--partition-tables all` leaves out.
@@ -265,9 +269,15 @@ pub fn partition_column(t: &TableDef, method: Method) -> Result<Column, String> 
     }
     let (lead, def) = lead.ok_or_else(|| "its natural key names no column".to_string())?;
     let ty = def[lead.len()..].trim_start().to_ascii_lowercase();
-    let text = if ["smallint", "integer", "bigint"].iter().any(|i| ty.starts_with(i)) {
+    let text = if ["smallint", "integer", "bigint"]
+        .iter()
+        .any(|i| ty.starts_with(i))
+    {
         false
-    } else if ["varchar", "text", "character"].iter().any(|i| ty.starts_with(i)) {
+    } else if ["varchar", "text", "character"]
+        .iter()
+        .any(|i| ty.starts_with(i))
+    {
         true
     } else {
         return Err(format!(
@@ -424,10 +434,9 @@ pub fn index_statements(
                         "ALTER TABLE {on} ADD CONSTRAINT {} UNIQUE ({columns})",
                         renamed(name, target)
                     ),
-                    (Key::Unique { name, .. }, false) => format!(
-                        "CREATE INDEX {} ON {on} ({columns})",
-                        renamed(name, target)
-                    ),
+                    (Key::Unique { name, .. }, false) => {
+                        format!("CREATE INDEX {} ON {on} ({columns})", renamed(name, target))
+                    }
                     (_, false) => format!(
                         "CREATE INDEX {target}_{}_idx ON {on} ({columns})",
                         columns.replace(", ", "_")
@@ -497,10 +506,16 @@ pub fn run_rows(
     }
     for &m in methods {
         let (kept, left) = plan(m, tables);
-        rows.push((format!("partition_{}_schema", m.name()), method_schema(schema, m)));
+        rows.push((
+            format!("partition_{}_schema", m.name()),
+            method_schema(schema, m),
+        ));
         rows.push((
             format!("partition_{}_tables", m.name()),
-            kept.iter().map(|(t, _)| t.name).collect::<Vec<_>>().join(","),
+            kept.iter()
+                .map(|(t, _)| t.name)
+                .collect::<Vec<_>>()
+                .join(","),
         ));
         rows.push((
             format!("partition_{}_left_out", m.name()),
@@ -690,7 +705,12 @@ async fn enforced(
     .bind(&columns)
     .fetch_one(&mut *conn)
     .await
-    .map_err(|e| format!("reading the unique indexes of {}: {e}", relations.join(", ")))?
+    .map_err(|e| {
+        format!(
+            "reading the unique indexes of {}: {e}",
+            relations.join(", ")
+        )
+    })?
     .0;
     Ok(!relations.is_empty() && unenforced == 0)
 }
@@ -767,7 +787,10 @@ async fn check_each_row_in_one_partition_and_each_key_unique(
         let holders: Vec<String> = if method.declarative() {
             vec![format!("{schema}.{table}")]
         } else {
-            parts.iter().map(|(p, _, _)| format!("{schema}.{p}")).collect()
+            parts
+                .iter()
+                .map(|(p, _, _)| format!("{schema}.{p}"))
+                .collect()
         };
         for key in keys(t).into_iter().filter(|k| k.holds(c.name)) {
             let columns = key.columns();
@@ -826,7 +849,10 @@ mod tests {
         assert_eq!(tables_name(&all), "all");
         let two = parse_tables("lego_purchases, lego_sets").unwrap();
         assert_eq!(tables_name(&two), "lego_sets,lego_purchases");
-        assert_eq!(tables_name(&parse_tables("generator_run").unwrap()), "generator_run");
+        assert_eq!(
+            tables_name(&parse_tables("generator_run").unwrap()),
+            "generator_run"
+        );
         for bad in ["purchases", "lego_purchases,lego_oo", ""] {
             assert!(parse_tables(bad).is_err(), "{bad} was accepted");
         }
@@ -936,7 +962,13 @@ mod tests {
 
     #[test]
     fn equal_ranges_hold_every_value_from_the_minimum_to_the_maximum_once() {
-        for (min, max, n) in [(-1, 9999, 8), (1, 13_679, 8), (5, 7, 8), (3, 3, 4), (0, 99, 1)] {
+        for (min, max, n) in [
+            (-1, 9999, 8),
+            (1, 13_679, 8),
+            (5, 7, 8),
+            (3, 3, 4),
+            (0, 99, 1),
+        ] {
             let ranges = equal_ranges(min, max, n);
             assert_eq!(ranges.len(), n as usize);
             assert_eq!(ranges[0].0, min);
@@ -969,7 +1001,10 @@ mod tests {
         );
         assert_eq!(inh.len(), 6);
         let range = make(Method::Range, true);
-        assert_eq!(range[0], "CREATE TABLE s.t (LIKE g.t) PARTITION BY RANGE (id)");
+        assert_eq!(
+            range[0],
+            "CREATE TABLE s.t (LIKE g.t) PARTITION BY RANGE (id)"
+        );
         assert!(range[1].starts_with("CREATE UNLOGGED TABLE s.t_p0 PARTITION OF s.t"));
         assert!(range[1].ends_with("FOR VALUES FROM (1) TO (21)"));
         assert_eq!(
@@ -977,7 +1012,10 @@ mod tests {
             "CREATE UNLOGGED TABLE s.t_default PARTITION OF s.t DEFAULT"
         );
         let hash = make(Method::Hash, false);
-        assert_eq!(hash[0], "CREATE TABLE s.t (LIKE g.t) PARTITION BY HASH (id)");
+        assert_eq!(
+            hash[0],
+            "CREATE TABLE s.t (LIKE g.t) PARTITION BY HASH (id)"
+        );
         assert_eq!(hash.len(), 5);
         assert!(hash[4].ends_with("FOR VALUES WITH (MODULUS 4, REMAINDER 3)"));
         let fill = fill_statements(Method::Inheritance, "s", "g", "t", &ranges);
@@ -1023,7 +1061,11 @@ mod tests {
             "CREATE INDEX lego_postcodes_p0_postcode_id_idx ON s.lego_postcodes_p0 (postcode_id)"
         ));
         assert!(!p.iter().any(|s| s.contains("PRIMARY KEY")));
-        let lines = sql(table("lego_inventory_parts"), "inventory_id", "lego_inventory_parts");
+        let lines = sql(
+            table("lego_inventory_parts"),
+            "inventory_id",
+            "lego_inventory_parts",
+        );
         assert!(has(
             &lines,
             "ALTER TABLE s.lego_inventory_parts ADD CONSTRAINT lego_inventory_parts_natural_key \
@@ -1054,7 +1096,10 @@ mod tests {
             Ok((-1, 1250))
         );
         assert_eq!(
-            read_range("FOR VALUES FROM ('3000000000') TO ('3000000100')", "purchase_id"),
+            read_range(
+                "FOR VALUES FROM ('3000000000') TO ('3000000100')",
+                "purchase_id"
+            ),
             Ok((3_000_000_000, 3_000_000_100))
         );
         assert_eq!(

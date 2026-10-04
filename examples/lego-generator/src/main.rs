@@ -319,7 +319,11 @@ async fn run(cli: Cli) -> Result<(), String> {
     for m in partitions::Method::ALL {
         let s = partitions::method_schema(&cli.schema, m);
         let taken = [Some(&cli.source_schema), cli.oo_schema.as_ref()];
-        if taken.into_iter().flatten().any(|other| same_schema(&s, other)) {
+        if taken
+            .into_iter()
+            .flatten()
+            .any(|other| same_schema(&s, other))
+        {
             return Err(format!(
                 "{s}, the schema of --partitioning {}, names the --source-schema or the \
                  --oo-schema, and every run drops it",

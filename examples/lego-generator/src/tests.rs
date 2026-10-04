@@ -9,9 +9,9 @@ use crate::catalogue::{
     Colour, InvRec, LineRec, NestRec, Part, Real, SetRec, Theme, GROWTH_FACTOR, MODELLED,
     MODEL_FIT,
 };
-use crate::paired;
 use crate::encode::{Enc, Format};
 use crate::load::{index_name, CompositeIndex, Part as KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
+use crate::paired;
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
 use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
@@ -1284,15 +1284,27 @@ fn paired_packs_hold_the_years_their_manifest_rows_name() {
     for (pair, members) in &packs {
         assert_eq!(members.len(), 2, "pair {pair}");
         let (a, b) = (&members[0], &members[1]);
-        assert_eq!((a.member.as_str(), b.member.as_str()), ("first", "second"), "pair {pair}");
-        assert_eq!((&a.partner, &b.partner), (&b.offsets, &a.offsets), "pair {pair}");
+        assert_eq!(
+            (a.member.as_str(), b.member.as_str()),
+            ("first", "second"),
+            "pair {pair}"
+        );
+        assert_eq!(
+            (&a.partner, &b.partner),
+            (&b.offsets, &a.offsets),
+            "pair {pair}"
+        );
         assert!(
             declared.contains(&(a.offsets.clone(), b.offsets.clone())),
             "pair {pair}: {:?} and {:?} are not a declared pair",
             a.offsets,
             b.offsets
         );
-        assert_eq!((a.window, a.mirrored), (b.window, b.mirrored), "pair {pair}");
+        assert_eq!(
+            (a.window, a.mirrored),
+            (b.window, b.mirrored),
+            "pair {pair}"
+        );
         for m in members {
             let placed: Vec<i32> = paired::placed(&m.offsets, m.mirrored)
                 .iter()
@@ -1774,7 +1786,10 @@ fn a_catalogue_repeating_a_natural_key_is_found() {
     assert!(found[0].starts_with(&format!("lego_inventory_parts ({}, ", line.inventory_id)));
     assert_eq!(
         found[1],
-        format!("lego_inventory_sets ({}, {})", nest.inventory_id, nest.set_num)
+        format!(
+            "lego_inventory_sets ({}, {})",
+            nest.inventory_id, nest.set_num
+        )
     );
 }
 
@@ -1786,7 +1801,10 @@ fn every_declared_key_holds_on_every_written_row() {
     let w = world(3000, 100, "natural:60,wavy:20,interleaved:10,paired:10");
     let db = written(&w, &generate(&w));
     let mut checked = 0;
-    for t in crate::load::TABLES.iter().filter(|t| t.name != "generator_run") {
+    for t in crate::load::TABLES
+        .iter()
+        .filter(|t| t.name != "generator_run")
+    {
         let declared = t.key.into_iter().chain(
             crate::load::UNIQUE_KEYS
                 .iter()
@@ -1798,7 +1816,11 @@ fn every_declared_key_holds_on_every_written_row() {
             let mut seen = HashSet::new();
             for r in &rows.rows {
                 let value = rows.project(r, &cols(key)).expect("a key has no NULL");
-                assert!(seen.insert(value.clone()), "{} repeats ({key}) = {value:?}", t.name);
+                assert!(
+                    seen.insert(value.clone()),
+                    "{} repeats ({key}) = {value:?}",
+                    t.name
+                );
             }
             assert!(!seen.is_empty(), "{} has no rows", t.name);
             checked += 1;

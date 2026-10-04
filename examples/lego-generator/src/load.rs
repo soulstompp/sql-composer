@@ -724,9 +724,7 @@ pub async fn create_schema(pool: &PgPool, s: &Settings) -> Result<(), sqlx::Erro
         .iter()
         .filter(|t| !REFERENCE_TABLES.contains(&t.name))
     {
-        sqlx::query(&create_table(s, t))
-            .execute(pool)
-            .await?;
+        sqlx::query(&create_table(s, t)).execute(pool).await?;
     }
     Ok(())
 }
@@ -910,9 +908,7 @@ pub async fn load_reference_tables(
             .await
             .map_err(|e| err(t.name, enc.rows, e, false))?;
         let res = async {
-            sqlx::query(&create_table(s, t))
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(&create_table(s, t)).execute(&mut *tx).await?;
             copy_batch(&mut tx, s, t, &enc, s.freeze_reference_tables).await
         }
         .await;
@@ -1422,7 +1418,10 @@ mod tests {
             ["function", "composite", "unique", "search"]
         );
         assert_eq!(prefixes(Indexes::parse("none").unwrap()), ["function"]);
-        assert_eq!(prefixes(Indexes::parse("keys").unwrap()), ["function", "unique"]);
+        assert_eq!(
+            prefixes(Indexes::parse("keys").unwrap()),
+            ["function", "unique"]
+        );
     }
 
     #[test]

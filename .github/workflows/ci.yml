@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, revamp]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -93,3 +93,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p cargo-sqlc
+
+  test-lego-generator:
+    name: Test lego-generator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p lego-generator
+
+  verify-lego:
+    name: Verify the lego example's composed SQL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify

@@ -38,6 +38,12 @@ The database URL can also come from `LEGO_GENERATOR_DATABASE_URL`, never from th
 `DATABASE_URL`: the target schema is dropped and recreated, so the database has to be named on
 purpose.
 
+Both programs speak TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
+`?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
+also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
+names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
+offer it.
+
 ## Loading
 
 The load is hierarchical. A wave is `--chunk` root records (sets, or builders), written in one

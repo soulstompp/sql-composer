@@ -36,6 +36,8 @@ pub struct Wiring {
     pub cross_twins: f64,
     /// A builder's collection row falls outside the builder's home socket.
     pub cross_collections: f64,
+    /// The traps planted, of those `--traps` can leave out (`traps::can_leave_out`).
+    pub traps: BTreeSet<Trap>,
 }
 
 /// Purchases per set on offer, on average; each set's share follows its demand.
@@ -449,6 +451,10 @@ impl World {
                 Population::CollectionRows => (self.collection_rows(), false),
                 Population::Natural | Population::Phase => continue,
             };
+            if !self.wiring.traps.contains(&d.trap) {
+                self.planted.push((d.trap, 0));
+                continue;
+            }
             let want = d.planted(population);
             let mut r = Rng::stream(seed, Purpose::TrapPick, d.trap as u64);
             let mut got = 0u64;
@@ -457,7 +463,8 @@ impl World {
                 tries += 1;
                 if tries > 1000 * want + 100_000 {
                     return Err(format!(
-                        "trap {}: found {got} of {want} eligible rows in a population of {population}",
+                        "trap {}: found {got} of {want} eligible rows in a population of \
+                         {population}; leave it out of --traps to load without it",
                         d.trap
                     ));
                 }
@@ -484,7 +491,11 @@ impl World {
         }
         self.unreleased.sort_unstable();
         if self.row_traps.values().any(|(t, _)| *t == Trap::D5) && self.unreleased.is_empty() {
-            return Err("pre-orders need an unreleased or announced set".into());
+            return Err(
+                "trap D5 (pre-orders) needs an unreleased or announced set, which traps B2 and B5 \
+                 plant: name one of them in --traps, or leave D5 out"
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -526,8 +537,10 @@ impl World {
         (lettered, rerelease)
     }
 
+    /// Whether synthesized set `i` is a pack of the `paired` phase: its phase is `paired` and trap
+    /// O5 is planted. Without O5, the phase's sets are drawn as `natural` draws them.
     fn in_paired(&self, i: u64) -> bool {
-        self.board.phase_of(i).pattern == Pattern::Paired
+        self.board.phase_of(i).pattern == Pattern::Paired && self.wiring.traps.contains(&Trap::O5)
     }
 
     /// Whether synthesized set `i` is the `-2` record of set `i - 1`'s number.

@@ -15,8 +15,9 @@
 //! also has rows of its own leaves out its children's rows with a `NO INHERIT` CHECK. A table with
 //! two parents is a row of both, and a query through either parent reads it once.
 //!
-//! Every class has the generated table's primary key, and every class with rows of its own each of
-//! the generated table's composite indexes, reading time through the generated schema's `clock`.
+//! As `--indexes` asks, every class has the generated table's primary key, and every class with
+//! rows of its own each of the generated table's composite indexes, reading time through the
+//! generated schema's `clock`.
 //!
 //! After the build, a placement check reads every class's CHECKs back from the catalogue:
 //! - each hierarchy has exactly the generated table's rows;
@@ -31,7 +32,7 @@ use sqlx::PgConnection;
 use tracing::info;
 
 use crate::calendar::{ZONE_COUNTRIES, ZONE_NAMES};
-use crate::load::{index_name, CompositeIndex, COMPOSITE_INDEXES};
+use crate::load::{index_name, CompositeIndex, Indexes, COMPOSITE_INDEXES};
 
 /// The root themes of licensed sets, by name.
 pub const LICENSED: [&str; 10] = [
@@ -68,6 +69,96 @@ pub const HUES: [&str; 12] = [
 ];
 /// A colour whose strongest and weakest channels differ by less than this is neutral.
 pub const NEUTRAL_BELOW: u8 = 32;
+
+/// Which hierarchies are built: the sets', the colours' and the builders'.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Classes {
+    pub sets: bool,
+    pub colors: bool,
+    pub builders: bool,
+}
+
+impl Classes {
+    pub const ALL: Classes = Classes {
+        sets: true,
+        colors: true,
+        builders: true,
+    };
+    pub const NONE: Classes = Classes {
+        sets: false,
+        colors: false,
+        builders: false,
+    };
+
+    /// `none`, or a comma-separated list of `sets`, `colors` and `builders`.
+    pub fn parse(s: &str) -> Result<Classes, String> {
+        let mut out = Classes::NONE;
+        if s.trim() == "none" {
+            return Ok(out);
+        }
+        for item in s.split(',') {
+            match item.trim() {
+                "sets" => out.sets = true,
+                "colors" => out.colors = true,
+                "builders" => out.builders = true,
+                other => {
+                    return Err(format!(
+                        "--classes: want none, or a list of sets, colors and builders, \
+                         not `{other}`"
+                    ))
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The hierarchies `--classes` and `--oo-schema` ask for: `--classes` when given, else all
+    /// three with `--oo-schema` and none without. Refused when `--classes` names a hierarchy and
+    /// no schema is given to build it in, and when it names none and a schema is given, which
+    /// would keep an earlier load's rows there.
+    pub fn resolve(classes: Option<&str>, oo_schema: Option<&str>) -> Result<Classes, String> {
+        let resolved = match (classes, oo_schema) {
+            (Some(c), _) => Classes::parse(c)?,
+            (None, Some(_)) => Classes::ALL,
+            (None, None) => Classes::NONE,
+        };
+        if resolved.any() && oo_schema.is_none() {
+            return Err(format!(
+                "--classes {} needs --oo-schema, the schema the classes are built in",
+                resolved.name()
+            ));
+        }
+        if let (false, Some(oo)) = (resolved.any(), oo_schema) {
+            return Err(format!(
+                "--classes none with --oo-schema {oo}: {oo} would keep the classes of an earlier \
+                 load. Name the classes to build, or leave out --oo-schema"
+            ));
+        }
+        Ok(resolved)
+    }
+
+    pub fn any(&self) -> bool {
+        self.sets || self.colors || self.builders
+    }
+
+    /// The list as `--classes` takes it.
+    pub fn name(&self) -> String {
+        let names: Vec<&str> = [
+            ("sets", self.sets),
+            ("colors", self.colors),
+            ("builders", self.builders),
+        ]
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+        if names.is_empty() {
+            "none".into()
+        } else {
+            names.join(",")
+        }
+    }
+}
 
 /// What a class's CHECK tests.
 #[derive(Clone, Debug)]
@@ -512,34 +603,51 @@ async fn count(conn: &mut PgConnection, sql: &str) -> Result<i64, String> {
         .map_err(|e| format!("{e}: {sql}"))
 }
 
-/// Builds the classes in `oo` from the generated tables in `generated`, then runs the placement
+/// Builds the hierarchies `classes` names in `oo` from the generated tables in `generated`, each
+/// class with the primary key and the composite indexes `indexes` asks for, then runs the placement
 /// check on them.
-pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result<Built, String> {
+pub async fn build(
+    conn: &mut PgConnection,
+    generated: &str,
+    oo: &str,
+    classes: Classes,
+    indexes: Indexes,
+) -> Result<Built, String> {
     let mut steps = Vec::new();
     let started = Instant::now();
     exec(conn, &format!("DROP SCHEMA IF EXISTS {oo} CASCADE")).await?;
     exec(conn, &format!("CREATE SCHEMA {oo}")).await?;
-    exec(conn, &colour_wheel(oo)).await?;
-    let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(&format!(
-        "SELECT id, name, parent_id FROM {generated}.lego_themes"
-    ))
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|e| format!("reading the themes: {e}"))?;
-    let streets: BTreeMap<String, (i32, i32)> = sqlx::query_as::<_, (String, i32, i32)>(&format!(
-        "SELECT c.zone, min(s.street_id), max(s.street_id) \
-         FROM {generated}.lego_streets s \
-         JOIN {generated}.lego_postcodes p ON p.postcode_id = s.postcode_id \
-         JOIN {generated}.lego_cities c ON c.city_id = p.city_id \
-         GROUP BY c.zone"
-    ))
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|e| format!("reading the streets: {e}"))?
-    .into_iter()
-    .map(|(zone, lo, hi)| (zone, (lo, hi)))
-    .collect();
-    let hierarchies = [sets(&themes)?, colours(oo), builders(&streets)];
+    let mut hierarchies = Vec::new();
+    if classes.sets {
+        let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(&format!(
+            "SELECT id, name, parent_id FROM {generated}.lego_themes"
+        ))
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| format!("reading the themes: {e}"))?;
+        hierarchies.push(sets(&themes)?);
+    }
+    if classes.colors {
+        exec(conn, &colour_wheel(oo)).await?;
+        hierarchies.push(colours(oo));
+    }
+    if classes.builders {
+        let streets: BTreeMap<String, (i32, i32)> =
+            sqlx::query_as::<_, (String, i32, i32)>(&format!(
+                "SELECT c.zone, min(s.street_id), max(s.street_id) \
+                 FROM {generated}.lego_streets s \
+                 JOIN {generated}.lego_postcodes p ON p.postcode_id = s.postcode_id \
+                 JOIN {generated}.lego_cities c ON c.city_id = p.city_id \
+                 GROUP BY c.zone"
+            ))
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| format!("reading the streets: {e}"))?
+            .into_iter()
+            .map(|(zone, lo, hi)| (zone, (lo, hi)))
+            .collect();
+        hierarchies.push(builders(&streets));
+    }
 
     for h in &hierarchies {
         for c in &h.classes {
@@ -587,12 +695,14 @@ pub async fn build(conn: &mut PgConnection, generated: &str, oo: &str) -> Result
             .await?;
         }
         for c in &h.classes {
-            exec(
-                conn,
-                &format!("ALTER TABLE {oo}.{} ADD PRIMARY KEY ({})", c.name, h.key),
-            )
-            .await?;
-            for ix in h.composite_indexes(c) {
+            if indexes.keys {
+                exec(
+                    conn,
+                    &format!("ALTER TABLE {oo}.{} ADD PRIMARY KEY ({})", c.name, h.key),
+                )
+                .await?;
+            }
+            for ix in h.composite_indexes(c).into_iter().filter(|_| indexes.composite) {
                 let on = format!("{oo}.{}", c.name);
                 exec(
                     conn,
@@ -919,5 +1029,33 @@ mod tests {
                 > 1
         );
         assert!(built > 0);
+    }
+
+    #[test]
+    fn classes_are_none_or_a_list_and_any_other_word_is_refused() {
+        assert_eq!(Classes::parse("sets,colors,builders"), Ok(Classes::ALL));
+        assert_eq!(Classes::parse("none"), Ok(Classes::NONE));
+        assert_eq!(
+            Classes::parse(" builders , sets ").unwrap().name(),
+            "sets,builders"
+        );
+        for bad in ["all", "colours", "sets,themes", ""] {
+            assert!(Classes::parse(bad).is_err(), "{bad} was accepted");
+        }
+    }
+
+    #[test]
+    fn the_classes_follow_the_schema_and_a_mismatch_either_way_is_refused() {
+        assert_eq!(Classes::resolve(None, Some("oo")), Ok(Classes::ALL));
+        assert_eq!(Classes::resolve(None, None), Ok(Classes::NONE));
+        assert_eq!(Classes::resolve(Some("none"), None), Ok(Classes::NONE));
+        let e = Classes::resolve(Some("none"), Some("oo")).unwrap_err();
+        assert!(e.contains("Name the classes"), "{e}");
+        assert_eq!(
+            Classes::resolve(Some("colors"), Some("oo")).unwrap().name(),
+            "colors"
+        );
+        let e = Classes::resolve(Some("sets"), None).unwrap_err();
+        assert!(e.contains("--oo-schema"), "{e}");
     }
 }

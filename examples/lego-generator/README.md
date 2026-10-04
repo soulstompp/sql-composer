@@ -69,7 +69,17 @@ through the same function. Beside the composite indexes the load builds what a D
 searches they do not serve (`UNIQUE_KEYS` and `SEARCHES` in `src/load.rs`): the postcodes' unique
 code and a `text_pattern_ops` key for a code by its prefix, a GiST on the builders' homes by
 distance (`ll_to_earth`), and GINs on part names by their words and on part and set names by
-trigrams. It creates the extensions they need (`cube`, `earthdistance`, `pg_trgm`) in `public`.
+trigrams.
+
+`--indexes` says which of these are built: `keys` (the primary keys and the unique key),
+`composite` and `search`, as a list, or `none`. All three are built by default; the clock function
+is created whatever the list. The search indexes need the extensions `cube`, `earthdistance` and
+`pg_trgm`. When `search` is in the list, the generator creates each one in `public` before it writes
+anything, unless the database has it already, in any schema; each search index names the schema its
+extension is in. `earthdistance` is not a trusted extension, so only a superuser can create it: a
+role that is not one needs a superuser to run `CREATE EXTENSION earthdistance CASCADE` in the
+database first, or leaves `search` out of `--indexes`.
+
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
 leaves it on); then the tables are vacuumed and analysed. `--unlogged` creates unlogged tables for
 scratch runs, and `--synchronous-commit` sets the loading sessions' commit mode (off by default).
@@ -169,6 +179,14 @@ the collation or on ties, and dates across clock changes. Every planted row is l
 `trap_manifest`, with the phase, wave and socket it came from. The program prints each trap, its rate
 and how many it planted when it starts.
 
+`--traps` says which traps are planted: `all` (the default), `none`, or a list such as `K1,K3,D5`.
+Only the traps planted at a rate and O5, which the `paired` phase writes, can be left out; naming
+any other is refused. The others arise from the real catalogue, from the rows of other traps, or
+from how every wave is written, and are there whatever `--traps` says: so are the purchases that
+fall in a clock change or across a month by themselves. Without O5, the `paired` phase writes its
+sets as `natural` does. D5's pre-orders name a set that is not out yet, which only B2 and B5 plant,
+so D5 is refused without one of them.
+
 Every reference in the generated tables names a row its table holds, traps included:
 
 - a set of trap B3 with a theme the real catalogue's theme list does not hold carries a root theme
@@ -198,7 +216,15 @@ and of each composite index, unique key and search index, keyed by its name (`co
 PostgreSQL's table inheritance, in a schema of their own. That schema is dropped and recreated, and
 may not name `--schema` or `--source-schema`. Each hierarchy's root table keeps the generated
 table's name and columns. The rows are the generated rows, unchanged, and each is written to the
-table of its most specific class. Every class's CHECK reads the row's own columns:
+table of its most specific class.
+
+`--classes` says which hierarchies are built: `none`, or a list of `sets`, `colors` and `builders`.
+All three are built when it is left out. A list without `--oo-schema` is refused, since the classes
+need a schema of their own, and so is `--classes none` with it, since that schema would keep the
+classes of an earlier load: name the classes, or leave out `--oo-schema`. Nothing is dropped when
+either is refused.
+
+Every class's CHECK reads the row's own columns:
 
 - **Sets, by the root theme of their theme:**
   - `licensed`, holding the licensed sets, with `star_wars` under it;
@@ -221,10 +247,10 @@ table of its most specific class. Every class's CHECK reads the row's own column
 
 A class's CHECK, which its children inherit, is named `<class>_check`. A class that has rows of its
 own beside its children's leaves theirs out with a `NO INHERIT` CHECK named
-`<class>_no_inherit_check`. Each class has the generated table's primary key, and each class with
-rows of its own every one of the generated table's composite indexes. Every class is vacuumed and
-analysed. Read a hierarchy through its root, with the generated schema behind it for the other
-tables:
+`<class>_no_inherit_check`. As `--indexes` asks, each class has the generated table's primary key,
+and each class with rows of its own every one of the generated table's composite indexes. Every
+class is vacuumed and analysed. Read a hierarchy through its root, with the generated schema
+behind it for the other tables:
 
 ```sql
 SET search_path = lego_oo, lego;

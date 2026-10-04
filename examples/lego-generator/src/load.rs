@@ -37,6 +37,68 @@ pub enum IndexTiming {
     After,
 }
 
+/// Which of the generator's indexes are built: the primary and unique keys, the composite indexes
+/// (`COMPOSITE_INDEXES`), and the search indexes (`SEARCHES`) with the extensions they need.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Indexes {
+    pub keys: bool,
+    pub composite: bool,
+    pub search: bool,
+}
+
+impl Indexes {
+    #[cfg(test)]
+    pub const ALL: Indexes = Indexes {
+        keys: true,
+        composite: true,
+        search: true,
+    };
+
+    /// `none`, or a comma-separated list of `keys`, `composite` and `search`.
+    pub fn parse(s: &str) -> Result<Indexes, String> {
+        let mut out = Indexes {
+            keys: false,
+            composite: false,
+            search: false,
+        };
+        if s.trim() == "none" {
+            return Ok(out);
+        }
+        for item in s.split(',') {
+            match item.trim() {
+                "keys" => out.keys = true,
+                "composite" => out.composite = true,
+                "search" => out.search = true,
+                other => {
+                    return Err(format!(
+                        "--indexes: want none, or a list of keys, composite and search, \
+                         not `{other}`"
+                    ))
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The list as `--indexes` takes it.
+    pub fn name(&self) -> String {
+        let names: Vec<&str> = [
+            ("keys", self.keys),
+            ("composite", self.composite),
+            ("search", self.search),
+        ]
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+        if names.is_empty() {
+            "none".into()
+        } else {
+            names.join(",")
+        }
+    }
+}
+
 /// The session and table settings a load runs under.
 #[derive(Clone, Debug)]
 pub struct Settings {
@@ -44,6 +106,7 @@ pub struct Settings {
     pub format: Format,
     pub method: Method,
     pub index_timing: IndexTiming,
+    pub indexes: Indexes,
     pub unlogged: bool,
     pub synchronous_commit: bool,
     pub wave_timeout: String,
@@ -274,13 +337,30 @@ pub const UNIQUE_KEYS: &[(&str, &str, &str)] =
 
 /// An index a DBA adds beside the composite indexes, for a search they do not serve: a code by its
 /// prefix, a home by its distance, a name by its words or by a pattern. `sql` is what follows
-/// `ON <table>`, and `extensions` are created in the database, in `public`, before it is built.
+/// `ON <table>`, with `{<extension>}` standing for the schema an extension is in. `extensions` are
+/// created in `public` before it is built, unless the database has them already, in any schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Search {
     pub name: &'static str,
     pub table: &'static str,
     pub sql: &'static str,
     pub extensions: &'static [&'static str],
+}
+
+/// The schema each extension is in, as an identifier SQL can name it by, by extension name.
+pub type ExtensionSchemas = BTreeMap<String, String>;
+
+impl Search {
+    /// What follows `ON <table>`, each extension named by the schema `schemas` gives it, or by
+    /// `public`.
+    pub fn sql_in(&self, schemas: &ExtensionSchemas) -> String {
+        let mut sql = self.sql.to_string();
+        for e in self.extensions {
+            let schema = schemas.get(*e).map_or("public", String::as_str);
+            sql = sql.replace(&format!("{{{e}}}"), schema);
+        }
+        sql
+    }
 }
 
 pub const SEARCHES: &[Search] = &[
@@ -293,7 +373,7 @@ pub const SEARCHES: &[Search] = &[
     Search {
         name: "lego_builders_home_earth_idx",
         table: "lego_builders",
-        sql: "USING gist (public.ll_to_earth(latitude, longitude))",
+        sql: "USING gist ({earthdistance}.ll_to_earth(latitude, longitude))",
         extensions: &["cube", "earthdistance"],
     },
     Search {
@@ -305,13 +385,13 @@ pub const SEARCHES: &[Search] = &[
     Search {
         name: "lego_parts_name_trgm_idx",
         table: "lego_parts",
-        sql: "USING gin (name public.gin_trgm_ops)",
+        sql: "USING gin (name {pg_trgm}.gin_trgm_ops)",
         extensions: &["pg_trgm"],
     },
     Search {
         name: "lego_sets_name_trgm_idx",
         table: "lego_sets",
-        sql: "USING gin (name public.gin_trgm_ops)",
+        sql: "USING gin (name {pg_trgm}.gin_trgm_ops)",
         extensions: &["pg_trgm"],
     },
 ];
@@ -337,24 +417,48 @@ pub fn index_name(table: &str, parts: &[Part]) -> String {
     format!("{}_{digest:08x}", &full[..cut])
 }
 
-/// What `generator_run` records of the clock function and the indexes: each one's definition by its
-/// name.
-pub fn roster_rows(schema: &str) -> Vec<(String, String)> {
+/// The extensions the search indexes need, in the order they are created: none unless the search
+/// indexes are built.
+pub fn extensions_for(indexes: Indexes) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    if indexes.search {
+        for e in SEARCHES.iter().flat_map(|x| x.extensions.iter().copied()) {
+            if !out.contains(&e) {
+                out.push(e);
+            }
+        }
+    }
+    out
+}
+
+/// What `generator_run` records of the clock function and of the indexes built: each one's
+/// definition by its name, a search index's naming each extension by the schema it is in.
+pub fn roster_rows(
+    schema: &str,
+    indexes: Indexes,
+    extension_schemas: &ExtensionSchemas,
+) -> Vec<(String, String)> {
     let mut rows = vec![("function_clock".to_string(), clock_function(schema))];
-    for s in COMPOSITE_INDEXES {
-        rows.push((
-            format!("composite_{}", index_name(s.table, s.parts)),
-            format!("{} {}", s.table, s.definition(schema)),
-        ));
+    if indexes.composite {
+        for s in COMPOSITE_INDEXES {
+            rows.push((
+                format!("composite_{}", index_name(s.table, s.parts)),
+                format!("{} {}", s.table, s.definition(schema)),
+            ));
+        }
     }
-    for (table, name, columns) in UNIQUE_KEYS {
-        rows.push((format!("unique_{name}"), format!("{table} ({columns})")));
+    if indexes.keys {
+        for (table, name, columns) in UNIQUE_KEYS {
+            rows.push((format!("unique_{name}"), format!("{table} ({columns})")));
+        }
     }
-    for s in SEARCHES {
-        rows.push((
-            format!("search_{}", s.name),
-            format!("{} {}", s.table, s.sql),
-        ));
+    if indexes.search {
+        for s in SEARCHES {
+            rows.push((
+                format!("search_{}", s.name),
+                format!("{} {}", s.table, s.sql_in(extension_schemas)),
+            ));
+        }
     }
     rows
 }
@@ -574,7 +678,10 @@ pub async fn server_settings(pool: &PgPool) -> Vec<(String, String)> {
     out
 }
 
-fn create_table(s: &Settings, t: &TableDef, with_key: bool) -> String {
+/// A table as `CREATE TABLE` makes it, with its primary key when the keys are built before the
+/// load.
+fn create_table(s: &Settings, t: &TableDef) -> String {
+    let with_key = s.indexes.keys && s.index_timing == IndexTiming::Before;
     let key = match (with_key, t.key) {
         (true, Some(k)) => format!(", PRIMARY KEY ({k})"),
         _ => String::new(),
@@ -605,11 +712,49 @@ pub async fn create_schema(pool: &PgPool, s: &Settings) -> Result<(), sqlx::Erro
         .iter()
         .filter(|t| !REFERENCE_TABLES.contains(&t.name))
     {
-        sqlx::query(&create_table(s, t, s.index_timing == IndexTiming::Before))
+        sqlx::query(&create_table(s, t))
             .execute(pool)
             .await?;
     }
     Ok(())
+}
+
+/// Creates in `public` the extensions the search indexes need, when they are built and the
+/// database does not have them already in some schema, and returns the schema each one is in. Run
+/// before the load, so that a role that may not create one stops before anything is written.
+pub async fn create_extensions(pool: &PgPool, s: &Settings) -> Result<ExtensionSchemas, String> {
+    let wanted = extensions_for(s.indexes);
+    for e in &wanted {
+        sqlx::query(&format!(
+            "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA public"
+        ))
+        .execute(pool)
+        .await
+        .map_err(|err| {
+            format!(
+                "creating extension {e}: {err}. The search indexes need cube, earthdistance and \
+                 pg_trgm, in any schema; earthdistance can be created only by a superuser, so \
+                 have one run `CREATE EXTENSION earthdistance CASCADE` in this database, or \
+                 leave search out of --indexes"
+            )
+        })?;
+    }
+    let names: Vec<String> = wanted.iter().map(|e| e.to_string()).collect();
+    let schemas: ExtensionSchemas = sqlx::query_as::<_, (String, String)>(
+        "SELECT e.extname::text, quote_ident(n.nspname)::text \
+         FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace \
+         WHERE e.extname = ANY($1)",
+    )
+    .bind(&names)
+    .fetch_all(pool)
+    .await
+    .map_err(|err| format!("reading the extensions' schemas: {err}"))?
+    .into_iter()
+    .collect();
+    for (e, schema) in &schemas {
+        info!(extension = %e, schema = %schema, "extension ready");
+    }
+    Ok(schemas)
 }
 
 async fn copy_batch(
@@ -753,7 +898,7 @@ pub async fn load_reference_tables(
             .await
             .map_err(|e| err(t.name, enc.rows, e, false))?;
         let res = async {
-            sqlx::query(&create_table(s, t, s.index_timing == IndexTiming::Before))
+            sqlx::query(&create_table(s, t))
                 .execute(&mut *tx)
                 .await?;
             copy_batch(&mut tx, s, t, &enc, s.freeze_reference_tables).await
@@ -976,16 +1121,26 @@ pub async fn watch_progress(
     }
 }
 
-/// After the load: keys (when built after), autovacuum back on, the clock function and then the
-/// composite indexes, the unique keys and the search indexes, statistics, the visibility map.
+/// After the load: the primary keys (when built after), autovacuum back on, the clock function and
+/// then the composite indexes, the unique keys and the search indexes, each as `--indexes` asks,
+/// statistics, the visibility map. A search index names each extension by the schema
+/// `extension_schemas` gives it.
 pub async fn finish(
     conn: &mut PgConnection,
     s: &Settings,
+    extension_schemas: &ExtensionSchemas,
 ) -> Result<Vec<(String, Duration)>, sqlx::Error> {
     let mut steps = Vec::new();
+    let composite: &[CompositeIndex] = if s.indexes.composite {
+        COMPOSITE_INDEXES
+    } else {
+        &[]
+    };
+    let unique: &[(&str, &str, &str)] = if s.indexes.keys { UNIQUE_KEYS } else { &[] };
+    let searches: &[Search] = if s.indexes.search { SEARCHES } else { &[] };
     for t in &TABLES {
         let name = t.name;
-        if s.index_timing == IndexTiming::After {
+        if s.indexes.keys && s.index_timing == IndexTiming::After {
             if let Some(k) = t.key {
                 let started = Instant::now();
                 sqlx::query(&format!(
@@ -1012,7 +1167,7 @@ pub async fn finish(
     sqlx::query(&clock_function(&s.schema))
         .execute(&mut *conn)
         .await?;
-    for ix in COMPOSITE_INDEXES {
+    for ix in composite {
         let started = Instant::now();
         let name = index_name(ix.table, ix.parts);
         let on = format!("{}.{}", s.schema, ix.table);
@@ -1027,7 +1182,7 @@ pub async fn finish(
             "composite index built"
         );
     }
-    for (table, name, columns) in UNIQUE_KEYS {
+    for (table, name, columns) in unique {
         let started = Instant::now();
         sqlx::query(&format!(
             "ALTER TABLE {}.{table} ADD CONSTRAINT {name} UNIQUE ({columns})",
@@ -1043,23 +1198,14 @@ pub async fn finish(
             "unique key built"
         );
     }
-    let mut extensions: Vec<&str> = SEARCHES
-        .iter()
-        .flat_map(|x| x.extensions.iter().copied())
-        .collect();
-    extensions.dedup();
-    for e in extensions {
-        sqlx::query(&format!(
-            "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA public"
-        ))
-        .execute(&mut *conn)
-        .await?;
-    }
-    for x in SEARCHES {
+    for x in searches {
         let started = Instant::now();
         sqlx::query(&format!(
             "CREATE INDEX {} ON {}.{} {}",
-            x.name, s.schema, x.table, x.sql
+            x.name,
+            s.schema,
+            x.table,
+            x.sql_in(extension_schemas)
         ))
         .execute(&mut *conn)
         .await?;
@@ -1139,4 +1285,132 @@ pub async fn write_run(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(indexes: Indexes, index_timing: IndexTiming) -> Settings {
+        Settings {
+            schema: "lego".into(),
+            format: Format::Binary,
+            method: Method::Copy,
+            index_timing,
+            indexes,
+            unlogged: false,
+            synchronous_commit: false,
+            wave_timeout: "300s".into(),
+            build_timeout: "3600s".into(),
+            maintenance_work_mem: "1GB".into(),
+            parallel_maintenance_workers: 4,
+            freeze_reference_tables: false,
+            analyze: true,
+            vacuum: true,
+            autovacuum_during_load: false,
+        }
+    }
+
+    #[test]
+    fn indexes_are_none_or_a_list_and_any_other_word_is_refused() {
+        assert_eq!(Indexes::parse("keys,composite,search"), Ok(Indexes::ALL));
+        let two = Indexes {
+            keys: true,
+            composite: false,
+            search: true,
+        };
+        assert_eq!(Indexes::parse(" search , keys "), Ok(two));
+        let none = Indexes::parse("none").unwrap();
+        assert!(!none.keys && !none.composite && !none.search);
+        assert_eq!(none.name(), "none");
+        assert_eq!(Indexes::parse("composite").unwrap().name(), "composite");
+        assert_eq!(Indexes::ALL.name(), "keys,composite,search");
+        for bad in ["all", "keys,btree", ""] {
+            assert!(Indexes::parse(bad).is_err(), "{bad} was accepted");
+        }
+    }
+
+    #[test]
+    fn the_extensions_are_created_only_for_the_search_indexes() {
+        assert_eq!(
+            extensions_for(Indexes::ALL),
+            ["cube", "earthdistance", "pg_trgm"]
+        );
+        let no_search = Indexes {
+            search: false,
+            ..Indexes::ALL
+        };
+        assert!(extensions_for(no_search).is_empty());
+    }
+
+    #[test]
+    fn a_search_index_names_each_extension_by_the_schema_it_is_in() {
+        let sql = |name: &str, schemas: &ExtensionSchemas| {
+            SEARCHES
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap()
+                .sql_in(schemas)
+        };
+        let unknown = ExtensionSchemas::new();
+        assert_eq!(
+            sql("lego_builders_home_earth_idx", &unknown),
+            "USING gist (public.ll_to_earth(latitude, longitude))"
+        );
+        assert_eq!(
+            sql("lego_sets_name_trgm_idx", &unknown),
+            "USING gin (name public.gin_trgm_ops)"
+        );
+        let elsewhere: ExtensionSchemas = [
+            ("cube", "geo"),
+            ("earthdistance", "geo"),
+            ("pg_trgm", "\"Text Search\""),
+        ]
+        .into_iter()
+        .map(|(e, s)| (e.to_string(), s.to_string()))
+        .collect();
+        assert_eq!(
+            sql("lego_builders_home_earth_idx", &elsewhere),
+            "USING gist (geo.ll_to_earth(latitude, longitude))"
+        );
+        assert_eq!(
+            sql("lego_parts_name_trgm_idx", &elsewhere),
+            "USING gin (name \"Text Search\".gin_trgm_ops)"
+        );
+        for s in SEARCHES {
+            assert!(!s.sql_in(&elsewhere).contains('{'), "{}", s.name);
+        }
+    }
+
+    #[test]
+    fn generator_run_records_only_the_indexes_built() {
+        let prefixes = |indexes: Indexes| -> Vec<String> {
+            let mut p: Vec<String> = roster_rows("lego", indexes, &ExtensionSchemas::new())
+                .into_iter()
+                .map(|(k, _)| k.split('_').next().unwrap().to_string())
+                .collect();
+            p.dedup();
+            p
+        };
+        assert_eq!(
+            prefixes(Indexes::ALL),
+            ["function", "composite", "unique", "search"]
+        );
+        assert_eq!(prefixes(Indexes::parse("none").unwrap()), ["function"]);
+        assert_eq!(prefixes(Indexes::parse("keys").unwrap()), ["function", "unique"]);
+    }
+
+    #[test]
+    fn a_table_is_created_with_its_primary_key_only_when_keys_are_built_before_the_load() {
+        let t = table("lego_sets");
+        let with_key =
+            |indexes, timing| create_table(&settings(indexes, timing), t).contains("PRIMARY KEY");
+        let no_keys = Indexes {
+            keys: false,
+            ..Indexes::ALL
+        };
+        assert!(with_key(Indexes::ALL, IndexTiming::Before));
+        assert!(!with_key(Indexes::ALL, IndexTiming::After));
+        assert!(!with_key(no_keys, IndexTiming::Before));
+    }
 }

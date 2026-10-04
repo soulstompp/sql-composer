@@ -225,6 +225,7 @@ fn wiring(sets: u64, chunk: u64) -> Wiring {
         cross_versions: 0.2,
         cross_twins: 0.0,
         cross_collections: 0.6,
+        traps: crate::traps::all_planted(),
     }
 }
 
@@ -241,9 +242,21 @@ fn dials() -> Dials {
 }
 
 fn world(sets: u64, chunk: u64, patch: &str) -> World {
+    world_planting(sets, chunk, patch, crate::traps::all_planted()).expect("world")
+}
+
+/// A world that plants only `traps` of the traps `--traps` can leave out.
+fn world_planting(
+    sets: u64,
+    chunk: u64,
+    patch: &str,
+    traps: BTreeSet<Trap>,
+) -> Result<World, String> {
     let real = Real::new(fixture());
     let board = Switchboard::new(&real, patch, dials(), sets, chunk).expect("patch");
-    World::new(real, wiring(sets, chunk), board).expect("world")
+    let mut wiring = wiring(sets, chunk);
+    wiring.traps = traps;
+    World::new(real, wiring, board)
 }
 
 struct Everything {
@@ -1532,6 +1545,31 @@ fn each_composite_index_includes_the_columns_its_expressions_read() {
     assert!(expressions > 0);
 }
 
+/// Each composite index lists its plain columns before its expressions: no column of the table
+/// follows an expression in its key. Some index has an expression, so the order is checked on one.
+#[test]
+fn each_composite_index_lists_its_plain_columns_before_its_expressions() {
+    let mut with_expressions = 0;
+    for s in COMPOSITE_INDEXES {
+        let first_expression = s
+            .parts
+            .iter()
+            .position(|p| matches!(p, KeyPart::Expression { .. }));
+        let Some(at) = first_expression else {
+            continue;
+        };
+        with_expressions += 1;
+        assert!(
+            s.parts[at..]
+                .iter()
+                .all(|p| matches!(p, KeyPart::Expression { .. })),
+            "{} lists a column after an expression",
+            index_name(s.table, s.parts)
+        );
+    }
+    assert!(with_expressions > 0);
+}
+
 /// The example's migration builds on the dump's tables exactly the composite indexes the generator
 /// builds on them, in the same order and under the same names, none with an expression, since the
 /// example makes no clock function.
@@ -1644,4 +1682,79 @@ fn every_named_size_fits_the_tables_integers() {
             size.name()
         );
     }
+}
+
+/// A trap left out of `--traps` is planted on no row, and every other trap is planted as often as
+/// when all are. Each left out trap is planted when all are, so the run has something to leave out.
+#[test]
+fn a_trap_left_out_is_planted_nowhere_and_every_other_as_often() {
+    let patch = "natural:60,wavy:20,interleaved:10,paired:10";
+    let left_out = [Trap::K3, Trap::K7, Trap::B3, Trap::D3, Trap::O5];
+    let mut traps = crate::traps::all_planted();
+    for t in left_out {
+        assert!(traps.remove(&t), "{t}");
+    }
+    let all = world(3000, 100, patch);
+    let some = world_planting(3000, 100, patch, traps).expect("world");
+    let planted = |w: &World, trap: Trap| w.planted.iter().find(|p| p.0 == trap).map(|p| p.1);
+    for d in DECLS {
+        let (a, s) = (planted(&all, d.trap), planted(&some, d.trap));
+        if left_out.contains(&d.trap) && d.trap != Trap::O5 {
+            assert!(a.unwrap() > 0, "{}", d.trap);
+            assert_eq!(s, Some(0), "{}", d.trap);
+        } else {
+            assert_eq!(s, a, "{}", d.trap);
+        }
+    }
+    for (trap, _) in some.set_traps.values().chain(some.row_traps.values()) {
+        assert!(!left_out.contains(trap), "{trap} planted");
+    }
+    assert!(!all.added_themes().is_empty());
+    assert!(some.added_themes().is_empty());
+    let o5 = |w: &World| {
+        let e = generate(w);
+        e.sets
+            .iter()
+            .flat_map(|wave| wave.manifest.iter())
+            .filter(|m| m.trap == Trap::O5)
+            .count()
+    };
+    assert!(o5(&all) > 0);
+    assert_eq!(o5(&some), 0);
+    let db = written(&some, &generate(&some));
+    let c = &db["lego_collection"];
+    let typed = c.at("typed_name");
+    assert!(c.rows.iter().all(|r| r[typed].is_none()));
+}
+
+/// With no trap planted, no row is picked for one and the paired phase writes no pair, while the
+/// real catalogue's own trapped rows are listed exactly as when every trap is planted.
+#[test]
+fn with_no_trap_planted_the_real_catalogue_keeps_its_own_trapped_rows() {
+    let patch = "natural:90,paired:10";
+    let all = world(1500, 100, patch);
+    let none = world_planting(1500, 100, patch, BTreeSet::new()).expect("world");
+    assert!(none.set_traps.is_empty() && none.row_traps.is_empty());
+    assert!(none.planted.iter().all(|p| p.1 == 0));
+    let rows = |w: &World| manifest_rows(&written(w, &generate(w)));
+    let (all_rows, none_rows) = (rows(&all), rows(&none));
+    assert!(!none_rows.iter().any(|m| m.0 == "O5"));
+    let real = |rows: &[(String, String, String, String)]| {
+        sorted(rows.iter().filter(|m| m.1 == "real").cloned())
+    };
+    assert!(!real(&none_rows).is_empty());
+    assert_eq!(real(&none_rows), real(&all_rows));
+}
+
+/// Pre-orders (D5) name a set that is not out yet, which only traps B2 and B5 plant, so D5 alone is
+/// refused before anything is generated.
+#[test]
+fn pre_orders_without_an_unreleased_set_are_refused() {
+    let only_d5: BTreeSet<Trap> = [Trap::D5].into_iter().collect();
+    match world_planting(500, 100, "natural:100", only_d5) {
+        Ok(_) => panic!("D5 was planted without an unreleased set"),
+        Err(e) => assert!(e.contains("B2") && e.contains("--traps"), "{e}"),
+    }
+    let with_b2: BTreeSet<Trap> = [Trap::D5, Trap::B2].into_iter().collect();
+    assert!(world_planting(500, 100, "natural:100", with_b2).is_ok());
 }

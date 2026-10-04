@@ -150,6 +150,10 @@ struct Cli {
     second_version_ppm: u32,
     #[arg(long, default_value_t = 150_000)]
     recolour_ppm: u32,
+    /// The traps planted: `all`, `none`, or a list of traps (`K1,D3,…`). Only the traps planted
+    /// at a rate or written by a phase can be left out; the others arise from the real catalogue.
+    #[arg(long, default_value = "all")]
+    traps: String,
     /// COPY payload format.
     #[arg(long, default_value = "binary")]
     copy_format: String,
@@ -159,6 +163,11 @@ struct Cli {
     /// Build the primary keys `before` or `after` the load.
     #[arg(long, default_value = "after")]
     index_timing: String,
+    /// The generator's indexes to build: `none`, or a list of `keys` (the primary and unique keys),
+    /// `composite` (the composite indexes for the joins) and `search` (the search indexes, with the
+    /// extensions they need).
+    #[arg(long, default_value = "keys,composite,search")]
+    indexes: String,
     /// Create the tables UNLOGGED (for scratch runs).
     #[arg(long)]
     unlogged: bool,
@@ -199,6 +208,10 @@ struct Cli {
     /// inheritance.
     #[arg(long)]
     oo_schema: Option<String>,
+    /// The hierarchies built in `--oo-schema`: `none`, or a list of `sets`, `colors` and
+    /// `builders`. All three when absent and `--oo-schema` is given; none without it.
+    #[arg(long)]
+    classes: Option<String>,
     /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
     /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
     #[arg(long)]
@@ -278,6 +291,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             ));
         }
     }
+    let classes = oo::Classes::resolve(cli.classes.as_deref(), cli.oo_schema.as_deref())?;
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let build_timeout = cli
         .build_timeout
@@ -296,6 +310,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 ))
             }
         },
+        indexes: load::Indexes::parse(&cli.indexes)?,
         unlogged: cli.unlogged,
         synchronous_commit: on(&cli.synchronous_commit)?,
         wave_timeout: cli.wave_timeout.clone(),
@@ -346,6 +361,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         lines = real.cat.lines.len(),
         "real catalogue read"
     );
+    let extension_schemas = if cli.dry_run {
+        load::ExtensionSchemas::new()
+    } else {
+        load::create_extensions(&pool, &settings).await?
+    };
 
     let builders = builders_for(sets + real.cat.sets.len() as u64);
     let wiring = Wiring {
@@ -364,6 +384,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         cross_versions: cli.cross_versions.unwrap_or(real.version_crossing.rate()),
         cross_twins: cli.cross_twins.unwrap_or(real.twin_crossing.rate()),
         cross_collections: cli.cross_collections,
+        traps: traps::parse_list(&cli.traps)?,
     };
     let dials = Dials {
         wavy_period: cli.wavy_period,
@@ -499,9 +520,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             cli.second_version_ppm.to_string(),
         ),
         ("recolour_ppm".into(), cli.recolour_ppm.to_string()),
+        ("traps".into(), traps::list_name(&wiring.traps)),
         ("copy_format".into(), settings.format.name().into()),
         ("method".into(), cli.method.clone()),
         ("index_timing".into(), cli.index_timing.clone()),
+        ("indexes".into(), settings.indexes.name()),
         ("unlogged".into(), cli.unlogged.to_string()),
         ("synchronous_commit".into(), cli.synchronous_commit.clone()),
         ("freeze_reference_tables".into(), cli.freeze.to_string()),
@@ -513,6 +536,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             "oo_schema".into(),
             cli.oo_schema.clone().unwrap_or_default(),
         ),
+        ("classes".into(), classes.name()),
     ];
     for d in DECLS {
         let planted = world
@@ -528,7 +552,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             ),
         ));
     }
-    run_rows.extend(load::roster_rows(&settings.schema));
+    run_rows.extend(load::roster_rows(
+        &settings.schema,
+        settings.indexes,
+        &extension_schemas,
+    ));
     for (k, v) in &server {
         run_rows.push((format!("server_{k}"), v.clone()));
     }
@@ -711,11 +739,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         let mut conn = load::build_session(&cli.database_url, &settings)
             .await
             .map_err(|e| format!("build session: {e}"))?;
-        steps = load::finish(&mut conn, &settings)
+        steps = load::finish(&mut conn, &settings, &extension_schemas)
             .await
             .map_err(|e| format!("finish: {e}"))?;
-        if let Some(oo) = &cli.oo_schema {
-            let built = oo::build(&mut conn, &cli.schema, oo).await?;
+        if let (Some(oo), true) = (&cli.oo_schema, classes.any()) {
+            let built = oo::build(&mut conn, &cli.schema, oo, classes, settings.indexes).await?;
             steps.extend(built.steps);
             oo_rows = built.rows;
         }

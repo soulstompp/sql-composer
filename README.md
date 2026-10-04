@@ -50,6 +50,8 @@ Reading and adapting to `.sqlc` templates is fairly straightforward, but designi
 
 The examples below use the [Lego database](https://www.kaggle.com/datasets/rtatman/lego-database) ([SQL](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql)), which has sets, parts, colors, themes, inventories, and the joins between them. It's a good fit because even simple questions ("what parts are in this set, with colors and categories?") require a 4-table join — exactly the kind of logic you'd want to write once and reuse.
 
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
+
 ### The problem: duplicated joins
 
 Suppose you need to query the full part details for a set. The join chain is always the same:
@@ -767,7 +769,7 @@ crates/
   cargo-sqlc/             # CLI pre-compiler
 examples/
   lego/                   # Runnable example: every template feature on the Lego database
-  lego-generator/         # Builds a large catalogue from the Lego database and loads it into Postgres
+  lego-generator/         # sqlc-brickgen: a large catalogue built from the Lego database, for Postgres
 ```
 
 ## Core Library Features

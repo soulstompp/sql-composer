@@ -2,9 +2,10 @@
 
 ## 0.0.1
 
-The first release on crates.io. The generator first shipped as an example in sql-composer 0.0.4,
-which describes it as it was then; these are the changes since.
+The first release on crates.io. The generator first shipped as `lego-generator`, an example in
+sql-composer 0.0.4, which describes it as it was then; these are the changes since.
 
+- **Named sqlc-brickgen** — The package and its binary are `sqlc-brickgen`, formerly `lego-generator`. Its sessions name themselves `sqlc-brickgen/<n>` in `application_name`, and the one that builds the indexes `sqlc-brickgen/build`; they were `lego-loader/…`. The database URL can come from `SQLC_BRICKGEN_DATABASE_URL`, which was `LEGO_GENERATOR_DATABASE_URL`. The tables keep their `lego_*` names.
 - **Sizes past huge** — `--size` also takes `8m`, `80m` and `800m`, the number of synthesized sets in millions. Set numbers stay distinct past nine million sets, and a set count whose inventory ids would pass `integer` is refused. Each key, statistics and vacuum build may run an hour for every two million sets unless `--build-timeout` says otherwise.
 - **Builders in real cities** — Builders live on made-up streets in real cities, Natural Earth's populated places (`data/cities.tsv`, public domain), with postcodes in each country's format. The new tables `lego_cities`, `lego_postcodes` and `lego_streets` hold them, and a builder's zone is read through their street. Every purchase instant has a second and a millisecond, and its wall-clock reading is written to the millisecond.
 - **A purchase reaches its set through its collection row** — A collection row names its set by `set_num`, and keeps what the builder typed, where they typed it their own way, in `typed_set_num` or `typed_name`. A purchase names its row by `(builder_id, row_no)`, and a row's copies are counted from its purchases. Every reference in the generated tables names a row its table holds, traps included.

@@ -1,13 +1,18 @@
 [package]
-name = "lego-generator"
+name = "sqlc-brickgen"
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
-publish = false
-description = "Generates a large LEGO catalogue, with builders' collections and purchase logs, and loads it into Postgres in hierarchical waves"
+repository = "https://github.com/soulstompp/sql-composer"
+readme = "README.md"
+rust-version = "1.87"
+keywords = ["postgres", "test-data", "generator", "benchmark", "partitioning"]
+categories = ["command-line-utilities", "database", "development-tools::testing"]
+include = ["src/**", "data/cities.tsv", "README.md", "CHANGELOG.md", "LICENSE"]
+description = "Generates a large LEGO-style catalogue, with builders' collections and purchase logs, and loads it into Postgres in hierarchical waves"
 
 [[bin]]
-name = "lego-generator"
+name = "sqlc-brickgen"
 path = "src/main.rs"
 
 [dependencies]

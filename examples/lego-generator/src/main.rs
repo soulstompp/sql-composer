@@ -80,13 +80,13 @@ enum LogFormat {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "lego-generator",
-    about = "Generate a large LEGO catalogue and load it into Postgres in hierarchical waves"
+    name = "sqlc-brickgen",
+    about = "Generate a large LEGO-style catalogue and load it into Postgres in hierarchical waves"
 )]
 struct Cli {
     /// Postgres connection URL. Its own variable, never the general `DATABASE_URL`, because the
     /// target schema is dropped and recreated.
-    #[arg(long, env = "LEGO_GENERATOR_DATABASE_URL", hide_env_values = true)]
+    #[arg(long, env = "SQLC_BRICKGEN_DATABASE_URL", hide_env_values = true)]
     database_url: String,
     /// Schema holding the real `lego_*` tables to draw from.
     #[arg(long, default_value = "public")]

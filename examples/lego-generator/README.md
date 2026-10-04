@@ -1,7 +1,8 @@
-# LEGO catalogue generator
+# sqlc-brickgen
 
-Builds a large LEGO catalogue from a real one and loads it into Postgres, together with builders,
-their collections and their purchase logs.
+`sqlc-brickgen` builds a large LEGO-style catalogue from a real one and loads it into Postgres,
+together with builders, their collections and their purchase logs. LEGO® is a trademark of the LEGO
+Group, which does not sponsor, authorise or endorse this project.
 
 The real catalogue is the eight `lego_*` tables (colours, themes, part categories, parts, sets,
 inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them once,
@@ -17,7 +18,7 @@ database it names. Name the same database in both commands. From the repository 
 
 ```sh
 cargo run -p lego-example -- --database-url postgres://localhost:5432/sqlc_lego setup
-cargo run --release -p lego-generator -- --database-url postgres://localhost:5432/sqlc_lego --size small
+cargo run --release -p sqlc-brickgen -- --database-url postgres://localhost:5432/sqlc_lego --size small
 ```
 
 Without `--size`, the generator builds `huge`: about 2 million synthesized sets, with their
@@ -38,7 +39,7 @@ postcodes, names, stores and calendar stay the same at every size, so a bigger s
 The same `--sets`, `--seed` and wiring flags give the same rows. Each key, statistics and vacuum
 build may run an hour for every two million sets unless `--build-timeout` says otherwise.
 
-The database URL can also come from `LEGO_GENERATOR_DATABASE_URL`, never from the general
+The database URL can also come from `SQLC_BRICKGEN_DATABASE_URL`, never from the general
 `DATABASE_URL`: the target schema is dropped and recreated, so the database has to be named on
 purpose.
 
@@ -234,8 +235,10 @@ Every reference in the generated tables names a row its table holds, traps inclu
 ## Output
 
 Logs go to standard error: `RUST_LOG` filters them, and `--log-format json` writes JSON. Every
-session names itself `lego-loader/<n>` in `application_name`. A progress line, with the COPY
-statements then running, is logged every `--log-progress-every` seconds.
+loading session names itself `sqlc-brickgen/<n>` in `application_name`, and the session that builds
+the keys and indexes after the load `sqlc-brickgen/build`, so `pg_stat_activity` shows which
+sessions are the generator's. A progress line, with the COPY statements then running, is logged
+every `--log-progress-every` seconds.
 
 On standard output, the lines starting `SUMMARY` hold the run's figures: the resolved configuration,
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
@@ -416,5 +419,5 @@ rows, and the `SUMMARY size` lines each copied table's size with all its partiti
 ## Tests
 
 ```sh
-cargo test -p lego-generator
+cargo test -p sqlc-brickgen
 ```

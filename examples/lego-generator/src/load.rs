@@ -589,7 +589,7 @@ fn sqlstate(e: &sqlx::Error) -> (Option<String>, String) {
     }
 }
 
-/// A pool whose every session names itself `lego-loader/<n>` and carries the load's settings.
+/// A pool whose every session names itself `sqlc-brickgen/<n>` and carries the load's settings.
 pub async fn pool(url: &str, size: u32, s: &Settings) -> Result<PgPool, sqlx::Error> {
     let counter = Arc::new(AtomicU64::new(0));
     let sync = if s.synchronous_commit { "on" } else { "off" };
@@ -605,7 +605,7 @@ pub async fn pool(url: &str, size: u32, s: &Settings) -> Result<PgPool, sqlx::Er
             let sync = sync.to_string();
             let timeout = timeout.clone();
             Box::pin(async move {
-                sqlx::query(&format!("SET application_name = 'lego-loader/{n}'"))
+                sqlx::query(&format!("SET application_name = 'sqlc-brickgen/{n}'"))
                     .execute(&mut *conn)
                     .await?;
                 sqlx::query(&format!("SET synchronous_commit = {sync}"))
@@ -631,7 +631,7 @@ pub async fn build_session(url: &str, s: &Settings) -> Result<PgConnection, sqlx
         .log_statements(log::LevelFilter::Debug);
     let mut c = PgConnection::connect_with(&opts).await?;
     for q in [
-        "SET application_name = 'lego-loader/build'".to_string(),
+        "SET application_name = 'sqlc-brickgen/build'".to_string(),
         format!("SET statement_timeout = '{}'", s.build_timeout),
         format!("SET maintenance_work_mem = '{}'", s.maintenance_work_mem),
         format!(
@@ -1099,7 +1099,7 @@ pub async fn watch_progress(
         let rows: Result<Vec<(String, String, i64, i64)>, _> = sqlx::query_as(
             "SELECT a.application_name::text, p.relid::regclass::text, p.tuples_processed, p.bytes_processed \
              FROM pg_stat_progress_copy p JOIN pg_stat_activity a USING (pid) \
-             WHERE a.application_name LIKE 'lego-loader/%' ORDER BY 1",
+             WHERE a.application_name LIKE 'sqlc-brickgen/%' ORDER BY 1",
         )
         .fetch_all(&pool)
         .await;

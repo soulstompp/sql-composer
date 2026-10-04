@@ -63,7 +63,7 @@ Thank you! We'll try to respond as quickly as possible.
      cargo-sqlc/             # CLI tool
    examples/
      lego/                   # Runnable example on the Lego database (lego-example)
-     lego-generator/         # Large catalogue generator for Postgres (lego-generator)
+     lego-generator/         # Large catalogue generator for Postgres (sqlc-brickgen)
    ```
 
 5. **Database setup for integration tests** (optional)
@@ -100,7 +100,7 @@ Thank you! We'll try to respond as quickly as possible.
    cargo test -p cargo-sqlc
 
    # The catalogue generator's tests, which need no database
-   cargo test -p lego-generator
+   cargo test -p sqlc-brickgen
 
    # Check that the lego example's committed .sql files are what its templates compose to
    cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify

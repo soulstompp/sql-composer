@@ -94,13 +94,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p cargo-sqlc
 
-  test-lego-generator:
-    name: Test lego-generator
+  test-sqlc-brickgen:
+    name: Test sqlc-brickgen
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p lego-generator
+      - run: cargo test -p sqlc-brickgen
 
   verify-lego:
     name: Verify the lego example's composed SQL

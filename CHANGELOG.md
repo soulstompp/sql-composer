@@ -4,10 +4,9 @@
 
 ### examples
 
-- **Lego example's composed statements refreshed** — The committed `.sql` files had fallen behind their templates: several differed, and those of the newer templates were missing. They are composed again, and CI checks them with `cargo sqlc compose --verify`. A line with no category, part name or colour name now sorts after the named ones, and a set with no part count first within its year, on every database: each `ORDER BY` says so with an `IS NULL` term, since databases disagree on where a NULL sorts.
-- **Composite indexes migration** — `migrations/20260930000000_composite_indexes.sql` gives the dump's tables the composite indexes a DBA adds for the example's joins, each led by the column the join into its table fixes and ending on the column the next join reads, or holding it in `INCLUDE`. `setup` and `migrate` run it, and it is safe to run again.
 - **TLS** — The Lego example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
-- **Lego catalogue generator** — Its changes are in its own changelog, [`examples/lego-generator/CHANGELOG.md`](examples/lego-generator/CHANGELOG.md).
+- **The composed statements are checked** — CI runs `cargo sqlc compose --verify` on the Lego example, so its `.sql` files can no longer fall behind their templates. Its composite indexes migration is now `migrations/20260930000000_composite_indexes.sql`.
+- **The catalogue generator is `sqlc-brickgen`** — `examples/lego-generator/` builds the crate and binary `sqlc-brickgen`, formerly `lego-generator`, with its own version and its own changelog, [`examples/lego-generator/CHANGELOG.md`](examples/lego-generator/CHANGELOG.md).
 
 ## 0.0.4
 
@@ -25,6 +24,8 @@
 
 - **Lego example reworked** — A set's parts are listed version by version, and the summary and tracking tables keep versions apart. Theme scopes are a theme and every theme below it, chosen by id; colour and category filters are `(part_num, color_id)` patterns; bind values match parameters by name. New subcommands `shared-moulds` (`:intersect`), `city-only-moulds` (`:except`) and `laws`, which checks each promise against the same answer computed directly in SQL.
 - **Lego catalogue generator** (`examples/lego-generator/`) — Builds a large LEGO catalogue from the real one the Lego example loads, with builders' collections and purchase logs, and loads it into Postgres in batches. `--size small|medium|huge` picks the scale, and the same `--sets`, `--seed` and wiring give the same rows.
+- **Lego example's composed statements refreshed** — The committed `.sql` files had fallen behind their templates: several differed, and those of the newer templates were missing. They are composed again. A line with no category, part name or colour name now sorts after the named ones, and a set with no part count first within its year, on every database: each `ORDER BY` says so with an `IS NULL` term, since databases disagree on where a NULL sorts.
+- **Composite indexes migration** — A migration gives the dump's tables the composite indexes a DBA adds for the example's joins, each led by the column the join into its table fixes and ending on the column the next join reads, or holding it in `INCLUDE`. `setup` and `migrate` run it, and it is safe to run again.
 
 ### All crates
 

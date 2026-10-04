@@ -1,9 +1,8 @@
 //! The packs of the `paired` phase: written in pairs, each pack's child sets released in the years
 //! of a pattern, written as offsets from the earliest.
 
-/// Three pairs of release-year patterns. The two packs of a pair hold sets whose years match two at
-/// a time and differ in a run of three, which a planner reading columns two at a time cannot tell
-/// apart.
+/// Three pairs of release-year patterns. The two patterns of a pair hold as many pairs of
+/// consecutive years, and a different number of runs of three consecutive years, mirrored or not.
 pub const YEAR_PAIRS: [([i32; 5], [i32; 5]); 3] = [
     ([0, 1, 2, 5, 7], [0, 1, 3, 5, 6]),
     ([0, 1, 2, 4, 7], [0, 1, 3, 4, 6]),

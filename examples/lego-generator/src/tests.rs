@@ -10,7 +10,7 @@ use crate::catalogue::{
     MODEL_FIT,
 };
 use crate::encode::{Enc, Format};
-use crate::load::{index_name, CompositeIndex, Part as KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
+use crate::load::{index_name, CompositeIndex, KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
 use crate::paired;
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
@@ -1315,6 +1315,25 @@ fn paired_packs_hold_the_years_their_manifest_rows_name() {
     }
 }
 
+/// The two patterns of each declared pair hold as many pairs of consecutive years, and a different
+/// number of runs of three consecutive years, as written and mirrored.
+#[test]
+fn each_year_pair_agrees_on_consecutive_pairs_and_differs_on_runs_of_three() {
+    let runs = |years: &[i32], length: i32| {
+        years
+            .iter()
+            .filter(|&&y| (1..length).all(|k| years.contains(&(y + k))))
+            .count()
+    };
+    for (a, b) in paired::YEAR_PAIRS {
+        for mirrored in [false, true] {
+            let (a, b) = (paired::placed(&a, mirrored), paired::placed(&b, mirrored));
+            assert_eq!(runs(&a, 2), runs(&b, 2), "{a:?} and {b:?}");
+            assert_ne!(runs(&a, 3), runs(&b, 3), "{a:?} and {b:?}");
+        }
+    }
+}
+
 /// Every reference lands in a row of its owner: through each reference, every row names a row the
 /// named table holds, and every row the manifest names exists. The one exception is the real
 /// catalogue's own lines whose part number its parts list does not hold, which the manifest lists
@@ -1584,10 +1603,21 @@ fn each_composite_index_lists_its_plain_columns_before_its_expressions() {
 
 /// The example's migration builds on the dump's tables exactly the composite indexes the generator
 /// builds on them, in the same order and under the same names, none with an expression, since the
-/// example makes no clock function.
+/// example makes no clock function. The migration is the LEGO example's, beside this crate in the
+/// repository; where it is absent, as in the packaged crate, the test has nothing to compare and
+/// says so.
 #[test]
 fn the_example_migration_builds_the_composite_indexes_of_the_dump_tables() {
-    let sql = include_str!("../../lego/migrations/20260930000000_composite_indexes.sql");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lego/migrations/20260930000000_composite_indexes.sql");
+    let sql = match std::fs::read_to_string(&path) {
+        Ok(sql) => sql,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("skipped: no LEGO example migration at {}", path.display());
+            return;
+        }
+        Err(e) => panic!("reading {}: {e}", path.display()),
+    };
     let text = sql
         .lines()
         .filter(|l| !l.trim_start().starts_with("--"))

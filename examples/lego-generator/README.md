@@ -20,6 +20,10 @@ cargo run -p lego-example -- --database-url postgres://localhost:5432/sqlc_lego 
 cargo run --release -p lego-generator -- --database-url postgres://localhost:5432/sqlc_lego --size small
 ```
 
+Without `--size`, the generator builds `huge`: about 2 million synthesized sets, with their
+builders and purchases, which is a long load. `--size small`, 20 thousand sets, makes a quick first
+one.
+
 `setup` needs `psql` on the `PATH`, and ends with "Setup complete!". It creates the database before
 it loads the catalogue, so a `setup` that stops early leaves an empty database behind. The generator
 checks for the eight tables before it reads anything, and names the ones it cannot find.
@@ -87,8 +91,11 @@ role that is not one needs a superuser to run `CREATE EXTENSION earthdistance CA
 database first, or leaves `search` out of `--indexes`.
 
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
-leaves it on); then the tables are vacuumed and analysed. `--unlogged` creates unlogged tables for
-scratch runs, and `--synchronous-commit` sets the loading sessions' commit mode (off by default).
+leaves it on); then the tables are vacuumed and analysed. `--vacuum off` leaves out the vacuum, and
+`--analyze off` the statistics; with both off the tables are left as loaded. The object-oriented
+classes and the partitioned copies are vacuumed and analysed whatever they say. `--unlogged`
+creates unlogged tables for scratch runs, and `--synchronous-commit` sets the loading sessions'
+commit mode (off by default).
 
 ## Years
 
@@ -115,11 +122,12 @@ weight is its real sets plus the releases of its modelled years. The patch
 - `wavy`: a wave travelling over the sockets, forward then back (`--wavy-period`, `--wavy-amplitude`);
 - `hotspot`: one socket takes a share of the sets (`--hotspot-share`, `--hotspot-socket`);
 - `swing`: waves alternate between two groups of sockets (`--swing-a`, `--swing-b`, `--swing-period`);
-- `paired`: packs written in pairs, their child sets chosen by release year so that the two packs'
-  sets' years match two at a time and differ in a run of three, which a planner reading columns two
-  at a time cannot tell apart. The years come from three pairs of patterns (`YEAR_PAIRS` in
-  `src/paired.rs`), placed from a window of real release years that moves with the wave, and
-  mirrored on its way back. Each pack is listed in `trap_manifest` under O5, its detail naming its
+- `paired`: packs written in pairs, their child sets chosen by release year so that the two packs
+  of a pair hold as many pairs of consecutive years, and a different number of runs of three
+  consecutive years: counting their years two at a time cannot tell the two packs apart. The years
+  come from three pairs of patterns (`YEAR_PAIRS` in `src/paired.rs`, which a test holds to this),
+  placed from a window of real release years that moves with the wave, and mirrored on its way
+  back. Each pack is listed in `trap_manifest` under O5, its detail naming its
   pair, whether it is the first or second member, its offsets, its partner's offsets, the window and
   whether it is mirrored.
 
@@ -212,9 +220,13 @@ On standard output, the lines starting `SUMMARY` hold the run's figures: the res
 rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
 the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the
 sets, most bought first), the WAL written and each table's final size. The same configuration is
-written to the table `generator_run`, with the definitions of the clock function (`function_clock`)
-and of each composite index, unique key and search index, keyed by its name (`composite_<name>`,
-`unique_<name>`, `search_<name>`).
+written to the table `generator_run`. Each wiring flag is keyed by its own name, in underscores
+(`--hotspot-share` is `hotspot_share`, `--swing-a` is `swing_a`), with the value the run used:
+`upto_phase` is the number of the patch's phases when the flag is left out, and the hot socket is
+`hotspot`. So are the load's flags `copy_format`, `method`, `index_timing`, `indexes`, `unlogged`,
+`synchronous_commit`, `freeze` and `autovacuum_during_load`. Beside them are the definitions of the
+clock function (`function_clock`) and of each composite index, unique key and search index, keyed
+by its name (`composite_<name>`, `unique_<name>`, `search_<name>`).
 
 ## Object-oriented tables
 
@@ -278,7 +290,7 @@ four things. The build fails if any does not hold:
 
 The `SUMMARY oo` lines give the rows each class has of its own.
 
-## Partitions by id
+## Partitioned copies
 
 `--partitioning` also copies the generated tables, after the load, into tables partitioned by the
 leading column of their natural key, the unique key over the table's own attributes. Each method
@@ -358,6 +370,27 @@ rows, and the `SUMMARY size` lines each copied table's size with all its partiti
   reason (`partition_<method>_schema`, `partition_<method>_tables`, `partition_<method>_left_out`);
 - when the keys are built, every key that is no longer unique across its table
   (`unique_lost_<method>_<key>`).
+
+## Other flags
+
+- `--lettered-ppm` (30000): synthesized sets per million whose number leads with a letter prefix,
+  one of the real catalogue's, drawn in its proportions.
+- `--rerelease-ppm` (20000): synthesized sets per million drawn as a re-release, the next version
+  of the set before them under its number (`-2` after its `-1`).
+- `--second-version-ppm` (700): synthesized sets per million given a second inventory, version 2,
+  with one line's quantity corrected.
+- `--recolour-ppm` (150000): lines per million of a synthesized set's inventory whose colour is
+  drawn again, from the colours the real catalogue's lines give its part.
+- `--wave-timeout` (`300s`): the `statement_timeout` of each wave's statements.
+- `--maintenance-work-mem` (`1GB`) and `--parallel-maintenance-workers` (4): the
+  `maintenance_work_mem` and `max_parallel_maintenance_workers` of the session that builds the keys
+  and indexes and vacuums after the load.
+- `--freeze`: loads the reference tables with `COPY … FREEZE`, which PostgreSQL allows because each
+  is created in the transaction that loads it. Every other table is written by many transactions,
+  so it is loaded as usual, and the run says so.
+- `--vacuum on|off` and `--analyze on|off` (both `on`): see Loading.
+- `--dry-run`: generates and encodes every wave and writes nothing. It still connects, to read the
+  real catalogue.
 
 ## Tests
 

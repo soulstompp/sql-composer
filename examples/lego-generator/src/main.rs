@@ -80,7 +80,7 @@ enum LogFormat {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "lego",
+    name = "lego-generator",
     about = "Generate a large LEGO catalogue and load it into Postgres in hierarchical waves"
 )]
 struct Cli {
@@ -100,6 +100,8 @@ struct Cli {
     /// Synthesized sets; overrides `--size`.
     #[arg(long)]
     sets: Option<u64>,
+    /// The seed every random draw starts from: the same seed, `--sets` and wiring flags give the
+    /// same rows.
     #[arg(long, default_value_t = 20_260_926)]
     seed: u64,
     /// Root records (sets; builders) per wave.
@@ -111,15 +113,21 @@ struct Cli {
     /// The phases of the switchboard, as `<pattern>:<percent>,…`.
     #[arg(long, default_value = "natural:90,wavy:9,paired:1")]
     patch: String,
+    /// Waves the `wavy` pattern's travelling wave takes to cross the socket order one way; it then
+    /// comes back over as many.
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,
+    /// Width of the `wavy` pattern's travelling wave, as a share of the socket order.
     #[arg(long, default_value_t = 0.25)]
     wavy_amplitude: f64,
+    /// Share of a `hotspot` phase's sets that go to the hot socket; the rest are drawn as
+    /// `natural` draws them.
     #[arg(long, default_value_t = 0.9)]
     hotspot_share: f64,
     /// The hot socket as `r<root>/<decade>s`; the heaviest socket when absent.
     #[arg(long)]
     hotspot_socket: Option<String>,
+    /// Waves a `swing` phase draws from one group before it turns to the other.
     #[arg(long, default_value_t = 4)]
     swing_period: u64,
     /// First swing group: root theme ids and a half-open year range (the classic play themes of the classic era).
@@ -143,19 +151,27 @@ struct Cli {
     /// Collection rows outside the builder's home socket.
     #[arg(long, default_value_t = 0.6)]
     cross_collections: f64,
+    /// Synthesized sets per million whose number leads with a letter prefix, one of the real
+    /// catalogue's, drawn in its proportions.
     #[arg(long, default_value_t = 30_000)]
     lettered_ppm: u32,
+    /// Synthesized sets per million drawn as a re-release: the next version of the set before
+    /// them, under its number (`-2` after its `-1`).
     #[arg(long, default_value_t = 20_000)]
     rerelease_ppm: u32,
+    /// Synthesized sets per million given a second inventory, version 2, with one line's quantity
+    /// corrected.
     #[arg(long, default_value_t = 700)]
     second_version_ppm: u32,
+    /// Lines per million of a synthesized set's inventory whose colour is drawn again, from the
+    /// colours the real catalogue's lines give its part.
     #[arg(long, default_value_t = 150_000)]
     recolour_ppm: u32,
     /// The traps planted: `all`, `none`, or a list of traps (`K1,D3,…`). Only the traps planted
     /// at a rate or written by a phase can be left out; the others arise from the real catalogue.
     #[arg(long, default_value = "all")]
     traps: String,
-    /// COPY payload format.
+    /// COPY payload format: `binary` or `text`.
     #[arg(long, default_value = "binary")]
     copy_format: String,
     /// `copy` or `unnest`.
@@ -182,15 +198,21 @@ struct Cli {
     /// sets when absent.
     #[arg(long)]
     build_timeout: Option<String>,
+    /// `maintenance_work_mem` for the session that builds the keys and indexes and vacuums after
+    /// the load.
     #[arg(long, default_value = "1GB")]
     maintenance_work_mem: String,
+    /// `max_parallel_maintenance_workers` for the session that builds the keys and indexes and
+    /// vacuums after the load.
     #[arg(long, default_value_t = 4)]
     parallel_maintenance_workers: u32,
     /// COPY FREEZE for the reference tables (created in the loading transaction).
     #[arg(long)]
     freeze: bool,
+    /// Analyse the generated tables after the load: `on` or `off`.
     #[arg(long, default_value = "on")]
     analyze: String,
+    /// Vacuum the generated tables after the load: `on` or `off`.
     #[arg(long, default_value = "on")]
     vacuum: String,
     /// Leave autovacuum on for the loaded tables while they load (off by default, and on again after).
@@ -199,6 +221,7 @@ struct Cli {
     /// Seconds between progress lines; 0 for none.
     #[arg(long, default_value_t = 10)]
     log_progress_every: u64,
+    /// The logs on standard error, as `pretty` text or as `json`.
     #[arg(long, value_enum, default_value = "pretty")]
     log_format: LogFormat,
     /// Generate and encode every wave, write nothing.
@@ -214,7 +237,7 @@ struct Cli {
     #[arg(long)]
     classes: Option<String>,
     /// Also copy the generated tables, after the load, into tables partitioned by the leading
-    /// column of their primary key, one schema per method, `<schema>_<method>`, dropped and
+    /// column of their natural key, one schema per method, `<schema>_<method>`, dropped and
     /// recreated: `none`, or a list of `inheritance` (children holding ranges under CHECKs),
     /// `range` and `hash` (declarative).
     #[arg(long, default_value = "none")]
@@ -457,12 +480,22 @@ async fn run(cli: Cli) -> Result<(), String> {
         ("chunk".into(), wiring.chunk.to_string()),
         ("jobs".into(), cli.jobs.to_string()),
         ("patch".into(), world.board.to_string()),
+        (
+            "upto_phase".into(),
+            cli.upto_phase
+                .unwrap_or(world.board.phases.len())
+                .to_string(),
+        ),
         ("wavy_period".into(), cli.wavy_period.to_string()),
         ("wavy_amplitude".into(), cli.wavy_amplitude.to_string()),
         (
             "hotspot".into(),
             world.real.sockets[usize::from(world.board.hot_socket())].label(),
         ),
+        ("hotspot_share".into(), cli.hotspot_share.to_string()),
+        ("swing_period".into(), cli.swing_period.to_string()),
+        ("swing_a".into(), cli.swing_a.clone()),
+        ("swing_b".into(), cli.swing_b.clone()),
         ("real_sets".into(), world.real.cat.sets.len().to_string()),
         ("real_lines".into(), world.real.cat.lines.len().to_string()),
         ("sockets".into(), world.real.sockets.len().to_string()),
@@ -577,7 +610,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         ("indexes".into(), settings.indexes.name()),
         ("unlogged".into(), cli.unlogged.to_string()),
         ("synchronous_commit".into(), cli.synchronous_commit.clone()),
-        ("freeze_reference_tables".into(), cli.freeze.to_string()),
+        ("freeze".into(), cli.freeze.to_string()),
         (
             "autovacuum_during_load".into(),
             cli.autovacuum_during_load.clone(),

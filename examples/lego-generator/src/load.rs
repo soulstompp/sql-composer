@@ -161,7 +161,7 @@ pub fn clock_function(schema: &str) -> String {
 
 /// One column of a composite index's key: a column of the table, or an expression over it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
+pub enum KeyPart {
     /// A column of the table.
     Column(&'static str),
     /// An expression: the name it gives the index's name, and its SQL, in which `{clock}` stands
@@ -172,19 +172,19 @@ pub enum Part {
     },
 }
 
-impl Part {
+impl KeyPart {
     fn label(&self) -> &'static str {
         match self {
-            Part::Column(c) => c,
-            Part::Expression { label, .. } => label,
+            KeyPart::Column(c) => c,
+            KeyPart::Expression { label, .. } => label,
         }
     }
 
     /// The part as an index key holds it, the clock read from `schema`.
     pub fn key_sql(&self, schema: &str) -> String {
         match self {
-            Part::Column(c) => c.to_string(),
-            Part::Expression { sql, .. } => {
+            KeyPart::Column(c) => c.to_string(),
+            KeyPart::Expression { sql, .. } => {
                 format!("({})", sql.replace("{clock}", &format!("{schema}.clock")))
             }
         }
@@ -195,7 +195,7 @@ impl Part {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompositeIndex {
     pub table: &'static str,
-    pub parts: &'static [Part],
+    pub parts: &'static [KeyPart],
     pub include: &'static [&'static str],
 }
 
@@ -220,12 +220,12 @@ impl CompositeIndex {
 }
 
 /// A purchase's month, on UTC's wall clock.
-const MONTH: Part = Part::Expression {
+const MONTH: KeyPart = KeyPart::Expression {
     label: "month",
     sql: "extract(month FROM {clock}(ordered_at))::smallint",
 };
 /// A purchase's instant, on UTC's wall clock.
-const ORDERED_AT: Part = Part::Expression {
+const ORDERED_AT: KeyPart = KeyPart::Expression {
     label: "ordered_at",
     sql: "{clock}(ordered_at)",
 };
@@ -238,66 +238,66 @@ const ORDERED_AT: Part = Part::Expression {
 pub const COMPOSITE_INDEXES: &[CompositeIndex] = &[
     CompositeIndex {
         table: "lego_themes",
-        parts: &[Part::Column("parent_id"), Part::Column("id")],
+        parts: &[KeyPart::Column("parent_id"), KeyPart::Column("id")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_sets",
-        parts: &[Part::Column("theme_id"), Part::Column("set_num")],
+        parts: &[KeyPart::Column("theme_id"), KeyPart::Column("set_num")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_sets",
-        parts: &[Part::Column("theme_id"), Part::Column("year")],
+        parts: &[KeyPart::Column("theme_id"), KeyPart::Column("year")],
         include: &["set_num"],
     },
     CompositeIndex {
         table: "lego_inventories",
         parts: &[
-            Part::Column("set_num"),
-            Part::Column("version"),
-            Part::Column("id"),
+            KeyPart::Column("set_num"),
+            KeyPart::Column("version"),
+            KeyPart::Column("id"),
         ],
         include: &[],
     },
     CompositeIndex {
         table: "lego_inventory_sets",
-        parts: &[Part::Column("inventory_id"), Part::Column("set_num")],
+        parts: &[KeyPart::Column("inventory_id"), KeyPart::Column("set_num")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_inventory_parts",
         parts: &[
-            Part::Column("inventory_id"),
-            Part::Column("part_num"),
-            Part::Column("color_id"),
+            KeyPart::Column("inventory_id"),
+            KeyPart::Column("part_num"),
+            KeyPart::Column("color_id"),
         ],
         include: &[],
     },
     CompositeIndex {
         table: "lego_parts",
-        parts: &[Part::Column("part_cat_id"), Part::Column("part_num")],
+        parts: &[KeyPart::Column("part_cat_id"), KeyPart::Column("part_num")],
         include: &["name"],
     },
     CompositeIndex {
         table: "lego_collection",
         parts: &[
-            Part::Column("set_num"),
-            Part::Column("builder_id"),
-            Part::Column("row_no"),
+            KeyPart::Column("set_num"),
+            KeyPart::Column("builder_id"),
+            KeyPart::Column("row_no"),
         ],
         include: &[],
     },
     CompositeIndex {
         table: "lego_collection",
-        parts: &[Part::Column("builder_id"), Part::Column("row_no")],
+        parts: &[KeyPart::Column("builder_id"), KeyPart::Column("row_no")],
         include: &["set_num"],
     },
     CompositeIndex {
         table: "lego_purchases",
         parts: &[
-            Part::Column("builder_id"),
-            Part::Column("row_no"),
+            KeyPart::Column("builder_id"),
+            KeyPart::Column("row_no"),
             MONTH,
             ORDERED_AT,
         ],
@@ -310,22 +310,22 @@ pub const COMPOSITE_INDEXES: &[CompositeIndex] = &[
     },
     CompositeIndex {
         table: "lego_cities",
-        parts: &[Part::Column("zone"), Part::Column("city_id")],
+        parts: &[KeyPart::Column("zone"), KeyPart::Column("city_id")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_postcodes",
-        parts: &[Part::Column("city_id"), Part::Column("postcode_id")],
+        parts: &[KeyPart::Column("city_id"), KeyPart::Column("postcode_id")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_streets",
-        parts: &[Part::Column("postcode_id"), Part::Column("street_id")],
+        parts: &[KeyPart::Column("postcode_id"), KeyPart::Column("street_id")],
         include: &[],
     },
     CompositeIndex {
         table: "lego_builders",
-        parts: &[Part::Column("street_id"), Part::Column("builder_id")],
+        parts: &[KeyPart::Column("street_id"), KeyPart::Column("builder_id")],
         include: &[],
     },
 ];
@@ -413,8 +413,8 @@ pub const NAME_BYTES: usize = 63;
 
 /// The name of a composite index on `table` over `parts`: the table and the parts' names, or, where
 /// that is longer than `NAME_BYTES`, its front and a digest of the whole.
-pub fn index_name(table: &str, parts: &[Part]) -> String {
-    let labels: Vec<&str> = parts.iter().map(Part::label).collect();
+pub fn index_name(table: &str, parts: &[KeyPart]) -> String {
+    let labels: Vec<&str> = parts.iter().map(KeyPart::label).collect();
     let full = format!("{table}_{}_idx", labels.join("_"));
     if full.len() <= NAME_BYTES {
         return full;

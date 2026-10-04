@@ -1,4 +1,4 @@
-//! Partitions by id (`--partitioning`): after the load, the generated tables are copied into a
+//! Partitioned copies (`--partitioning`): after the load, the generated tables are copied into a
 //! schema per method, `<schema>_<method>`, each table split into `--partitions` parts by the
 //! leading column of its natural key, the unique key over the table's own attributes:
 //! - `inheritance`: child tables below an empty parent, each holding one range of the column under
@@ -220,11 +220,10 @@ pub fn unique_lost(t: &TableDef, column: &str) -> Vec<Key> {
     keys(t).into_iter().filter(|k| !k.holds(column)).collect()
 }
 
-/// The partition column: the leading column of a table's natural key, and whether it holds text.
+/// The partition column: the leading column of a table's natural key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Column {
     pub name: &'static str,
-    pub text: bool,
 }
 
 /// The columns of a `CREATE TABLE` column list, split at the commas outside parentheses.
@@ -289,7 +288,7 @@ pub fn partition_column(t: &TableDef, method: Method) -> Result<Column, String> 
             "its natural key leads with {lead}, text, which has no equal-width ranges"
         ));
     }
-    Ok(Column { name: lead, text })
+    Ok(Column { name: lead })
 }
 
 /// `n` half-open ranges `[lo, hi)` of equal width, the first starting at `min`, together holding

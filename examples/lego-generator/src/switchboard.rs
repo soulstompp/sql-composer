@@ -11,8 +11,8 @@
 //! - `wavy`: a wave travelling over the ordered sockets, forward then back, over and over;
 //! - `hotspot`: one socket takes a fixed share of the sets;
 //! - `swing`: waves alternate between two groups of sockets;
-//! - `paired`: packs written in pairs, whose child sets' release years match two at a time and
-//!   differ in a run of three (see `paired`).
+//! - `paired`: packs written in pairs, whose child sets' release years hold as many pairs of
+//!   consecutive years and a different number of runs of three (see `paired`).
 //!
 //! Every pattern except `natural` keeps the real weights along the socket order, and changes
 //! only which wave a set arrives in. A WAVE is one chunk of the loader.

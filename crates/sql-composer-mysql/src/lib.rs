@@ -120,10 +120,10 @@ impl driver::ComposerConnectionAsync for MysqlConn {
         &self,
         composer: &Composer,
         template: &Template,
-        mut values: BTreeMap<String, Vec<Self::Value>>,
+        values: BTreeMap<String, Vec<Self::Value>>,
     ) -> Result<(String, Vec<Self::Value>), AsyncError> {
         let composed = composer.compose_with_values(template, &values)?;
-        let ordered = driver::resolve_values(&composed, &mut values)?;
+        let ordered = driver::resolve_values_by_use(&composed, &values)?;
         Ok((composed.sql, ordered))
     }
 }
@@ -186,10 +186,10 @@ impl driver::ComposerConnection for MysqlConnection {
         &self,
         composer: &Composer,
         template: &Template,
-        mut values: BTreeMap<String, Vec<Self::Value>>,
+        values: BTreeMap<String, Vec<Self::Value>>,
     ) -> Result<(String, Vec<Self::Value>), SyncError> {
         let composed = composer.compose_with_values(template, &values)?;
-        let ordered = driver::resolve_values(&composed, &mut values)?;
+        let ordered = driver::resolve_values_by_use(&composed, &values)?;
         Ok((composed.sql, ordered))
     }
 }
@@ -238,5 +238,23 @@ mod tests {
         let result = composer.compose_with_values(&template, &values).unwrap();
         assert_eq!(result.sql, "SELECT * FROM users WHERE id IN (?, ?, ?)");
         assert_eq!(result.bind_params, vec!["ids", "ids", "ids"]);
+    }
+
+    #[test]
+    fn test_a_name_used_twice_gets_its_value_twice() {
+        let input = "SELECT * FROM users WHERE id = :bind(id) OR manager_id = :bind(id)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let composer = Composer::new(Dialect::Mysql);
+        let values = sql_composer::bind_values!("id" => [mysql_async::Value::from(7)]);
+        let result = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT * FROM users WHERE id = ? OR manager_id = ?"
+        );
+        let ordered = sql_composer::driver::resolve_values_by_use(&result, &values).unwrap();
+        assert_eq!(
+            ordered,
+            vec![mysql_async::Value::from(7), mysql_async::Value::from(7)]
+        );
     }
 }

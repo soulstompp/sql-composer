@@ -5,7 +5,7 @@ JOIN lego_sets s ON s.set_num = i.set_num
 WHERE s.theme_id IN (
     SELECT sc.theme_id
     FROM (
-        SELECT tc.theme_id
+        SELECT tc.ancestor_id AS scope_id, tc.theme_id
 FROM (
     WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
     SELECT t.id, t.id, 0

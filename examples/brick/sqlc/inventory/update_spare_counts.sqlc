@@ -1,7 +1,6 @@
-# Sync the spare part counts in inventory_tracking from the canonical part resolution, version by
-# version: a part's spare count is the sum of its spare lines across colours, in that version. A
-# tracked part with no spare lines in its version gets 0.
-# When the DBA changes the join logic in set_part_details, this UPDATE stays in sync.
+# Sync the spare counts in inventory_tracking with the set's lines, version by version: a tracked
+# part's spare count is the sum of its spare lines across colours in that version, and 0 where it
+# has none. A tracked part the set's lines no longer hold keeps its count.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 )

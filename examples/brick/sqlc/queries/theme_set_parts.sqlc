@@ -1,5 +1,5 @@
 # Every line of every inventory of every set in a theme scope (the theme and every theme below it),
-# one row per line, keyed by the line. Used as a :count() source.
+# one row per line, keyed by the line.
 SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare
 FROM lego_inventory_parts ip
 JOIN lego_inventories i ON i.id = ip.inventory_id

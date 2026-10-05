@@ -1,7 +1,7 @@
 # Populate the per-category part summary for a set: one row per (set, version, category). A set
 # sold in several versions gets one summary per version, never a sum across them. The totals are
-# the shared ones, so they always agree with the parts listing. Running it again replaces the
-# version's summary rather than adding a second copy.
+# the shared ones, so they always agree with the parts listing. Running it again updates each
+# category's row rather than adding a second; a category the set no longer has keeps its row.
 INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
 SELECT
     :bind(set_num),

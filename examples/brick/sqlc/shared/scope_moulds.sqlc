@@ -1,5 +1,5 @@
 # The moulds (part numbers) used by any set in a theme scope: one row per part_num. The caller
-# decides the scope (the @scope slot): a scope is a set of theme ids, with one column, theme_id.
+# decides the scope (the @scope slot): one row per theme_id, with the scope's own theme as scope_id.
 SELECT DISTINCT ip.part_num
 FROM lego_inventory_parts ip
 JOIN lego_inventories i ON i.id = ip.inventory_id

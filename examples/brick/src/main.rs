@@ -1596,6 +1596,57 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         Err(e) => verdict(&law, false, &format!("a statement failed: {e}")),
     };
 
+    // 18. The union of Technic's and City's sets is each scope's sets from the year on, labelled
+    //     with the scope's own name, walked down the themes table from the two scope themes: a
+    //     set in both scopes comes back once under each label, and no row twice.
+    let combined = compose(sqlc_dir, "reports/combined_theme_sets.sqlc");
+    let from_year = 2000;
+    let rows = bound(
+        &combined,
+        &[
+            int("city_theme_id", CITY_THEME_ID),
+            int("min_year", from_year),
+            int("technic_theme_id", TECHNIC_THEME_ID),
+        ],
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    let composed: BTreeSet<(String, String)> = rows
+        .iter()
+        .map(|r| (r.get("theme_group"), r.get("set_num")))
+        .collect();
+    let walked: BTreeSet<(String, String)> = sqlx::query(
+        "WITH RECURSIVE down (scope_id, theme_id) AS ( \
+             SELECT id, id FROM lego_themes WHERE id IN ($1, $2) \
+           UNION ALL \
+             SELECT d.scope_id, t.id FROM lego_themes t JOIN down d ON t.parent_id = d.theme_id \
+         ) \
+         SELECT scope.name, s.set_num FROM down d \
+         JOIN lego_sets s ON s.theme_id = d.theme_id \
+         JOIN lego_themes scope ON scope.id = d.scope_id \
+         WHERE s.year >= $3",
+    )
+    .bind(TECHNIC_THEME_ID)
+    .bind(CITY_THEME_ID)
+    .bind(from_year)
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .iter()
+    .map(|r| (r.get(0), r.get(1)))
+    .collect();
+    all_hold &= verdict(
+        &format!("Technic's and City's sets from {from_year} are each scope's, labelled by it"),
+        !composed.is_empty() && rows.len() == composed.len() && composed == walked,
+        &format!(
+            "{} rows, {} distinct, against {} walked",
+            rows.len(),
+            composed.len(),
+            walked.len()
+        ),
+    );
+
     println!(
         "=== Laws: {} ===",
         if all_hold { "all hold" } else { "SOME FAIL" }

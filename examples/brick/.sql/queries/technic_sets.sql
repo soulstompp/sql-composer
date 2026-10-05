@@ -1,10 +1,7 @@
 SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
 FROM lego_sets s
-JOIN lego_themes scope ON scope.id = $2
-WHERE s.theme_id IN (
-    SELECT sc.theme_id
-    FROM (
-        SELECT tc.theme_id
+JOIN (
+    SELECT tc.ancestor_id AS scope_id, tc.theme_id
 FROM (
     WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
     SELECT t.id, t.id, 0
@@ -21,6 +18,7 @@ WHERE NOT in_cycle
 ) tc
 WHERE tc.ancestor_id = $2
 
-    ) sc
-)
-  AND s.year >= $1
+) sc ON sc.theme_id = s.theme_id
+JOIN lego_themes scope ON scope.id = sc.scope_id
+WHERE s.year >= $1
+

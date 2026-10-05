@@ -1,14 +1,3 @@
-# City sets: every set in the City scope (scopes/city.sqlc) released in min_year or later, one row
-# per set. The scope's name is read from the themes table by the scope's own id, so the label can
-# never disagree with the scope that chose the rows.
-# Standalone query, also used as a :union() source.
-SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
-FROM lego_sets s
-JOIN lego_themes scope ON scope.id = :bind(city_theme_id)
-WHERE s.theme_id IN (
-    SELECT sc.theme_id
-    FROM (
-        :compose(scopes/city.sqlc)
-    ) sc
-)
-  AND s.year >= :bind(min_year)
+# City's sets released in min_year or later, labelled with City's name: one row per set, keyed by
+# set_num.
+:compose(shared/scope_sets.sqlc, @scope = scopes/city.sqlc)

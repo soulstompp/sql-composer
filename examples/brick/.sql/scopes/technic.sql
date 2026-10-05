@@ -1,4 +1,4 @@
-SELECT tc.theme_id
+SELECT tc.ancestor_id AS scope_id, tc.theme_id
 FROM (
     WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
     SELECT t.id, t.id, 0

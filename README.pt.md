@@ -39,7 +39,7 @@ Para compor a partir de Rust, basta juntar a biblioteca:
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
+sql-composer = "0.0.5"
 ```
 
 ## Uma primeira composição
@@ -532,7 +532,7 @@ A funcionalidade `serde` deriva `Serialize` e `Deserialize` para os tipos princi
 ligada por omissão, compila com a biblioteca padrão.
 
 ```toml
-sql-composer = { version = "0.0.4", features = ["serde"] }
+sql-composer = { version = "0.0.5", features = ["serde"] }
 ```
 
 ### Controladores
@@ -547,8 +547,8 @@ mesmos para todos os dialetos, e só os marcadores mudam.
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-rusqlite = "0.0.4"
+sql-composer = "0.0.5"
+sql-composer-rusqlite = "0.0.5"
 ```
 
 ```rust,ignore
@@ -578,8 +578,8 @@ let _rows = stmt.query(refs.as_slice()).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-duckdb = "0.0.4"
+sql-composer = "0.0.5"
+sql-composer-duckdb = "0.0.5"
 ```
 
 ```rust,ignore
@@ -604,9 +604,9 @@ let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-postgres = "0.0.4"  # síncrono e assíncrono, ambos ligados por omissão
-# sql-composer-postgres = { version = "0.0.4", default-features = false, features = ["async"] }
+sql-composer = "0.0.5"
+sql-composer-postgres = "0.0.5"  # síncrono e assíncrono, ambos ligados por omissão
+# sql-composer-postgres = { version = "0.0.5", default-features = false, features = ["async"] }
 ```
 
 A funcionalidade `sync` traz o pacote `postgres` e, com ele, o tipo síncrono; a `async` liga o tipo
@@ -643,9 +643,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-mysql = "0.0.4"  # síncrono e assíncrono, ambos ligados por omissão
-# sql-composer-mysql = { version = "0.0.4", default-features = false, features = ["async"] }
+sql-composer = "0.0.5"
+sql-composer-mysql = "0.0.5"  # síncrono e assíncrono, ambos ligados por omissão
+# sql-composer-mysql = { version = "0.0.5", default-features = false, features = ["async"] }
 ```
 
 A funcionalidade `sync` traz o pacote `mysql` e, com ele, o tipo síncrono; a `async` liga o tipo
@@ -683,8 +683,8 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.0.4"                                        # confere no PostgreSQL (por omissão)
-# sql-composer-sqlx = { version = "0.0.4", features = ["validate"] } # junta a verificação da sintaxe sem ligação
+sql-composer-sqlx = "0.0.5"                                        # confere no PostgreSQL (por omissão)
+# sql-composer-sqlx = { version = "0.0.5", features = ["validate"] } # junta a verificação da sintaxe sem ligação
 ```
 
 O `verify_postgres`, da funcionalidade `postgres`, ligada por omissão, prepara cada instrução num
@@ -725,7 +725,7 @@ examples/
   sqlc-brickgen/          # sqlc-brickgen: um catálogo grande, feito a partir de um real, para o PostgreSQL
 ```
 
-Os pacotes estão na versão 0.0.4, e uma versão 0.0 pode mudar a API.
+Os pacotes estão na versão 0.0.5, e uma versão 0.0 pode mudar a API.
 
 ## Licença
 

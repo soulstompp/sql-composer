@@ -9,7 +9,7 @@ name = "brick"
 path = "src/main.rs"
 
 [dependencies]
-sql-composer = { version = "0.0.4", path = "../../crates/sql-composer" }
+sql-composer = { version = "0.0.5", path = "../../crates/sql-composer" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }

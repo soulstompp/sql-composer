@@ -4,52 +4,56 @@ A full showcase of sql-composer features using the [Lego database](https://raw.g
 
 ## Setup
 
-Make sure PostgreSQL is running and `psql` is on the `PATH`, then, from the repository root:
+The example runs on the database sqlc-brickgen builds. With PostgreSQL running and `psql` on the
+`PATH`, from the repository root:
 
 ```sh
-cargo run -p lego-example -- setup
+createdb sqlc_brick
+curl -sSfL https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql \
+    | psql -X -q -v ON_ERROR_STOP=1 -o /dev/null -d sqlc_brick
+cargo run --release -p sqlc-brickgen -- --database-url postgres:///sqlc_brick \
+    --size small --traps none --indexes keys,composite
+cargo run -p brick-example -- migrate
 ```
 
-This single command will:
-1. Download the [lego SQL dump](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql) to `~/.cache/sql-composer/` (`$XDG_CACHE_HOME/sql-composer/` when that is set), cached for future runs
-2. Connect to the server's `postgres` database, end every other session on the database the URL
-   names, drop that database if it exists, and create it again
-3. Load the lego data with `psql`
-4. Run migrations to create the extra tables (`set_category_summary`, `inventory_tracking`) and the
-   composite indexes for the joins between the dump's tables
+1. `createdb` makes the example's database.
+2. `psql` loads Neon's sample dump into its `public` schema: the real catalogue the generator
+   reads. The load stops at the first failed statement.
+3. The generator writes the catalogue and 20 thousand synthesized sets, with their builders,
+   collections and purchases, into the schema `lego`, which it drops and recreates on every run.
+   `--traps none` leaves out the traps it plants, and `--indexes keys,composite` builds the keys and
+   the composite indexes for the joins, without the search indexes and the extensions they need.
+4. `migrate` adds the example's own tables (`set_category_summary`, `inventory_tracking`) to the
+   same schema. Each migration is safe to run again, and runs again after the generator, whose run
+   drops them with the schema.
 
-`setup` drops and recreates the database the URL names: point it only at a database the example
-owns. The load stops at the first failed statement.
-
-`migrate` runs step 4 alone, on a database that already holds the dump. Each migration is safe to
-run again.
+The queries search the schema `lego` alone; `--schema` names another.
 
 ### Connecting
 
-The database is the one `--database-url` names, or `SQLC_LEGO_DATABASE_URL` when the flag is left
-out. With neither, it is `postgres:///sqlc_lego`: the database `sqlc_lego` on the local server,
+The database is the one `--database-url` names, or `SQLC_BRICK_DATABASE_URL` when the flag is left
+out. With neither, it is `postgres:///sqlc_brick`: the database `sqlc_brick` on the local server,
 through its Unix socket, as the current user.
 
 ```sh
-cargo run -p lego-example -- --database-url postgres://user@host/dbname setup
-SQLC_LEGO_DATABASE_URL=postgres://user@host/dbname cargo run -p lego-example -- all
+cargo run -p brick-example -- --database-url postgres://user@host/dbname migrate
+SQLC_BRICK_DATABASE_URL=postgres://user@host/dbname cargo run -p brick-example -- all
 ```
 
 The example speaks TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
 `?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
 also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
 names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
-offer it. `setup` hands the same URL to `psql`, whose libpq checks a `verify-full` certificate
-against `sslrootcert`, or `~/.postgresql/root.crt` without it, not against the bundled roots.
+offer it.
 
-The subcommands read the templates from `--sqlc-dir`, `examples/lego/sqlc` by default. That path is
+The subcommands read the templates from `--sqlc-dir`, `examples/brick/sqlc` by default. That path is
 relative to the directory the command runs in, so run them from the repository root, or name the
 directory.
 
 ### Data and licences
 
-The example ships none of the Lego data: `setup` downloads it to your machine. It is Neon's sample
-dump, `lego.sql` in
+The example ships none of the catalogue: the `curl` above downloads it to your machine. It is Neon's
+sample dump, `lego.sql` in
 [neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
 repository under the MIT licence, whose README gives the data's source as Kaggle's
 [LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
@@ -65,7 +69,7 @@ LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or en
 Generate `.sql` files from `.sqlc` templates to see the composed output:
 
 ```sh
-cargo sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --skip-prepare
+cargo sqlc compose --source examples/brick/sqlc --target examples/brick/.sql --skip-prepare
 ```
 
 ### Run examples
@@ -76,37 +80,37 @@ is_spare)`, and a set is its `set_num`.
 
 ```sh
 # :compose() + :bind() — list parts for a set, version by version
-cargo run -p lego-example -- parts 10182-1
-cargo run -p lego-example -- parts 75053-1      # a set LEGO sold in two versions
+cargo run -p brick-example -- parts 10182-1
+cargo run -p brick-example -- parts 75053-1      # a set LEGO sold in two versions
 
 # :compose() in INSERT SELECT — populate the summary table, one row per (set, version, category)
-cargo run -p lego-example -- summary 10182-1
+cargo run -p brick-example -- summary 10182-1
 
 # :compose() in INSERT … ON CONFLICT, then in UPDATE — track a set's parts and sync spare counts
-cargo run -p lego-example -- spares 10182-1
+cargo run -p brick-example -- spares 10182-1
 
 # @slot composition — filter parts by color, or by category
-cargo run -p lego-example -- by-color 10182-1 "Black"
-cargo run -p lego-example -- by-category 10182-1 "Plates"
+cargo run -p brick-example -- by-color 10182-1 "Black"
+cargo run -p brick-example -- by-category 10182-1 "Plates"
 
 # Multi-value :bind() IN clause — find sets in theme scopes (each theme and every theme below it)
-cargo run -p lego-example -- themes 2010 1 52 158
+cargo run -p brick-example -- themes 2010 1 52 158
 
 # :union() — combine Technic and City sets, each labelled with its scope
-cargo run -p lego-example -- combined 2010
+cargo run -p brick-example -- combined 2010
 
 # :count(DISTINCT) — count distinct moulds in a theme scope (158 is Star Wars)
-cargo run -p lego-example -- count 158
+cargo run -p brick-example -- count 158
 
 # :intersect() and :except() — moulds Technic and City share, and moulds only City uses
-cargo run -p lego-example -- shared-moulds
-cargo run -p lego-example -- city-only-moulds
+cargo run -p brick-example -- shared-moulds
+cargo run -p brick-example -- city-only-moulds
 
 # Check the example's laws (exits 1 if any fails)
-cargo run -p lego-example -- laws
+cargo run -p brick-example -- laws
 
 # Run all examples with default values, then the laws
-cargo run -p lego-example -- all
+cargo run -p brick-example -- all
 ```
 
 ### What the queries promise

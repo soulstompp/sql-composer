@@ -1,5 +1,4 @@
--- Extra tables for the lego example.
--- Base Lego data comes from the neon sample dump, not this migration.
+-- The example's own tables, beside the catalogue sqlc-brickgen writes.
 
 CREATE TABLE IF NOT EXISTS set_category_summary (
     id SERIAL PRIMARY KEY,

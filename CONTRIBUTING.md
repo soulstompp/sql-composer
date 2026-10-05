@@ -62,8 +62,8 @@ Thank you! We'll try to respond as quickly as possible.
      sql-composer-sqlx/      # sqlx integration
      cargo-sqlc/             # CLI tool
    examples/
-     lego/                   # Runnable example on the Lego database (lego-example)
-     lego-generator/         # Large catalogue generator for Postgres (sqlc-brickgen)
+     brick/                  # Runnable example on sqlc-brickgen's database (brick-example)
+     sqlc-brickgen/          # Large catalogue generator for Postgres (sqlc-brickgen)
    ```
 
 5. **Database setup for integration tests** (optional)
@@ -102,11 +102,11 @@ Thank you! We'll try to respond as quickly as possible.
    # The catalogue generator's tests, which need no database
    cargo test -p sqlc-brickgen
 
-   # Check that the lego example's committed .sql files are what its templates compose to
-   cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify
+   # Check that the brick example's committed .sql files are what its templates compose to
+   cargo run -p cargo-sqlc -- sqlc compose --source examples/brick/sqlc --target examples/brick/.sql --verify
    ```
 
-   After changing a template under `examples/lego/sqlc`, compose the example again (the same
+   After changing a template under `examples/brick/sqlc`, compose the example again (the same
    command without `--verify`, with `--skip-prepare`) and commit the `.sql` files with it.
 
 [rustup]: https://rustup.rs/

@@ -10,7 +10,7 @@ use crate::catalogue::{
     MODEL_FIT,
 };
 use crate::encode::{Enc, Format};
-use crate::load::{index_name, CompositeIndex, KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
+use crate::load::{index_name, KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
 use crate::paired;
 use crate::switchboard::{Dials, Switchboard};
 use crate::traps::{Trap, DECLS};
@@ -1599,54 +1599,6 @@ fn each_composite_index_lists_its_plain_columns_before_its_expressions() {
         );
     }
     assert!(with_expressions > 0);
-}
-
-/// The example's migration builds on the dump's tables exactly the composite indexes the generator
-/// builds on them, in the same order and under the same names, none with an expression, since the
-/// example makes no clock function. The migration is the LEGO example's, beside this crate in the
-/// repository; where it is absent, as in the packaged crate, the test has nothing to compare and
-/// says so.
-#[test]
-fn the_example_migration_builds_the_composite_indexes_of_the_dump_tables() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../lego/migrations/20260930000000_composite_indexes.sql");
-    let sql = match std::fs::read_to_string(&path) {
-        Ok(sql) => sql,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("skipped: no LEGO example migration at {}", path.display());
-            return;
-        }
-        Err(e) => panic!("reading {}: {e}", path.display()),
-    };
-    let text = sql
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("--"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let built: Vec<String> = text
-        .split(';')
-        .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|s| !s.is_empty())
-        .collect();
-    let dump: Vec<&CompositeIndex> = COMPOSITE_INDEXES
-        .iter()
-        .filter(|s| crate::catalogue::TABLES.contains(&s.table))
-        .collect();
-    assert!(dump
-        .iter()
-        .all(|s| s.parts.iter().all(|p| matches!(p, KeyPart::Column(_)))));
-    let expected: Vec<String> = dump
-        .iter()
-        .map(|s| {
-            format!(
-                "CREATE INDEX IF NOT EXISTS {} ON {} {}",
-                index_name(s.table, s.parts),
-                s.table,
-                s.definition("public")
-            )
-        })
-        .collect();
-    assert_eq!(built, expected);
 }
 
 /// A composite index's name longer than the server keeps is cut to fit, keeps its front, and stays

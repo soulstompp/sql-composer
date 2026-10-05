@@ -85,7 +85,7 @@ sqlc/
     update_spare_counts.sqlc    # UPDATE — sync spare part counts
 ```
 
-#### [`shared/set_part_details.sqlc`](examples/lego/sqlc/shared/set_part_details.sqlc)
+#### [`shared/set_part_details.sqlc`](examples/brick/sqlc/shared/set_part_details.sqlc)
 
 ```sql
 # What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
@@ -128,7 +128,7 @@ WHERE i.set_num = :bind(set_num)
 
 This is a complete, valid query. Callers compose it into a CTE — the `WITH ... AS (...)` wrapping lives in the calling template, not here. Every `#` comment is stripped from the output.
 
-#### [`sets/select_set_parts.sqlc`](examples/lego/sqlc/sets/select_set_parts.sqlc) — SELECT
+#### [`sets/select_set_parts.sqlc`](examples/brick/sqlc/sets/select_set_parts.sqlc) — SELECT
 
 ```sql
 # List all parts for a set with full details, one row per line, version by version.
@@ -163,7 +163,7 @@ ORDER BY
     is_spare
 ```
 
-#### [`reports/insert_set_summary.sqlc`](examples/lego/sqlc/reports/insert_set_summary.sqlc) — INSERT SELECT
+#### [`reports/insert_set_summary.sqlc`](examples/brick/sqlc/reports/insert_set_summary.sqlc) — INSERT SELECT
 
 ```sql
 # Populate the per-category part count summary for a set: one row per (set, version, category). A
@@ -193,7 +193,7 @@ SET total_parts = EXCLUDED.total_parts,
     total_spare = EXCLUDED.total_spare
 ```
 
-#### [`inventory/update_spare_counts.sqlc`](examples/lego/sqlc/inventory/update_spare_counts.sqlc) — UPDATE
+#### [`inventory/update_spare_counts.sqlc`](examples/brick/sqlc/inventory/update_spare_counts.sqlc) — UPDATE
 
 ```sql
 # Sync the spare part counts in inventory_tracking from the canonical part resolution, version by
@@ -223,7 +223,7 @@ All three queries share the same 4-table join. Change the join logic once in `sh
 
 Sometimes a shared template needs to vary one piece of its logic depending on the caller. For example, the same base query might need different filters for different use cases. Instead of duplicating the entire template, use **slot arguments** — the shared template declares named slots with `@slot_name`, and the caller fills them with concrete file paths.
 
-#### [`shared/filtered_set_parts.sqlc`](examples/lego/sqlc/shared/filtered_set_parts.sqlc) — base query with a `@filter` slot
+#### [`shared/filtered_set_parts.sqlc`](examples/brick/sqlc/shared/filtered_set_parts.sqlc) — base query with a `@filter` slot
 
 ```sql
 # A set's lines that match a filter. The caller decides which filter to use (the @filter slot).
@@ -247,7 +247,7 @@ WHERE EXISTS (
 )
 ```
 
-#### [`filters/by_color.sqlc`](examples/lego/sqlc/filters/by_color.sqlc) — a standalone filter query
+#### [`filters/by_color.sqlc`](examples/brick/sqlc/filters/by_color.sqlc) — a standalone filter query
 
 ```sql
 # A colour, as a filter pattern: (any part, this colour). The colour is chosen by its name; a
@@ -259,7 +259,7 @@ FROM lego_colors c
 WHERE c.name = :bind(color_name)
 ```
 
-#### [`filters/by_category.sqlc`](examples/lego/sqlc/filters/by_category.sqlc) — another standalone filter
+#### [`filters/by_category.sqlc`](examples/brick/sqlc/filters/by_category.sqlc) — another standalone filter
 
 ```sql
 # A part category, as filter patterns: (this part, any colour) for every part in the category. A
@@ -273,13 +273,13 @@ JOIN lego_part_categories pc ON pc.id = p.part_cat_id
 WHERE pc.name = :bind(category_name)
 ```
 
-#### [`sets/select_colored_parts.sqlc`](examples/lego/sqlc/sets/select_colored_parts.sqlc) — fills `@filter` with the color filter
+#### [`sets/select_colored_parts.sqlc`](examples/brick/sqlc/sets/select_colored_parts.sqlc) — fills `@filter` with the color filter
 
 ```sql
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
 ```
 
-#### [`sets/select_category_parts.sqlc`](examples/lego/sqlc/sets/select_category_parts.sqlc) — fills `@filter` with the category filter
+#### [`sets/select_category_parts.sqlc`](examples/brick/sqlc/sets/select_category_parts.sqlc) — fills `@filter` with the category filter
 
 ```sql
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)
@@ -291,7 +291,7 @@ Both callers compose the same base query but plug in different filters. The base
 
 The Lego example also demonstrates combining queries with `:union()`, counting with `:count()`, and multi-value bind parameters for `IN` clauses.
 
-#### [`sets/select_sets_by_themes.sqlc`](examples/lego/sqlc/sets/select_sets_by_themes.sqlc) — multi-value `:bind()` for `IN`
+#### [`sets/select_sets_by_themes.sqlc`](examples/brick/sqlc/sets/select_sets_by_themes.sqlc) — multi-value `:bind()` for `IN`
 
 ```sql
 # Find sets in any of the given theme scopes: each given theme and every theme below it. One row per
@@ -321,7 +321,7 @@ ORDER BY s.year DESC, s.num_parts IS NULL DESC, s.num_parts DESC, s.set_num
 
 At runtime, call `compose_with_values()` with the actual value count for `theme_ids`, and the composer expands `:bind(theme_ids)` into the right number of placeholders: `$2, $3, $4` for 3 values.
 
-#### [`reports/combined_theme_sets.sqlc`](examples/lego/sqlc/reports/combined_theme_sets.sqlc) — `:union()`
+#### [`reports/combined_theme_sets.sqlc`](examples/brick/sqlc/reports/combined_theme_sets.sqlc) — `:union()`
 
 ```sql
 # Combine Technic and City sets into one result, each row labelled with its scope.
@@ -329,9 +329,9 @@ At runtime, call `compose_with_values()` with the actual value count for `theme_
 :union(queries/technic_sets.sqlc, queries/city_sets.sqlc)
 ```
 
-Each union source ([`queries/technic_sets.sqlc`](examples/lego/sqlc/queries/technic_sets.sqlc), [`queries/city_sets.sqlc`](examples/lego/sqlc/queries/city_sets.sqlc)) is a complete, standalone query. Bind parameters from both sources are merged alphabetically: `$1`=city_theme_id, `$2`=min_year, `$3`=technic_theme_id.
+Each union source ([`queries/technic_sets.sqlc`](examples/brick/sqlc/queries/technic_sets.sqlc), [`queries/city_sets.sqlc`](examples/brick/sqlc/queries/city_sets.sqlc)) is a complete, standalone query. Bind parameters from both sources are merged alphabetically: `$1`=city_theme_id, `$2`=min_year, `$3`=technic_theme_id.
 
-#### [`reports/count_theme_parts.sqlc`](examples/lego/sqlc/reports/count_theme_parts.sqlc) — `:count(DISTINCT)`
+#### [`reports/count_theme_parts.sqlc`](examples/brick/sqlc/reports/count_theme_parts.sqlc) — `:count(DISTINCT)`
 
 ```sql
 # Count the distinct moulds (part numbers) across every set in a theme scope.
@@ -339,11 +339,11 @@ Each union source ([`queries/technic_sets.sqlc`](examples/lego/sqlc/queries/tech
 :count(DISTINCT part_num OF queries/theme_set_parts.sqlc)
 ```
 
-Wraps [`queries/theme_set_parts.sqlc`](examples/lego/sqlc/queries/theme_set_parts.sqlc) in `SELECT COUNT(DISTINCT part_num) FROM (...) AS _count_sub`.
+Wraps [`queries/theme_set_parts.sqlc`](examples/brick/sqlc/queries/theme_set_parts.sqlc) in `SELECT COUNT(DISTINCT part_num) FROM (...) AS _count_sub`.
 
 ### Running the example
 
-The complete working example with all templates, a Rust binary, and setup instructions is in [`examples/lego/`](examples/lego/). See [`examples/lego/README.md`](examples/lego/README.md) for details.
+The complete working example with all templates, a Rust binary, and setup instructions is in [`examples/brick/`](examples/brick/). See [`examples/brick/README.md`](examples/brick/README.md) for details.
 
 ## Quick Start
 
@@ -804,8 +804,8 @@ crates/
   sql-composer-sqlx/      # sqlx integration (verify, validate)
   cargo-sqlc/             # CLI pre-compiler
 examples/
-  lego/                   # Runnable example: every template feature on the Lego database
-  lego-generator/         # sqlc-brickgen: a large catalogue built from the Lego database, for Postgres
+  brick/                  # Runnable example: every template feature, on sqlc-brickgen's database
+  sqlc-brickgen/          # sqlc-brickgen: a large catalogue built from a real one, for Postgres
 ```
 
 ## Core Library Features

@@ -1,11 +1,11 @@
 [package]
-name = "lego-example"
+name = "brick-example"
 version = "0.0.1"
 edition = "2021"
 publish = false
 
 [[bin]]
-name = "lego"
+name = "brick"
 path = "src/main.rs"
 
 [dependencies]
@@ -13,4 +13,3 @@ sql-composer = { version = "0.0.4", path = "../../crates/sql-composer" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

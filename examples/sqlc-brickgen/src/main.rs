@@ -401,8 +401,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         if !absent.is_empty() {
             return Err(format!(
                 "schema {} of this database does not hold the real catalogue (missing: {}). Load \
-                 it with `cargo run -p lego-example -- --database-url <the same URL> setup`, which \
-                 needs psql on the PATH, or name the schema that holds it with --source-schema",
+                 it with `curl -sSfL https://raw.githubusercontent.com/neondatabase/\
+                 postgres-sample-dbs/main/lego.sql | psql -X -v ON_ERROR_STOP=1 -d <the same \
+                 database>`, or name the schema that holds it with --source-schema",
                 cli.source_schema,
                 absent.join(", ")
             ));

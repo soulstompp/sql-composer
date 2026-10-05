@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use clap::{Parser, Subcommand};
 use sql_composer::composer::{ComposedSql, Composer};
@@ -10,9 +9,6 @@ use sql_composer::types::Dialect;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::Query;
 use sqlx::{PgPool, Postgres, Row};
-
-const LEGO_SQL_URL: &str =
-    "https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql";
 
 /// The set the examples use by default: Café Corner, a single-version set.
 const DEFAULT_SET: &str = "10182-1";
@@ -24,18 +20,22 @@ const CITY_THEME_ID: i32 = 52;
 const STAR_WARS_THEME_ID: i32 = 158;
 
 #[derive(Parser)]
-#[command(name = "lego", about = "sql-composer example using the Lego database")]
+#[command(name = "brick", about = "sql-composer example on a brick catalogue")]
 struct Cli {
     /// Postgres connection URL
     #[arg(
         long,
-        env = "SQLC_LEGO_DATABASE_URL",
-        default_value = "postgres:///sqlc_lego"
+        env = "SQLC_BRICK_DATABASE_URL",
+        default_value = "postgres:///sqlc_brick"
     )]
     database_url: String,
 
+    /// Schema holding sqlc-brickgen's tables, the only schema the queries search
+    #[arg(long, default_value = "lego")]
+    schema: String,
+
     /// Path to the sqlc template directory
-    #[arg(long, default_value = "examples/lego/sqlc")]
+    #[arg(long, default_value = "examples/brick/sqlc")]
     sqlc_dir: PathBuf,
 
     #[command(subcommand)]
@@ -44,8 +44,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Download lego data, create database, and run migrations
-    Setup,
     /// Run the migrations for the example tables
     Migrate,
     /// List parts for a set, version by version (:compose + :bind)
@@ -177,66 +175,7 @@ fn line_key(row: &PgRow) -> LineKey {
     )
 }
 
-/// Return the cache directory for sql-composer data files.
-fn cache_dir() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").expect("HOME not set");
-            PathBuf::from(home).join(".cache")
-        });
-    base.join("sql-composer")
-}
-
-/// Download the lego SQL dump if not already cached. Returns the path.
-async fn ensure_lego_sql() -> PathBuf {
-    let dir = cache_dir();
-    let path = dir.join("lego.sql");
-
-    if path.exists() {
-        println!("Using cached {}", path.display());
-        return path;
-    }
-
-    println!("Downloading lego database from {LEGO_SQL_URL}...");
-    std::fs::create_dir_all(&dir).expect("failed to create cache dir");
-
-    let resp = reqwest::get(LEGO_SQL_URL)
-        .await
-        .expect("failed to download lego.sql");
-
-    if !resp.status().is_success() {
-        panic!("download failed: HTTP {}", resp.status());
-    }
-
-    let bytes = resp.bytes().await.expect("failed to read response body");
-    std::fs::write(&path, &bytes).expect("failed to write lego.sql to cache");
-
-    println!("Cached to {}", path.display());
-    path
-}
-
-/// Extract the database name from a postgres:// URL, ignoring query params.
-fn db_name_from_url(url: &str) -> &str {
-    let without_query = url.split('?').next().unwrap_or(url);
-    without_query.rsplit('/').next().unwrap_or("sqlc_lego")
-}
-
-/// Build a maintenance URL by replacing the database name with `postgres`.
-fn maintenance_url(url: &str) -> String {
-    let db_name = db_name_from_url(url);
-    // Replace the last occurrence of /db_name with /postgres (before any query string)
-    if let Some(pos) = url.rfind(&format!("/{db_name}")) {
-        let mut result = url[..pos].to_string();
-        result.push_str("/postgres");
-        result.push_str(&url[pos + db_name.len() + 1..]);
-        result
-    } else {
-        url.to_string()
-    }
-}
-
-/// Quote a database name as an SQL identifier.
+/// Quote a name as an SQL identifier.
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
@@ -245,20 +184,43 @@ fn quote_ident(name: &str) -> String {
 async fn main() {
     let cli = Cli::parse();
 
-    if let Commands::Setup = cli.command {
-        cmd_setup(&cli.database_url).await;
-        return;
-    }
-
+    // Every connection searches the generator's schema alone. The database's `public` schema holds
+    // the catalogue the generator read, under the same table names, so a search that reached it
+    // would read that catalogue wherever the generator's table is missing.
+    let search_path = quote_ident(&cli.schema);
     let pool = PgPoolOptions::new()
         .max_connections(5)
+        .after_connect(move |conn, _| {
+            let search_path = search_path.clone();
+            Box::pin(async move {
+                sqlx::query("SELECT set_config('search_path', $1, false)")
+                    .bind(search_path)
+                    .execute(conn)
+                    .await
+                    .map(|_| ())
+            })
+        })
         .connect(&cli.database_url)
         .await
         .expect("failed to connect to database");
 
+    let schema_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)")
+            .bind(&cli.schema)
+            .fetch_one(&pool)
+            .await
+            .expect("query failed");
+    if !schema_exists {
+        eprintln!(
+            "schema {} is not in this database: build it with sqlc-brickgen, as the example's \
+             README shows, or name the schema that holds it with --schema",
+            cli.schema
+        );
+        std::process::exit(1);
+    }
+
     let dir = &cli.sqlc_dir;
     match cli.command {
-        Commands::Setup => unreachable!(),
         Commands::Migrate => cmd_migrate(&pool).await,
         Commands::Parts { set_num } => cmd_parts(&pool, dir, &set_num).await,
         Commands::Summary { set_num } => cmd_summary(&pool, dir, &set_num).await,
@@ -304,83 +266,6 @@ async fn main() {
     }
 }
 
-// ── setup ───────────────────────────────────────────────────────────
-
-async fn cmd_setup(database_url: &str) {
-    // 1. Download lego.sql if not cached
-    let sql_path = ensure_lego_sql().await;
-
-    // 2. Drop and recreate the database so reruns work cleanly
-    let db_name = db_name_from_url(database_url);
-    let maint_url = maintenance_url(database_url);
-
-    println!("Connecting to maintenance database...");
-    let admin_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database — is PostgreSQL running?");
-
-    println!("Dropping database {db_name} (if exists)...");
-    // Force-disconnect other sessions before dropping
-    let _ = sqlx::query(
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-         WHERE datname = $1 AND pid <> pg_backend_pid()",
-    )
-    .bind(db_name)
-    .execute(&admin_pool)
-    .await;
-
-    let ident = quote_ident(db_name);
-    sqlx::raw_sql(&format!("DROP DATABASE IF EXISTS {ident}"))
-        .execute(&admin_pool)
-        .await
-        .expect("failed to drop database");
-
-    println!("Creating database {db_name}...");
-    sqlx::raw_sql(&format!("CREATE DATABASE {ident}"))
-        .execute(&admin_pool)
-        .await
-        .expect("failed to create database");
-
-    admin_pool.close().await;
-
-    // 3. Load the lego data via psql. ON_ERROR_STOP makes a failed statement fail the load: without
-    //    it psql reports success whatever the script did.
-    println!("Loading lego data into {db_name}...");
-    let status = Command::new("psql")
-        .arg("-X")
-        .arg("-q")
-        .arg("-v")
-        .arg("ON_ERROR_STOP=1")
-        .arg(database_url)
-        .arg("-f")
-        .arg(&sql_path)
-        .stdout(std::process::Stdio::null())
-        .status()
-        .expect("failed to run psql — is PostgreSQL installed?");
-
-    if !status.success() {
-        eprintln!(
-            "psql failed loading {} — see the error above",
-            sql_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    // 4. Run migrations
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(database_url)
-        .await
-        .expect("failed to connect to database after loading data");
-
-    cmd_migrate(&pool).await;
-
-    println!("\nSetup complete! Try:");
-    println!("  cargo run -p lego-example -- all");
-}
-
 // ── migrate ─────────────────────────────────────────────────────────
 
 async fn cmd_migrate(pool: &PgPool) {
@@ -389,7 +274,6 @@ async fn cmd_migrate(pool: &PgPool) {
     let migrations = [
         include_str!("../migrations/20240101000000_example_tables.sql"),
         include_str!("../migrations/20260926000000_versions.sql"),
-        include_str!("../migrations/20260930000000_composite_indexes.sql"),
     ];
     for migration_sql in migrations {
         sqlx::raw_sql(migration_sql)

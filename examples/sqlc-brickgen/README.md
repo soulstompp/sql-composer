@@ -13,21 +13,22 @@ generated tables go to `--schema`, which is dropped and recreated on every run.
 
 ## Running
 
-The real catalogue comes from the LEGO example's `setup`, which loads it into `public` of the
-database it names. Name the same database in both commands. From the repository root:
+The generator reads the real catalogue from `public` of the database it is given, so load it there
+first, then name the same database to the generator. From the repository root:
 
 ```sh
-cargo run -p lego-example -- --database-url postgres://localhost:5432/sqlc_lego setup
-cargo run --release -p sqlc-brickgen -- --database-url postgres://localhost:5432/sqlc_lego --size small
+createdb sqlc_brick
+curl -sSfL https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql \
+    | psql -X -q -v ON_ERROR_STOP=1 -o /dev/null -d sqlc_brick
+cargo run --release -p sqlc-brickgen -- --database-url postgres:///sqlc_brick --size small
 ```
 
 Without `--size`, the generator builds `huge`: about 2 million synthesized sets, with their
 builders and purchases, which is a long load. `--size small`, 20 thousand sets, makes a quick first
 one.
 
-`setup` needs `psql` on the `PATH`, and ends with "Setup complete!". It creates the database before
-it loads the catalogue, so a `setup` that stops early leaves an empty database behind. The generator
-checks for the eight tables before it reads anything, and names the ones it cannot find.
+The load of the catalogue stops at the first failed statement. The generator checks for the eight
+tables before it reads anything, and names the ones it cannot find.
 `--schema` may not name the `--source-schema`: the target schema is dropped and recreated.
 
 `--size small|medium|huge|8m|80m|800m` names a number of synthesized sets: 20 thousand, 200
@@ -53,7 +54,7 @@ offer it.
 
 The generator is under the MIT licence, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE).
 
-It ships none of the real catalogue: the LEGO example's `setup` downloads it to your
+It ships none of the real catalogue: the `curl` in *Running* downloads it to your
 machine. It is Neon's sample dump, `lego.sql` in
 [neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
 repository under the MIT licence, whose README gives the data's source as Kaggle's

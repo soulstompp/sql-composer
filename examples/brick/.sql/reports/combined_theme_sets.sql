@@ -1,3 +1,5 @@
+SELECT * FROM (
+SELECT * FROM (
 SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
 FROM lego_sets s
 JOIN lego_themes scope ON scope.id = $3
@@ -24,7 +26,9 @@ WHERE tc.ancestor_id = $3
     ) sc
 )
   AND s.year >= $2
+) AS _union_1
 UNION
+SELECT * FROM (
 SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
 FROM lego_sets s
 JOIN lego_themes scope ON scope.id = $1
@@ -51,4 +55,5 @@ WHERE tc.ancestor_id = $1
     ) sc
 )
   AND s.year >= $2
-
+) AS _union_2
+) AS _union

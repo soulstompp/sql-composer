@@ -774,7 +774,8 @@ impl Composer {
         visited: &mut HashSet<PathBuf>,
     ) -> Result<()> {
         match command.kind {
-            CommandKind::Union => self.emit_union_numbered(command, index_map, sql, visited),
+            CommandKind::Union => self
+                .emit_set_operation_numbered(command, "UNION", "_union", index_map, sql, visited),
             CommandKind::Count => self.emit_count_numbered(command, index_map, sql, visited),
             CommandKind::Intersect => self.emit_set_operation_numbered(
                 command,
@@ -787,41 +788,6 @@ impl Composer {
             CommandKind::Except => self
                 .emit_set_operation_numbered(command, "EXCEPT", "_except", index_map, sql, visited),
         }
-    }
-
-    /// Emit SQL for a UNION command using the global index map.
-    fn emit_union_numbered(
-        &self,
-        command: &Command,
-        index_map: &BTreeMap<String, (usize, usize)>,
-        sql: &mut String,
-        visited: &mut HashSet<PathBuf>,
-    ) -> Result<()> {
-        let union_kw = if command.all {
-            "UNION ALL"
-        } else if command.distinct {
-            "UNION DISTINCT"
-        } else {
-            "UNION"
-        };
-
-        let empty_slots = HashMap::new();
-        for (i, source) in command.sources.iter().enumerate() {
-            if i > 0 {
-                let trimmed = sql.trim_end().len();
-                sql.truncate(trimmed);
-                sql.push_str(&format!("\n{union_kw}\n"));
-            }
-            if let Some(view) = self.view_reference(source)? {
-                sql.push_str(&format!("SELECT * FROM {view}"));
-                continue;
-            }
-            let resolved = self.find_template(source)?;
-            let template = parser::parse_template_file(&resolved)?;
-            self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
-        }
-
-        Ok(())
     }
 
     /// Emit SQL for a COUNT command using the global index map.
@@ -854,7 +820,9 @@ impl Composer {
                 columns: None,
                 sources: command.sources.clone(),
             };
-            self.emit_union_numbered(&union_cmd, index_map, sql, visited)?;
+            self.emit_set_operation_numbered(
+                &union_cmd, "UNION", "_union", index_map, sql, visited,
+            )?;
         } else {
             let source = &command.sources[0];
             if let Some(view) = self.view_reference(source)? {
@@ -870,12 +838,12 @@ impl Composer {
         Ok(())
     }
 
-    /// Emit SQL for an INTERSECT or EXCEPT command using the global index map.
+    /// Emit SQL for a UNION, INTERSECT or EXCEPT command using the global index map.
     ///
     /// Every source is its own derived table, and so is the whole. A source is text this
-    /// composer does not parse, so a source that is itself a union (or ends in an `ORDER BY`)
-    /// would otherwise regroup with this operator; and the whole is closed so that it composes
-    /// wherever a single query does, a `:union` member included.
+    /// composer does not parse, so a source that is itself a set operation (or ends in an
+    /// `ORDER BY`) would otherwise regroup with this operator; and the whole is closed so that it
+    /// composes wherever a single query does, as another set operation's source included.
     fn emit_set_operation_numbered(
         &self,
         command: &Command,
@@ -1070,7 +1038,7 @@ impl Composer {
         visited: &mut HashSet<PathBuf>,
     ) -> Result<ComposedSql> {
         match command.kind {
-            CommandKind::Union => self.compose_union(command, visited),
+            CommandKind::Union => self.compose_set_operation(command, "UNION", "_union", visited),
             CommandKind::Count => self.compose_count(command, visited),
             CommandKind::Intersect => {
                 self.compose_set_operation(command, "INTERSECT", "_intersect", visited)
@@ -1079,45 +1047,6 @@ impl Composer {
                 self.compose_set_operation(command, "EXCEPT", "_except", visited)
             }
         }
-    }
-
-    /// Compose a UNION command (positional path).
-    fn compose_union(
-        &self,
-        command: &Command,
-        visited: &mut HashSet<PathBuf>,
-    ) -> Result<ComposedSql> {
-        let mut parts = Vec::new();
-        let mut all_params = Vec::new();
-        let empty_slots = HashMap::new();
-
-        for source in &command.sources {
-            if let Some(view) = self.view_reference(source)? {
-                parts.push(format!("SELECT * FROM {view}"));
-                continue;
-            }
-            let resolved = self.find_template(source)?;
-            let template = parser::parse_template_file(&resolved)?;
-            let composed = self.compose_inner(&template, &empty_slots, visited)?;
-
-            parts.push(composed.sql.trim_end().to_string());
-            all_params.extend(composed.bind_params);
-        }
-
-        let union_kw = if command.all {
-            "UNION ALL"
-        } else if command.distinct {
-            "UNION DISTINCT"
-        } else {
-            "UNION"
-        };
-
-        let sql = parts.join(&format!("\n{union_kw}\n"));
-
-        Ok(ComposedSql {
-            sql,
-            bind_params: all_params,
-        })
     }
 
     /// Compose a COUNT command (positional path).
@@ -1142,7 +1071,7 @@ impl Composer {
                 columns: None,
                 sources: command.sources.clone(),
             };
-            self.compose_union(&union_cmd, visited)?
+            self.compose_set_operation(&union_cmd, "UNION", "_union", visited)?
         } else {
             let source = &command.sources[0];
             match self.view_reference(source)? {
@@ -1172,7 +1101,7 @@ impl Composer {
         })
     }
 
-    /// Compose an INTERSECT or EXCEPT command (positional path), wrapped as
+    /// Compose a UNION, INTERSECT or EXCEPT command (positional path), wrapped as
     /// [`Self::emit_set_operation_numbered`] wraps it and for the same reason.
     fn compose_set_operation(
         &self,
@@ -1215,7 +1144,7 @@ impl Composer {
         })
     }
 
-    /// The operator an `:intersect` or `:except` command writes, with its modifier.
+    /// The operator a `:union`, `:intersect` or `:except` command writes, with its modifier.
     ///
     /// A column list is refused rather than ignored: it names what `:count` counts, and a set
     /// operation compares whole rows, so a list here could only be a caller expecting a
@@ -2459,7 +2388,11 @@ mod tests {
             .compose(&file_template(&dir, "all.sqlc"))
             .unwrap()
             .sql;
-        assert_eq!(sql, "SELECT * FROM v.grand\nUNION ALL\nSELECT 1 AS y");
+        assert_eq!(
+            sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM v.grand\n) AS _union_1\nUNION ALL\n\
+             SELECT * FROM (\nSELECT 1 AS y\n) AS _union_2\n) AS _union"
+        );
     }
 
     #[test]
@@ -2703,8 +2636,10 @@ mod tests {
         assert_eq!(
             composed.sql,
             "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $2\n) AS _except_1\n\
-             EXCEPT\nSELECT * FROM (\nSELECT id FROM b\nUNION\n-- c's provenance\n\
-             SELECT id FROM c WHERE j = $1\n) AS _except_2\n) AS _except"
+             EXCEPT\nSELECT * FROM (\nSELECT * FROM (\nSELECT * FROM (\nSELECT id FROM b\n\
+             ) AS _union_1\nUNION\nSELECT * FROM (\n-- c's provenance\n\
+             SELECT id FROM c WHERE j = $1\n) AS _union_2\n) AS _union\n) AS _except_2\n\
+             ) AS _except"
         );
         assert_eq!(composed.bind_params, vec!["j", "k"]);
     }
@@ -2720,16 +2655,64 @@ mod tests {
             .sql;
         assert_eq!(
             sql,
-            "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $2\n) AS _except_1\n\
-             EXCEPT\nSELECT * FROM (\nSELECT id FROM b\n) AS _except_2\n) AS _except\n\
-             UNION ALL\n-- c's provenance\nSELECT id FROM c WHERE j = $1"
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM (\nSELECT * FROM (\n\
+             SELECT id FROM a WHERE k = $2\n) AS _except_1\nEXCEPT\nSELECT * FROM (\n\
+             SELECT id FROM b\n) AS _except_2\n) AS _except\n) AS _union_1\nUNION ALL\n\
+             SELECT * FROM (\n-- c's provenance\nSELECT id FROM c WHERE j = $1\n) AS _union_2\n\
+             ) AS _union"
         );
+    }
+
+    #[test]
+    fn test_a_union_keeps_a_union_source_grouped() {
+        // Spliced bare, `a UNION b UNION ALL c` is `(a UNION b) UNION ALL c`: every row of c,
+        // duplicates and all, comes back.
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "b_and_c.sqlc", ":union(ALL b.sqlc, c.sqlc)");
+        write_temp_file(&dir, "any.sqlc", ":union(a.sqlc, b_and_c.sqlc)");
+        let sql = composer
+            .compose(&file_template(&dir, "any.sqlc"))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            "SELECT * FROM (\nSELECT * FROM (\nSELECT id FROM a WHERE k = $2\n) AS _union_1\n\
+             UNION\nSELECT * FROM (\nSELECT * FROM (\nSELECT * FROM (\nSELECT id FROM b\n\
+             ) AS _union_1\nUNION ALL\nSELECT * FROM (\n-- c's provenance\n\
+             SELECT id FROM c WHERE j = $1\n) AS _union_2\n) AS _union\n) AS _union_2\n\
+             ) AS _union"
+        );
+    }
+
+    #[test]
+    fn test_a_union_source_keeps_its_own_order_and_limit() {
+        // Spliced bare, the first source's ORDER BY and LIMIT would end the whole union.
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "top.sqlc", "SELECT id FROM b ORDER BY id LIMIT 3");
+        write_temp_file(&dir, "top_and_c.sqlc", ":union(ALL top.sqlc, c.sqlc)");
+        let sql = composer
+            .compose(&file_template(&dir, "top_and_c.sqlc"))
+            .unwrap()
+            .sql;
+        assert!(
+            sql.contains("SELECT * FROM (\nSELECT id FROM b ORDER BY id LIMIT 3\n) AS _union_1"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn test_a_union_refuses_a_column_list() {
+        let (dir, composer) = set_operation_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "cols.sqlc", ":union(id OF a.sqlc, b.sqlc)");
+        assert!(composer.compose(&file_template(&dir, "cols.sqlc")).is_err());
     }
 
     #[test]
     fn test_set_operation_modifiers() {
         let (dir, composer) = set_operation_fixture(Dialect::Postgres);
         for (template, operator) in [
+            (":union(ALL a.sqlc, b.sqlc)", "\nUNION ALL\n"),
+            (":union(DISTINCT a.sqlc, b.sqlc)", "\nUNION DISTINCT\n"),
             (":except(ALL a.sqlc, b.sqlc)", "\nEXCEPT ALL\n"),
             (":except(DISTINCT a.sqlc, b.sqlc)", "\nEXCEPT DISTINCT\n"),
             (":intersect(ALL a.sqlc, b.sqlc)", "\nINTERSECT ALL\n"),
@@ -2912,7 +2895,8 @@ mod tests {
         assert_eq!(
             named(&dir, &composer, "all.sqlc").unwrap().sql,
             "WITH rel_grand AS (\nSELECT y FROM t\n),\nother AS (\nSELECT 1 AS y\n)\n\
-             SELECT * FROM rel_grand\nUNION ALL\nSELECT * FROM other"
+             SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM rel_grand\n) AS _union_1\n\
+             UNION ALL\nSELECT * FROM (\nSELECT * FROM other\n) AS _union_2\n) AS _union"
         );
     }
 

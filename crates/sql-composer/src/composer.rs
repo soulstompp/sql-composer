@@ -27,15 +27,16 @@ pub struct ComposedSql {
 /// Composes parsed templates into final SQL.
 ///
 /// Handles dialect-specific placeholder generation, compose reference resolution,
-/// and mock table substitution.
+/// and mock tables.
 #[derive(Clone)]
 pub struct Composer {
     /// The target database dialect for placeholder syntax.
     pub dialect: Dialect,
     /// Directories to search for template files referenced by `:compose()`.
     pub search_paths: Vec<PathBuf>,
-    /// Mock tables for test data substitution.
-    pub mock_tables: HashMap<String, MockTable>,
+    /// Mock tables by name: every composed statement that names one gets its rows at its head,
+    /// in its `WITH`, and reads them instead of the table's.
+    pub mock_tables: BTreeMap<String, MockTable>,
     /// Templates registered as views, by canonical path: wherever one is composed, the composed
     /// SQL names the view instead of inlining the template.
     pub views: HashMap<PathBuf, String>,
@@ -67,7 +68,7 @@ impl Composer {
         Self {
             dialect,
             search_paths: vec![],
-            mock_tables: HashMap::new(),
+            mock_tables: BTreeMap::new(),
             views: HashMap::new(),
             view_registry: None,
             name_relations: false,
@@ -160,28 +161,62 @@ impl Composer {
         self.search_paths.push(path);
     }
 
-    /// Register a mock table for test data substitution.
+    /// Give a table rows of your own: every statement composed after this that names the table
+    /// reads the mock's rows instead. A mock with the name of one already added replaces it.
     pub fn add_mock_table(&mut self, mock: MockTable) {
         self.mock_tables.insert(mock.name.clone(), mock);
     }
 
-    /// Compose a template into final SQL with placeholders.
-    /// Compose a template. Any name the template `:define`s stands for that relation everywhere
-    /// underneath it, so a statement can put its vocabulary in a `WITH` clause once and have
-    /// every reference to it below say the name instead of repeating the body.
+    /// Compose a template into final SQL with placeholders. Any name the template `:define`s
+    /// stands for that relation everywhere underneath it, so a statement can put its vocabulary
+    /// in a `WITH` clause once and have every reference to it below say the name instead of
+    /// repeating the body.
     pub fn compose(&self, template: &Template) -> Result<ComposedSql> {
-        if self.name_relations {
-            return self.compose_named(template, |composer, statement| {
+        let composed = if self.name_relations {
+            self.compose_named(template, |composer, statement| {
                 composer.compose_root(statement)
-            });
+            })?
+        } else {
+            let declared = self.declared_names(template)?;
+            if declared.is_empty() {
+                self.compose_root(template)?
+            } else {
+                let mut scoped = self.clone();
+                scoped.views.extend(declared);
+                scoped.compose_root(template)?
+            }
+        };
+        Ok(self.with_mocks(composed))
+    }
+
+    /// `composed` with each of its statements given, at its head, the mock tables it names.
+    fn with_mocks(&self, composed: ComposedSql) -> ComposedSql {
+        if self.mock_tables.is_empty() {
+            return composed;
         }
-        let declared = self.declared_names(template)?;
-        if declared.is_empty() {
-            return self.compose_root(template);
+        let text = &composed.sql;
+        let mut ends = Scanner::default().ends(text);
+        if ends.last() != Some(&text.len()) {
+            ends.push(text.len());
         }
-        let mut scoped = self.clone();
-        scoped.views.extend(declared);
-        scoped.compose_root(template)
+        let mut sql = String::with_capacity(text.len());
+        let mut start = 0;
+        for end in ends {
+            let statement = &text[start..end];
+            let words = code_words(statement);
+            let mocks: Vec<String> = self
+                .mock_tables
+                .values()
+                .filter(|mock| words.contains(&mock.name.to_ascii_lowercase()))
+                .map(|mock| format!("{} AS (\n{}\n)", mock.name, mock.to_sql(self.dialect)))
+                .collect();
+            sql.push_str(&head_with(statement, &mocks));
+            start = end;
+        }
+        ComposedSql {
+            sql,
+            bind_params: composed.bind_params,
+        }
     }
 
     /// The names a template declares for itself, by canonical path: one per `:define` that has a
@@ -239,12 +274,14 @@ impl Composer {
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
     ) -> Result<ComposedSql> {
-        if self.name_relations {
-            return self.compose_named(template, |composer, statement| {
+        let composed = if self.name_relations {
+            self.compose_named(template, |composer, statement| {
                 composer.compose_with_values_root(statement, values)
-            });
-        }
-        self.compose_with_values_root(template, values)
+            })?
+        } else {
+            self.compose_with_values_root(template, values)?
+        };
+        Ok(self.with_mocks(composed))
     }
 
     fn compose_with_values_root<V>(
@@ -1365,12 +1402,26 @@ struct Scanner {
 impl Scanner {
     /// The offsets just past each `;` in `text` that ends a statement.
     fn ends(&mut self, text: &str) -> Vec<usize> {
-        let bytes = text.as_bytes();
         let mut ends = Vec::new();
+        self.walk(text, |i, byte| {
+            if byte == b';' {
+                ends.push(i + 1);
+            }
+        });
+        ends
+    }
+
+    /// Walk `text`, calling `code` with the offset and value of each byte that is SQL itself:
+    /// outside quotes, quoted identifiers, comments, dollar quotes and psql meta-commands, and
+    /// opening none of them.
+    fn walk(&mut self, text: &str, mut code: impl FnMut(usize, u8)) {
+        let bytes = text.as_bytes();
         let mut scan = std::mem::take(&mut self.scan);
         let mut i = 0;
         while i < bytes.len() {
             let next = bytes.get(i + 1).copied();
+            let (at, byte) = (i, bytes[i]);
+            let was_code = matches!(scan, Scan::Code);
             scan = match (scan, bytes[i]) {
                 (Scan::Code, b'\'') => Scan::Quoted,
                 (Scan::Code, b'"') => Scan::Identifier,
@@ -1390,10 +1441,6 @@ impl Scanner {
                     }
                     None => Scan::Code,
                 },
-                (Scan::Code, b';') => {
-                    ends.push(i + 1);
-                    Scan::Code
-                }
                 (Scan::Quoted, b'\'') | (Scan::Identifier, b'"') => Scan::Code,
                 (Scan::LineComment | Scan::MetaCommand, b'\n') => Scan::Code,
                 (Scan::BlockComment(depth), b'*') if next == Some(b'/') => {
@@ -1414,11 +1461,35 @@ impl Scanner {
                 }
                 (scan, _) => scan,
             };
+            if was_code && i == at && matches!(scan, Scan::Code) {
+                code(at, byte);
+            }
             i += 1;
         }
         self.scan = scan;
-        ends
     }
+}
+
+/// The bare words of `text`, lowercased: the names its SQL spells outside strings, quoted
+/// identifiers and comments. A word is a run of ASCII letters, digits, `_` and `$`.
+fn code_words(text: &str) -> HashSet<String> {
+    let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$';
+    let mut words = HashSet::new();
+    let mut word = String::new();
+    let mut next_at = 0;
+    Scanner::default().walk(text, |at, byte| {
+        if (at != next_at || !is_word(byte)) && !word.is_empty() {
+            words.insert(std::mem::take(&mut word));
+        }
+        if is_word(byte) {
+            word.push(char::from(byte.to_ascii_lowercase()));
+        }
+        next_at = at + 1;
+    });
+    if !word.is_empty() {
+        words.insert(word);
+    }
+    words
 }
 
 /// The dollar quote that opens at the start of `bytes` (`$$` or `$tag$`), if one does.
@@ -2995,5 +3066,129 @@ mod tests {
             named(&dir, &composer, "loop/a.sqlc").unwrap_err(),
             Error::CircularReference { .. }
         ));
+    }
+
+    fn mocked(dialect: Dialect) -> Composer {
+        let mut composer = Composer::new(dialect);
+        composer.add_mock_table(
+            MockTable::new("sets")
+                .column("set_num", "varchar")
+                .column("year", "integer")
+                .row(&[Some("6000-1"), Some("1990")]),
+        );
+        composer
+    }
+
+    const SETS: &str = "sets AS (\nSELECT CAST('6000-1' AS varchar) AS set_num, \
+                        CAST('1990' AS integer) AS year\n)";
+
+    fn literal(sql: &str) -> Template {
+        parser::parse_template(sql, TemplateSource::Literal("mock".into())).unwrap()
+    }
+
+    #[test]
+    fn test_a_mocked_table_is_read_from_the_head_of_the_statement() {
+        let composed = mocked(Dialect::Postgres)
+            .compose(&literal(
+                "SELECT set_num FROM Sets WHERE year = :bind(year)",
+            ))
+            .unwrap();
+        assert_eq!(
+            composed.sql,
+            format!("WITH {SETS}\nSELECT set_num FROM Sets WHERE year = $1")
+        );
+        assert_eq!(composed.bind_params, vec!["year"]);
+    }
+
+    #[test]
+    fn test_a_statement_with_its_own_with_takes_the_mock_as_its_first_entry() {
+        let sql = mocked(Dialect::Postgres)
+            .compose(&literal(
+                "WITH RECURSIVE r AS (SELECT 1) SELECT * FROM sets, r",
+            ))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            format!("WITH RECURSIVE\n{SETS},\nr AS (SELECT 1) SELECT * FROM sets, r")
+        );
+    }
+
+    #[test]
+    fn test_a_create_as_takes_the_mock_at_the_head_of_its_query() {
+        let sql = mocked(Dialect::Postgres)
+            .compose(&literal("CREATE TABLE copy AS SELECT * FROM sets"))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            format!("CREATE TABLE copy AS WITH {SETS}\nSELECT * FROM sets")
+        );
+    }
+
+    #[test]
+    fn test_only_the_statements_that_name_a_mocked_table_take_it() {
+        let sql = mocked(Dialect::Postgres)
+            .compose(&literal(
+                "SELECT 'sets', \"sets\" -- sets\nFROM other /* sets */;\n\
+                 SELECT * FROM sets_archive;\nSELECT * FROM sets;",
+            ))
+            .unwrap()
+            .sql;
+        assert_eq!(
+            sql,
+            format!(
+                "SELECT 'sets', \"sets\" -- sets\nFROM other /* sets */;\n\
+                 SELECT * FROM sets_archive;\nWITH {SETS}\nSELECT * FROM sets;"
+            )
+        );
+    }
+
+    #[test]
+    fn test_a_mock_comes_before_the_relations_named_with_it() {
+        let (dir, mut composer) = named_fixture(Dialect::Postgres);
+        composer.mock_tables = mocked(Dialect::Postgres).mock_tables;
+        write_temp_file(
+            &dir,
+            "rel/recent.sqlc",
+            "SELECT set_num FROM sets WHERE year > 1980",
+        );
+        write_temp_file(
+            &dir,
+            "top.sqlc",
+            "SELECT * FROM (\n:compose(rel/recent.sqlc)\n) r",
+        );
+        assert_eq!(
+            named(&dir, &composer, "top.sqlc").unwrap().sql,
+            format!(
+                "WITH\n{SETS},\nrel_recent AS (\nSELECT set_num FROM sets WHERE year > 1980\n)\n\
+                 SELECT * FROM (\nSELECT * FROM rel_recent\n) r"
+            )
+        );
+    }
+
+    #[test]
+    fn test_a_mock_leaves_list_placeholders_as_they_are() {
+        let values: BTreeMap<String, Vec<i32>> = crate::bind_values!("years" => [1990, 1991]);
+        let composed = mocked(Dialect::Sqlite)
+            .compose_with_values(
+                &literal("SELECT set_num FROM sets WHERE year IN (:bind(years))"),
+                &values,
+            )
+            .unwrap();
+        assert_eq!(
+            composed.sql,
+            format!("WITH {SETS}\nSELECT set_num FROM sets WHERE year IN (?1, ?2)")
+        );
+        assert_eq!(composed.bind_params, vec!["years", "years"]);
+    }
+
+    #[test]
+    fn test_a_composer_with_no_mock_writes_no_with() {
+        let sql = Composer::new(Dialect::Postgres)
+            .compose(&literal("SELECT * FROM sets"))
+            .unwrap()
+            .sql;
+        assert_eq!(sql, "SELECT * FROM sets");
     }
 }

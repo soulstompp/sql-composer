@@ -203,4 +203,34 @@ mod tests {
         assert_eq!(sql, "SELECT ?1 AS col_1, ?2 AS col_2");
         assert_eq!(params.len(), 2);
     }
+
+    #[test]
+    fn test_a_mocked_table_is_read_where_no_table_exists() {
+        let conn = SqliteConnection::open_in_memory().unwrap();
+
+        let input = "SELECT set_num FROM lego_sets WHERE year >= :bind(year) ORDER BY set_num";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let mut composer = Composer::new(Dialect::Sqlite);
+        composer.add_mock_table(
+            sql_composer::MockTable::new("lego_sets")
+                .column("set_num", "text")
+                .column("year", "integer")
+                .row(&[Some("6000-1"), Some("1990")])
+                .row(&[Some("6001-1"), Some("1992")])
+                .row(&[Some("6002-1"), None]),
+        );
+
+        let values = bind_values!("year" => [boxed(1991i32)]);
+        let (sql, params) = conn.compose(&composer, &template, values).unwrap();
+
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<String> = stmt
+            .query_map(refs.as_slice(), |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(rows, vec!["6001-1".to_string()]);
+    }
 }

@@ -1,20 +1,10 @@
 # What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
-# line (inventory_id, part_num, color_id, is_spare). A set LEGO sold in more than one version has
-# one inventory per version, and each line carries its version. Nothing here adds two versions
+# line (inventory_id, part_num, color_id, is_spare). A set sold in more than one version has one
+# inventory per version, and each line carries its version. Nothing here adds two versions
 # together: a caller that totals a set totals it per version.
 #
 # A line is never dropped for what the catalogue lacks. A line whose part is not in the parts
 # catalogue keeps its row, with part_status 'uncatalogued' and no part name or category.
-#
-# This query is the single source of truth for "what parts are in a set."
-# If the DBA asks you to change join order or add a filter, change it here
-# and every query that composes this template picks up the fix.
-#
-# Used by: sets/select_set_parts.sqlc
-#          reports/insert_set_summary.sqlc
-#          inventory/track_set_parts.sqlc
-#          inventory/update_spare_counts.sqlc
-#          shared/filtered_set_parts.sqlc
 SELECT
     ip.inventory_id,
     i.version,

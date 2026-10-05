@@ -1,8 +1,7 @@
-# List all parts for a set with full details, one row per line, version by version.
-# Composes the shared part resolution query into a CTE. The ORDER BY ends on the line key, so the
-# order is total and a truncated listing is always the same rows. A line with no category, part name
-# or colour name comes after the named ones; the ORDER BY says so, because databases disagree on
-# where a NULL sorts.
+# A set's parts, one row per line, version by version, each line with its part, category and
+# colour. The ORDER BY ends on the line key, so the order is total and a truncated listing is always
+# the same rows. A line with no category, part name or colour name comes after the named ones; the
+# ORDER BY says so, because databases disagree on where a NULL sorts.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 )

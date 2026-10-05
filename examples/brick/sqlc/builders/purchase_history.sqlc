@@ -1,0 +1,20 @@
+# A builder's purchases in the order they were placed, each numbered, with the pieces bought so far.
+# One row per purchase, keyed by purchase_id. The window's order ends on purchase_id, so it is
+# total: two purchases placed at the same instant still take a place each, and the running total
+# moves one purchase at a time.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+)
+SELECT
+    row_number() OVER w AS nth,
+    ps.purchase_id,
+    ps.ordered_at,
+    ps.set_num,
+    s.name,
+    s.num_parts,
+    sum(s.num_parts) OVER w AS pieces_so_far
+FROM purchase_sets ps
+JOIN lego_sets s ON s.set_num = ps.set_num
+WHERE ps.builder_id = :bind(builder_id)
+WINDOW w AS (ORDER BY ps.ordered_at, ps.purchase_id)
+ORDER BY nth

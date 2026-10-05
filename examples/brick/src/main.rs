@@ -18,6 +18,20 @@ const VERSIONED_SET: &str = "75053-1";
 const TECHNIC_THEME_ID: i32 = 1;
 const CITY_THEME_ID: i32 = 52;
 const STAR_WARS_THEME_ID: i32 = 158;
+/// A small scope: two builders own every one of its sets.
+const SPYBIOTICS_THEME_ID: i32 = 463;
+/// The builder whose purchases the examples read by default.
+const DEFAULT_BUILDER: i32 = 3326;
+/// The years the purchase rollup covers by default.
+const ROLLUP_YEARS: (i32, i32) = (2016, 2017);
+
+/// Every set paired with its own theme and every theme above it, walked up from the set: the direct
+/// spelling the laws check a theme scope against.
+const WALK_UP: &str = "WITH RECURSIVE up (set_num, theme_id) AS ( \
+         SELECT s.set_num, s.theme_id FROM lego_sets s WHERE s.theme_id IS NOT NULL \
+       UNION \
+         SELECT u.set_num, t.parent_id FROM up u JOIN lego_themes t ON t.id = u.theme_id \
+         WHERE t.parent_id IS NOT NULL) ";
 
 #[derive(Parser)]
 #[command(name = "brick", about = "sql-composer example on a brick catalogue")]
@@ -70,6 +84,28 @@ enum Commands {
     SharedMoulds,
     /// Moulds City sets use and Technic sets do not (:except)
     CityOnlyMoulds,
+    /// A builder's purchases in order, numbered, with the pieces so far (window functions)
+    History { builder_id: i32 },
+    /// Each builder's latest purchase (DISTINCT ON)
+    Latest,
+    /// Each root theme's three newest sets (LATERAL)
+    Newest,
+    /// Purchases per year and root theme, with subtotals (ROLLUP)
+    Rollup { from_year: i32, to_year: i32 },
+    /// The median set size of each root theme (percentile_cont)
+    Sizes,
+    /// Every year from the first release to the last, the empty years kept (generate_series)
+    Years,
+    /// The sets no builder ever bought (NOT EXISTS)
+    NeverBought,
+    /// The builders who own every set of a theme scope (division)
+    Complete { theme_id: i32 },
+    /// A set's colours, version by version, as arrays (array_agg)
+    Colors { set_num: String },
+    /// A set as one JSON document (jsonb)
+    Document { set_num: String },
+    /// Keep a set's summary in step with MERGE
+    Merge { set_num: String },
     /// Check the example's laws; exits 1 if any fails
     Laws,
     /// Run all examples with default values, then the laws
@@ -158,6 +194,15 @@ fn print_header(name: &str, result: &ComposedSql) {
     println!("Bind params: {:?}\n", result.bind_params);
 }
 
+/// A composed statement read through an outer query, which names its rows `d`. The statement's
+/// parameters are unchanged, so the same values bind to it.
+fn read_through(result: &ComposedSql, select: &str, from_rest: &str) -> ComposedSql {
+    ComposedSql {
+        sql: format!("SELECT {select} FROM ({}) d {from_rest}", result.sql),
+        bind_params: result.bind_params.clone(),
+    }
+}
+
 /// An absent value printed as an absence, never as a number or an empty string.
 fn shown<T: Display>(v: Option<T>) -> String {
     v.map_or_else(|| "—".to_string(), |v| v.to_string())
@@ -165,6 +210,9 @@ fn shown<T: Display>(v: Option<T>) -> String {
 
 /// A line's identity: (inventory_id, part_num, color_id, is_spare).
 type LineKey = (i32, String, i32, bool);
+
+/// A set's summary rows: (version, category_name, total_parts, total_spare).
+type Summary = Vec<(i32, String, i32, i32)>;
 
 fn line_key(row: &PgRow) -> LineKey {
     (
@@ -253,6 +301,17 @@ async fn main() {
             )
             .await;
         }
+        Commands::History { builder_id } => cmd_history(&pool, dir, builder_id).await,
+        Commands::Latest => cmd_latest(&pool, dir).await,
+        Commands::Newest => cmd_newest(&pool, dir).await,
+        Commands::Rollup { from_year, to_year } => cmd_rollup(&pool, dir, from_year, to_year).await,
+        Commands::Sizes => cmd_sizes(&pool, dir).await,
+        Commands::Years => cmd_years(&pool, dir).await,
+        Commands::NeverBought => cmd_never_bought(&pool, dir).await,
+        Commands::Complete { theme_id } => cmd_complete(&pool, dir, theme_id).await,
+        Commands::Colors { set_num } => cmd_colors(&pool, dir, &set_num).await,
+        Commands::Document { set_num } => cmd_document(&pool, dir, &set_num).await,
+        Commands::Merge { set_num } => cmd_merge(&pool, dir, &set_num).await,
         Commands::Laws => {
             if !cmd_laws(&pool, dir).await {
                 std::process::exit(1);
@@ -562,6 +621,294 @@ async fn cmd_moulds(pool: &PgPool, sqlc_dir: &Path, template: &str, what: &str) 
     println!("{} moulds {what}.", rows.len());
 }
 
+/// Say how many rows a listing of the first 20 left out.
+fn more(rows: usize) {
+    if rows > 20 {
+        println!("  ... and {} more", rows - 20);
+    }
+}
+
+// ── window functions ────────────────────────────────────────────────
+
+async fn cmd_history(pool: &PgPool, sqlc_dir: &Path, builder_id: i32) {
+    let result = compose(sqlc_dir, "builders/purchase_history.sqlc");
+    print_header("builders/purchase_history", &result);
+
+    let rows = bound(&result, &[int("builder_id", builder_id)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("{} purchases by builder {builder_id}:", rows.len());
+    for row in rows.iter().take(20) {
+        println!(
+            "  {:>3}. {:<15} {:<50} {:>5} pieces, {:>6} so far",
+            row.get::<i64, _>("nth"),
+            row.get::<String, _>("set_num"),
+            row.get::<String, _>("name"),
+            shown(row.get::<Option<i32>, _>("num_parts")),
+            shown(row.get::<Option<i64>, _>("pieces_so_far")),
+        );
+    }
+    more(rows.len());
+}
+
+// ── DISTINCT ON ─────────────────────────────────────────────────────
+
+async fn cmd_latest(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "builders/latest_purchases.sqlc");
+    print_header("builders/latest_purchases", &result);
+
+    let rows = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("{} builders, each with their latest purchase:", rows.len());
+    for row in rows.iter().take(20) {
+        println!(
+            "  builder {:>6} {:<20} purchase {:>9}  set {}",
+            row.get::<i32, _>("builder_id"),
+            row.get::<String, _>("builder_name"),
+            row.get::<i64, _>("purchase_id"),
+            row.get::<String, _>("set_num"),
+        );
+    }
+    more(rows.len());
+}
+
+// ── LATERAL ─────────────────────────────────────────────────────────
+
+async fn cmd_newest(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "themes/newest_sets.sqlc");
+    print_header("themes/newest_sets", &result);
+
+    let rows = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    let roots: BTreeSet<i32> = rows.iter().map(|r| r.get("root_id")).collect();
+    println!(
+        "{} sets, the newest of {} root themes:",
+        rows.len(),
+        roots.len()
+    );
+    for row in rows.iter().take(20) {
+        println!(
+            "  {:<25} {:<15} {:<50} {:>4}",
+            row.get::<String, _>("root_name"),
+            row.get::<String, _>("set_num"),
+            row.get::<String, _>("name"),
+            shown(row.get::<Option<i32>, _>("year")),
+        );
+    }
+    more(rows.len());
+}
+
+// ── ROLLUP ──────────────────────────────────────────────────────────
+
+async fn cmd_rollup(pool: &PgPool, sqlc_dir: &Path, from_year: i32, to_year: i32) {
+    let result = compose(sqlc_dir, "reports/purchases_by_year_theme.sqlc");
+    print_header("reports/purchases_by_year_theme", &result);
+
+    let rows = bound(
+        &result,
+        &[int("from_year", from_year), int("to_year", to_year)],
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+
+    let themes = rows
+        .iter()
+        .filter(|r| r.get::<String, _>("level") == "theme")
+        .count();
+    println!("{themes} (year, root theme) rows, with these subtotals:");
+    for row in rows
+        .iter()
+        .filter(|r| r.get::<String, _>("level") != "theme")
+    {
+        println!(
+            "  {:<5} {:>4}  {:>8} purchases",
+            row.get::<String, _>("level"),
+            shown(row.get::<Option<i32>, _>("year")),
+            row.get::<i64, _>("purchases"),
+        );
+    }
+}
+
+// ── percentile_cont ─────────────────────────────────────────────────
+
+async fn cmd_sizes(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "reports/theme_set_sizes.sqlc");
+    print_header("reports/theme_set_sizes", &result);
+
+    let rows = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("{} root themes:", rows.len());
+    for row in rows.iter().take(20) {
+        println!(
+            "  {:<25} {:>5} sets ({:>5} sized): smallest {:>5}, median {:>7}, largest {:>5}",
+            row.get::<String, _>("root_name"),
+            row.get::<i64, _>("sets"),
+            row.get::<i64, _>("sized"),
+            shown(row.get::<Option<i32>, _>("smallest")),
+            shown(row.get::<Option<f64>, _>("median")),
+            shown(row.get::<Option<i32>, _>("largest")),
+        );
+    }
+    more(rows.len());
+}
+
+// ── generate_series ─────────────────────────────────────────────────
+
+async fn cmd_years(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "reports/release_years.sqlc");
+    print_header("reports/release_years", &result);
+
+    let rows: Vec<(i32, i64)> = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("year"), r.get("sets")))
+        .collect();
+
+    let empty: Vec<String> = rows
+        .iter()
+        .filter(|(_, sets)| *sets == 0)
+        .map(|(year, _)| year.to_string())
+        .collect();
+    println!(
+        "{} years, {} to {}; no release in {}: {}",
+        rows.len(),
+        shown(rows.first().map(|(y, _)| y)),
+        shown(rows.last().map(|(y, _)| y)),
+        empty.len(),
+        empty.join(", ")
+    );
+}
+
+// ── NOT EXISTS ──────────────────────────────────────────────────────
+
+async fn cmd_never_bought(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "sets/never_bought.sqlc");
+    print_header("sets/never_bought", &result);
+
+    let rows = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("{} sets no builder ever bought:", rows.len());
+    for row in rows.iter().take(20) {
+        println!(
+            "  {:<15} {:<60} {:>4}",
+            row.get::<String, _>("set_num"),
+            row.get::<String, _>("name"),
+            shown(row.get::<Option<i32>, _>("year")),
+        );
+    }
+    more(rows.len());
+}
+
+// ── division ────────────────────────────────────────────────────────
+
+async fn cmd_complete(pool: &PgPool, sqlc_dir: &Path, theme_id: i32) {
+    let result = compose(sqlc_dir, "builders/complete_scope.sqlc");
+    print_header("builders/complete_scope", &result);
+
+    let rows = bound(&result, &[int("theme_id", theme_id)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!(
+        "{} builders own every set in the scope of theme {theme_id}:",
+        rows.len()
+    );
+    for row in rows.iter().take(20) {
+        println!(
+            "  builder {:>6} {}",
+            row.get::<i32, _>("builder_id"),
+            row.get::<String, _>("name"),
+        );
+    }
+    more(rows.len());
+}
+
+// ── arrays ──────────────────────────────────────────────────────────
+
+async fn cmd_colors(pool: &PgPool, sqlc_dir: &Path, set_num: &str) {
+    let result = compose(sqlc_dir, "sets/set_colors.sqlc");
+    print_header("sets/set_colors", &result);
+
+    let rows = bound(&result, &[text("set_num", set_num)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("Colours of set {set_num}, version by version:");
+    for row in &rows {
+        let colors: Vec<String> = row
+            .get::<Option<Vec<String>>, _>("colors")
+            .unwrap_or_default();
+        println!(
+            "  version {}: {} colours, {} lines with no colour name: {}",
+            row.get::<i32, _>("version"),
+            colors.len(),
+            row.get::<i64, _>("unnamed_lines"),
+            colors.join(", "),
+        );
+    }
+}
+
+// ── jsonb ───────────────────────────────────────────────────────────
+
+async fn cmd_document(pool: &PgPool, sqlc_dir: &Path, set_num: &str) {
+    let result = compose(sqlc_dir, "sets/set_document.sqlc");
+    print_header("sets/set_document", &result);
+
+    let pretty = read_through(&result, "jsonb_pretty(d.document) AS document", "");
+    let rows = bound(&pretty, &[text("set_num", set_num)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    for row in &rows {
+        let document: String = row.get("document");
+        let lines: Vec<&str> = document.lines().collect();
+        for line in lines.iter().take(30) {
+            println!("  {line}");
+        }
+        if lines.len() > 30 {
+            println!("  ... and {} more lines of the document", lines.len() - 30);
+        }
+    }
+    if rows.is_empty() {
+        println!("No set {set_num}.");
+    }
+}
+
+// ── MERGE ───────────────────────────────────────────────────────────
+
+async fn cmd_merge(pool: &PgPool, sqlc_dir: &Path, set_num: &str) {
+    let result = compose(sqlc_dir, "reports/merge_set_summary.sqlc");
+    print_header("reports/merge_set_summary", &result);
+
+    let affected = bound(&result, &[text("set_num", set_num)])
+        .execute(pool)
+        .await
+        .expect("query failed")
+        .rows_affected();
+
+    println!("Merged {affected} category summary rows for set {set_num}.");
+}
+
 // ── laws ────────────────────────────────────────────────────────────
 //
 // Each law checks a composed template against the same answer computed directly in SQL, and
@@ -722,16 +1069,11 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         .await
         .expect("query failed")
         .get(0);
-    let walked: i64 = sqlx::query_scalar(
-        "WITH RECURSIVE up (set_num, theme_id) AS ( \
-             SELECT s.set_num, s.theme_id FROM lego_sets s WHERE s.theme_id IS NOT NULL \
-           UNION \
-             SELECT u.set_num, t.parent_id FROM up u JOIN lego_themes t ON t.id = u.theme_id \
-             WHERE t.parent_id IS NOT NULL) \
-         SELECT count(DISTINCT ip.part_num) FROM lego_inventory_parts ip \
+    let walked: i64 = sqlx::query_scalar(&format!(
+        "{WALK_UP} SELECT count(DISTINCT ip.part_num) FROM lego_inventory_parts ip \
          JOIN lego_inventories i ON i.id = ip.inventory_id \
-         WHERE i.set_num IN (SELECT set_num FROM up WHERE theme_id = $1)",
-    )
+         WHERE i.set_num IN (SELECT set_num FROM up WHERE theme_id = $1)"
+    ))
     .bind(STAR_WARS_THEME_ID)
     .fetch_one(pool)
     .await
@@ -835,6 +1177,425 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         &format!("(version, rows, parts) {rows:?} against the tables' (version, categories, pieces) {categories:?}"),
     );
 
+    // 7. A builder's purchase history lists the builder's purchases in the order they were placed,
+    //    numbered from 1, and each running total is the pieces of that purchase and every one
+    //    before it, ending on the builder's pieces counted straight from the tables.
+    let history = compose(sqlc_dir, "builders/purchase_history.sqlc");
+    let rows = bound(&history, &[int("builder_id", DEFAULT_BUILDER)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+    let nths: Vec<i64> = rows.iter().map(|r| r.get("nth")).collect();
+    let listed: Vec<i64> = rows.iter().map(|r| r.get("purchase_id")).collect();
+    let totals: Vec<Option<i64>> = rows.iter().map(|r| r.get("pieces_so_far")).collect();
+    let summed: Vec<Option<i64>> = rows
+        .iter()
+        .scan(None, |so_far: &mut Option<i64>, r| {
+            if let Some(n) = r.get::<Option<i32>, _>("num_parts") {
+                *so_far = Some(so_far.unwrap_or(0) + i64::from(n));
+            }
+            Some(*so_far)
+        })
+        .collect();
+    let placed: Vec<i64> = sqlx::query_scalar(
+        "SELECT purchase_id FROM lego_purchases WHERE builder_id = $1 \
+         ORDER BY ordered_at, purchase_id",
+    )
+    .bind(DEFAULT_BUILDER)
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    let pieces: Option<i64> = sqlx::query_scalar(
+        "SELECT sum(s.num_parts) FROM lego_purchases p \
+         JOIN lego_collection c ON c.builder_id = p.builder_id AND c.row_no = p.row_no \
+         JOIN lego_sets s ON s.set_num = c.set_num WHERE p.builder_id = $1",
+    )
+    .bind(DEFAULT_BUILDER)
+    .fetch_one(pool)
+    .await
+    .expect("query failed");
+    let last = totals.last().copied().flatten();
+    all_hold &= verdict(
+        &format!("builder {DEFAULT_BUILDER}'s history is their purchases in order, with running totals"),
+        !placed.is_empty()
+            && nths == (1..=placed.len() as i64).collect::<Vec<_>>()
+            && listed == placed
+            && totals == summed
+            && last == pieces,
+        &format!(
+            "{} rows in the order of {} placed, last running total {} against {} pieces in the tables",
+            rows.len(),
+            placed.len(),
+            shown(last),
+            shown(pieces)
+        ),
+    );
+
+    // 8. DISTINCT ON keeps, for each builder, the purchase that comes first when the builder's
+    //    purchases are numbered latest first.
+    let latest = compose(sqlc_dir, "builders/latest_purchases.sqlc");
+    let kept: BTreeSet<(i32, i64)> = bound(&latest, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("builder_id"), r.get("purchase_id")))
+        .collect();
+    let numbered: BTreeSet<(i32, i64)> = sqlx::query_as(
+        "SELECT builder_id, purchase_id FROM ( \
+           SELECT builder_id, purchase_id, row_number() OVER (PARTITION BY builder_id \
+             ORDER BY ordered_at DESC, purchase_id DESC) AS nth \
+           FROM lego_purchases) p \
+         WHERE nth = 1",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .collect();
+    all_hold &= verdict(
+        "each builder's latest purchase is the first of their purchases, latest first",
+        !kept.is_empty() && kept == numbered,
+        &format!("{} kept, {} numbered first", kept.len(), numbered.len()),
+    );
+
+    // 9. LATERAL with LIMIT 3 keeps, for each root theme, the sets that come first three when the
+    //    sets walked up to that root are numbered newest first.
+    let newest = compose(sqlc_dir, "themes/newest_sets.sqlc");
+    let kept: BTreeSet<(i32, String)> = bound(&newest, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("root_id"), r.get("set_num")))
+        .collect();
+    let numbered: BTreeSet<(i32, String)> = sqlx::query_as(&format!(
+        "{WALK_UP} SELECT theme_id, set_num FROM ( \
+           SELECT u.theme_id, u.set_num, row_number() OVER (PARTITION BY u.theme_id \
+             ORDER BY s.year DESC NULLS LAST, s.set_num DESC) AS nth \
+           FROM up u JOIN lego_themes r ON r.id = u.theme_id \
+           JOIN lego_sets s ON s.set_num = u.set_num \
+           WHERE r.parent_id IS NULL) n \
+         WHERE nth <= 3"
+    ))
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .collect();
+    all_hold &= verdict(
+        "each root theme's newest sets are its first three, newest first",
+        !kept.is_empty() && kept == numbered,
+        &format!("{} kept, {} numbered", kept.len(), numbered.len()),
+    );
+
+    // 10. The ROLLUP adds up: each year's subtotal is its themes' sum, and the total is the
+    //     years' sum and every purchase of those years in the tables.
+    let (from_year, to_year) = ROLLUP_YEARS;
+    let rollup = compose(sqlc_dir, "reports/purchases_by_year_theme.sqlc");
+    let rows = bound(
+        &rollup,
+        &[int("from_year", from_year), int("to_year", to_year)],
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    let mut themes: BTreeMap<i32, i64> = BTreeMap::new();
+    let mut years: BTreeMap<i32, i64> = BTreeMap::new();
+    let mut total = None;
+    for row in &rows {
+        let purchases: i64 = row.get("purchases");
+        match row.get::<String, _>("level").as_str() {
+            "theme" => *themes.entry(row.get("year")).or_default() += purchases,
+            "year" => {
+                years.insert(row.get("year"), purchases);
+            }
+            _ => total = Some(purchases),
+        }
+    }
+    let direct: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lego_purchases \
+         WHERE extract(year FROM ordered_at AT TIME ZONE 'UTC') BETWEEN $1 AND $2",
+    )
+    .bind(from_year)
+    .bind(to_year)
+    .fetch_one(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        &format!("purchases {from_year} to {to_year} add up by theme, by year and in total"),
+        !years.is_empty()
+            && themes == years
+            && total == Some(years.values().sum())
+            && total == Some(direct),
+        &format!(
+            "years {years:?}, their themes {themes:?}, total {} against {direct} in the tables",
+            shown(total)
+        ),
+    );
+
+    // 11. A root theme's median size is the middle of its sizes listed straight from the tables,
+    //     over a walk up from each set.
+    let sizes = compose(sqlc_dir, "reports/theme_set_sizes.sqlc");
+    let row = bound(&sizes, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .into_iter()
+        .find(|r| r.get::<i32, _>("root_id") == STAR_WARS_THEME_ID);
+    let (median, sized) = row.map_or((None, 0), |r| {
+        (r.get::<Option<f64>, _>("median"), r.get::<i64, _>("sized"))
+    });
+    let mut listed: Vec<i32> = sqlx::query_scalar(&format!(
+        "{WALK_UP} SELECT s.num_parts FROM up u JOIN lego_sets s ON s.set_num = u.set_num \
+         WHERE u.theme_id = $1 AND s.num_parts IS NOT NULL"
+    ))
+    .bind(STAR_WARS_THEME_ID)
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    listed.sort_unstable();
+    let n = listed.len();
+    let middle = match n {
+        0 => None,
+        _ if n % 2 == 1 => Some(f64::from(listed[n / 2])),
+        _ => Some((f64::from(listed[n / 2 - 1]) + f64::from(listed[n / 2])) / 2.0),
+    };
+    all_hold &= verdict(
+        "the median size of Star Wars is the middle of its sizes",
+        middle.is_some() && median == middle && sized == n as i64,
+        &format!(
+            "median {} of {sized} sized sets, against {} of {n} listed",
+            shown(median),
+            shown(middle)
+        ),
+    );
+
+    // 12. The release years run from the first to the last, once each; their counts add up to
+    //     every set with a year, and a year shows 0 exactly when no set has it.
+    let release_years = compose(sqlc_dir, "reports/release_years.sqlc");
+    let rows: Vec<(i32, i64)> = bound(&release_years, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("year"), r.get("sets")))
+        .collect();
+    let (first, last, dated): (Option<i32>, Option<i32>, i64) =
+        sqlx::query_as("SELECT min(year), max(year), count(year) FROM lego_sets")
+            .fetch_one(pool)
+            .await
+            .expect("query failed");
+    let present: BTreeSet<i32> =
+        sqlx::query_scalar("SELECT DISTINCT year FROM lego_sets WHERE year IS NOT NULL")
+            .fetch_all(pool)
+            .await
+            .expect("query failed")
+            .into_iter()
+            .collect();
+    let calendar: Vec<i32> = match (first, last) {
+        (Some(first), Some(last)) => (first..=last).collect(),
+        _ => Vec::new(),
+    };
+    let listed: Vec<i32> = rows.iter().map(|(year, _)| *year).collect();
+    let empty: BTreeSet<i32> = rows
+        .iter()
+        .filter(|(_, sets)| *sets == 0)
+        .map(|(year, _)| *year)
+        .collect();
+    let absent: BTreeSet<i32> = calendar
+        .iter()
+        .filter(|year| !present.contains(year))
+        .copied()
+        .collect();
+    let counted: i64 = rows.iter().map(|(_, sets)| sets).sum();
+    all_hold &= verdict(
+        "every year from first release to last is listed once, the empty ones with 0",
+        !rows.is_empty() && listed == calendar && counted == dated && empty == absent,
+        &format!(
+            "{} years listed against {}; {counted} sets against {dated}; empty {empty:?} against {absent:?}",
+            listed.len(),
+            calendar.len()
+        ),
+    );
+
+    // 13. The sets never bought and the sets bought are every set, and no set is both.
+    let never_bought = compose(sqlc_dir, "sets/never_bought.sqlc");
+    let never: BTreeSet<String> = bound(&never_bought, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| r.get("set_num"))
+        .collect();
+    let bought: BTreeSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT c.set_num FROM lego_purchases p \
+         JOIN lego_collection c ON c.builder_id = p.builder_id AND c.row_no = p.row_no",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .collect();
+    let every: BTreeSet<String> = sqlx::query_scalar("SELECT set_num FROM lego_sets")
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .into_iter()
+        .collect();
+    let union: BTreeSet<String> = never.union(&bought).cloned().collect();
+    all_hold &= verdict(
+        "the sets never bought and the sets bought are every set, none in both",
+        !never.is_empty() && never.is_disjoint(&bought) && union == every,
+        &format!(
+            "{} + {} = {} against {}",
+            never.len(),
+            bought.len(),
+            union.len(),
+            every.len()
+        ),
+    );
+
+    // 14. The builders the division keeps are the builders whose collection holds as many of the
+    //     scope's sets as the scope has.
+    let complete = compose(sqlc_dir, "builders/complete_scope.sqlc");
+    let kept: BTreeSet<i32> = bound(&complete, &[int("theme_id", SPYBIOTICS_THEME_ID)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| r.get("builder_id"))
+        .collect();
+    let counted: BTreeSet<i32> = sqlx::query_scalar(&format!(
+        "{WALK_UP}, scope AS (SELECT set_num FROM up WHERE theme_id = $1) \
+         SELECT c.builder_id FROM lego_collection c JOIN scope ON scope.set_num = c.set_num \
+         GROUP BY c.builder_id HAVING count(DISTINCT c.set_num) = (SELECT count(*) FROM scope)"
+    ))
+    .bind(SPYBIOTICS_THEME_ID)
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .collect();
+    all_hold &= verdict(
+        "the builders owning all of Spybiotics are those holding as many of its sets as it has",
+        !kept.is_empty() && kept == counted,
+        &format!("{kept:?} against {counted:?}"),
+    );
+
+    // 15. A set's colour arrays hold, version by version, as many colours as its lines name.
+    let colors = compose(sqlc_dir, "sets/set_colors.sqlc");
+    let arrays: Vec<(i32, i64)> = bound(&colors, &[text("set_num", VERSIONED_SET)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| {
+            let colors = r
+                .get::<Option<Vec<String>>, _>("colors")
+                .unwrap_or_default();
+            (r.get("version"), colors.len() as i64)
+        })
+        .collect();
+    let named: Vec<(i32, i64)> = sqlx::query_as(
+        "SELECT i.version, count(DISTINCT c.name) FROM lego_inventory_parts ip \
+         JOIN lego_inventories i ON i.id = ip.inventory_id \
+         JOIN lego_colors c ON c.id = ip.color_id \
+         WHERE i.set_num = $1 GROUP BY i.version ORDER BY i.version",
+    )
+    .bind(VERSIONED_SET)
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        &format!("the colours of {VERSIONED_SET} are the colours its lines name, per version"),
+        !arrays.is_empty() && arrays == named,
+        &format!("(version, colours) {arrays:?} against {named:?}"),
+    );
+
+    // 16. A set's document holds every line of the set once.
+    let document = compose(sqlc_dir, "sets/set_document.sqlc");
+    let counted = read_through(
+        &document,
+        "coalesce(sum(jsonb_array_length(v.version -> 'lines')), 0)::bigint AS lines",
+        "CROSS JOIN LATERAL jsonb_array_elements(d.document -> 'versions') AS v(version)",
+    );
+    let in_document: i64 = bound(&counted, &[text("set_num", DEFAULT_SET)])
+        .fetch_one(pool)
+        .await
+        .expect("query failed")
+        .get("lines");
+    let in_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lego_inventory_parts ip \
+         JOIN lego_inventories i ON i.id = ip.inventory_id WHERE i.set_num = $1",
+    )
+    .bind(DEFAULT_SET)
+    .fetch_one(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        &format!("the document of {DEFAULT_SET} holds each of its lines once"),
+        in_tables > 0 && in_document == in_tables,
+        &format!("{in_document} lines in the document, {in_tables} in the tables"),
+    );
+
+    // 17. MERGE repairs a summary to what INSERT … ON CONFLICT writes: after INSERT, every total
+    //     is put wrong and one row removed, and MERGE, run twice, brings back the same rows. Run
+    //     in a transaction that is rolled back, so checking leaves nothing behind.
+    let merge = compose(sqlc_dir, "reports/merge_set_summary.sqlc");
+    let law = format!("MERGE of {VERSIONED_SET} repairs its summary to what INSERT writes");
+    let read = "SELECT version, category_name, total_parts, total_spare \
+                FROM set_category_summary WHERE set_num = $1 ORDER BY version, category_name";
+    let values = [text("set_num", VERSIONED_SET)];
+    let mut tx = pool.begin().await.expect("begin failed");
+    let outcome: Result<(Summary, Summary), sqlx::Error> = async {
+        sqlx::query("DELETE FROM set_category_summary WHERE set_num = $1")
+            .bind(VERSIONED_SET)
+            .execute(&mut *tx)
+            .await?;
+        bound(&summary, &values).execute(&mut *tx).await?;
+        let inserted: Summary = sqlx::query_as(read)
+            .bind(VERSIONED_SET)
+            .fetch_all(&mut *tx)
+            .await?;
+        sqlx::query(
+            "UPDATE set_category_summary SET total_parts = total_parts + 1, \
+             total_spare = total_spare + 1 WHERE set_num = $1",
+        )
+        .bind(VERSIONED_SET)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM set_category_summary WHERE id = \
+             (SELECT min(id) FROM set_category_summary WHERE set_num = $1)",
+        )
+        .bind(VERSIONED_SET)
+        .execute(&mut *tx)
+        .await?;
+        for _ in 0..2 {
+            bound(&merge, &values).execute(&mut *tx).await?;
+        }
+        let merged: Summary = sqlx::query_as(read)
+            .bind(VERSIONED_SET)
+            .fetch_all(&mut *tx)
+            .await?;
+        Ok((inserted, merged))
+    }
+    .await;
+    tx.rollback().await.expect("rollback failed");
+    all_hold &= match outcome {
+        Ok((inserted, merged)) => verdict(
+            &law,
+            !inserted.is_empty() && merged == inserted,
+            &format!(
+                "{} rows inserted, {} after the merge",
+                inserted.len(),
+                merged.len()
+            ),
+        ),
+        Err(e) => verdict(&law, false, &format!("a statement failed: {e}")),
+    };
+
     println!(
         "=== Laws: {} ===",
         if all_hold { "all hold" } else { "SOME FAIL" }
@@ -876,6 +1637,17 @@ async fn cmd_all(pool: &PgPool, sqlc_dir: &Path) -> bool {
         "used by City and not Technic",
     )
     .await;
+    cmd_history(pool, sqlc_dir, DEFAULT_BUILDER).await;
+    cmd_latest(pool, sqlc_dir).await;
+    cmd_newest(pool, sqlc_dir).await;
+    cmd_rollup(pool, sqlc_dir, ROLLUP_YEARS.0, ROLLUP_YEARS.1).await;
+    cmd_sizes(pool, sqlc_dir).await;
+    cmd_years(pool, sqlc_dir).await;
+    cmd_never_bought(pool, sqlc_dir).await;
+    cmd_complete(pool, sqlc_dir, SPYBIOTICS_THEME_ID).await;
+    cmd_colors(pool, sqlc_dir, VERSIONED_SET).await;
+    cmd_document(pool, sqlc_dir, DEFAULT_SET).await;
+    cmd_merge(pool, sqlc_dir, VERSIONED_SET).await;
 
     println!("\n=== All examples complete ===");
     cmd_laws(pool, sqlc_dir).await

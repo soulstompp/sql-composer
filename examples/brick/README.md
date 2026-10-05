@@ -4,8 +4,8 @@ A full showcase of sql-composer features using the [Lego database](https://raw.g
 
 ## Setup
 
-The example runs on the database sqlc-brickgen builds. With PostgreSQL running and `psql` on the
-`PATH`, from the repository root:
+The example runs on the database sqlc-brickgen builds, on PostgreSQL 15 or later (for `MERGE`).
+With the server running and `psql` on the `PATH`, from the repository root:
 
 ```sh
 createdb sqlc_brick
@@ -106,6 +106,39 @@ cargo run -p brick-example -- count 158
 cargo run -p brick-example -- shared-moulds
 cargo run -p brick-example -- city-only-moulds
 
+# Window functions — a builder's purchases in order, numbered, with the pieces bought so far
+cargo run -p brick-example -- history 3326
+
+# DISTINCT ON — each builder's latest purchase
+cargo run -p brick-example -- latest
+
+# LATERAL — each root theme's three newest sets
+cargo run -p brick-example -- newest
+
+# ROLLUP — purchases per year and root theme, with each year's subtotal and the grand total
+cargo run -p brick-example -- rollup 2016 2017
+
+# percentile_cont — the median set size of each root theme
+cargo run -p brick-example -- sizes
+
+# generate_series — every year from the first release to the last, the years with none kept
+cargo run -p brick-example -- years
+
+# NOT EXISTS — the sets no builder ever bought
+cargo run -p brick-example -- never-bought
+
+# Division — the builders who own every set of a theme scope (463 is Spybiotics)
+cargo run -p brick-example -- complete 463
+
+# array_agg — a set's colours, version by version
+cargo run -p brick-example -- colors 75053-1
+
+# jsonb — a set as one JSON document
+cargo run -p brick-example -- document 10182-1
+
+# MERGE — keep a set's summary in step with its totals
+cargo run -p brick-example -- merge 75053-1
+
 # Check the example's laws (exits 1 if any fails)
 cargo run -p brick-example -- laws
 
@@ -138,6 +171,9 @@ sqlc/
     theme_closure.sqlc             # Every theme with every theme below it
     filtered_set_parts.sqlc        # @filter slot base query
     scope_moulds.sqlc              # @scope slot: the moulds a theme scope uses
+    purchase_sets.sqlc             # Every purchase with its builder and set, through its collection row
+    set_roots.sqlc                 # Every set with its root theme
+    set_category_totals.sqlc       # A set's piece totals per version and category
   scopes/
     technic.sqlc                   # The Technic scope (theme ids)
     city.sqlc                      # The City scope (theme ids)
@@ -146,15 +182,28 @@ sqlc/
     select_colored_parts.sqlc      # @filter = by_color
     select_category_parts.sqlc     # @filter = by_category
     select_sets_by_themes.sqlc     # Multi-value :bind() IN clause
+    never_bought.sqlc              # NOT EXISTS: the sets no builder bought
+    set_colors.sqlc                # array_agg: a set's colours per version
+    set_document.sqlc              # jsonb: a set as one document
   filters/
     by_color.sqlc                  # Color filter patterns
     by_category.sqlc               # Category filter patterns
   reports/
     insert_set_summary.sqlc        # INSERT SELECT via :compose()
+    merge_set_summary.sqlc         # MERGE via :compose()
+    purchases_by_year_theme.sqlc   # ROLLUP: purchases per year and root theme
+    theme_set_sizes.sqlc           # percentile_cont: the median set size per root theme
+    release_years.sqlc             # generate_series: every year, the empty ones kept
     combined_theme_sets.sqlc       # :union() of two queries
     count_theme_parts.sqlc         # :count(DISTINCT)
     shared_moulds.sqlc             # :intersect() of two queries
     city_only_moulds.sqlc          # :except() of two queries
+  builders/
+    purchase_history.sqlc          # Window functions over a builder's purchases
+    latest_purchases.sqlc          # DISTINCT ON: each builder's latest purchase
+    complete_scope.sqlc            # Division: the builders who own a whole scope
+  themes/
+    newest_sets.sqlc               # LATERAL: each root theme's newest three
   inventory/
     track_set_parts.sqlc           # INSERT … ON CONFLICT via :compose()
     update_spare_counts.sqlc       # UPDATE via :compose()
@@ -181,3 +230,14 @@ sqlc/
 | `:except(src, src)` | `city_only_moulds.sqlc` |
 | `#` comments | All `.sqlc` files |
 | Multi-value bind (IN) | `select_sets_by_themes.sqlc` |
+| Window functions | `purchase_history.sqlc` |
+| `DISTINCT ON` | `latest_purchases.sqlc` |
+| `LATERAL` | `newest_sets.sqlc` |
+| `GROUPING SETS` (`ROLLUP`) | `purchases_by_year_theme.sqlc` |
+| `percentile_cont … WITHIN GROUP` | `theme_set_sizes.sqlc` |
+| `generate_series` | `release_years.sqlc` |
+| Anti-join (`NOT EXISTS`) | `never_bought.sqlc` |
+| Division (`NOT EXISTS … EXCEPT`) | `complete_scope.sqlc` |
+| Arrays (`array_agg`) | `set_colors.sqlc` |
+| `jsonb` | `set_document.sqlc` |
+| `MERGE` | `merge_set_summary.sqlc` |

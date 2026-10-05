@@ -1,0 +1,12 @@
+# Every year from the first release to the last, with the number of sets released in it: one row
+# per year, keyed by year. generate_series writes the calendar and the sets are counted against it,
+# so a year with no release is a year examined and found empty, with 0, and never a year left out.
+SELECT y.year, count(s.set_num) AS sets
+FROM (
+    SELECT min(year) AS first_year, max(year) AS last_year
+    FROM lego_sets
+) span
+CROSS JOIN generate_series(span.first_year, span.last_year) AS y(year)
+LEFT JOIN lego_sets s ON s.year = y.year
+GROUP BY y.year
+ORDER BY y.year

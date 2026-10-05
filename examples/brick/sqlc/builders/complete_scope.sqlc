@@ -1,0 +1,21 @@
+# The builders who own every set of a theme scope (the theme and every theme below it): one row per
+# builder, keyed by builder_id. A builder is kept when the scope's sets, less the sets in the
+# builder's collection, leave nothing. A scope with no sets would keep every builder, so the scope
+# must hold at least one set.
+WITH scope_sets AS (
+    SELECT s.set_num
+    FROM lego_sets s
+    JOIN (
+        :compose(shared/theme_closure.sqlc)
+    ) tc ON tc.theme_id = s.theme_id
+    WHERE tc.ancestor_id = :bind(theme_id)
+)
+SELECT b.builder_id, b.name
+FROM lego_builders b
+WHERE EXISTS (SELECT 1 FROM scope_sets)
+  AND NOT EXISTS (
+    SELECT set_num FROM scope_sets
+    EXCEPT
+    SELECT c.set_num FROM lego_collection c WHERE c.builder_id = b.builder_id
+)
+ORDER BY b.builder_id

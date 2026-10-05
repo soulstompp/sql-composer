@@ -1,0 +1,16 @@
+# Every set with the root theme at the top of its theme's tree, one row per set, keyed by set_num.
+# A root theme has no parent, and the theme closure pairs each theme with every theme above it, so
+# each set meets exactly one root.
+SELECT
+    s.set_num,
+    s.name,
+    s.year,
+    s.num_parts,
+    r.id AS root_id,
+    r.name AS root_name
+FROM lego_sets s
+JOIN (
+    :compose(shared/theme_closure.sqlc)
+) tc ON tc.theme_id = s.theme_id
+JOIN lego_themes r ON r.id = tc.ancestor_id
+WHERE r.parent_id IS NULL

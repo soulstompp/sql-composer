@@ -1,0 +1,33 @@
+# Purchases per year and root theme, with each year's subtotal and the grand total, for the years
+# from from_year to to_year. ROLLUP adds a row for each year across its themes, and one row across
+# everything; GROUPING tells those rows from a theme's own, so a subtotal is labelled as one and
+# never read as a theme with no name. One row per (level, year, root_id). The year is the
+# purchase's, in UTC.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+),
+set_roots AS (
+    :compose(shared/set_roots.sqlc)
+),
+dated AS (
+    SELECT
+        extract(year FROM ps.ordered_at AT TIME ZONE 'UTC')::integer AS year,
+        sr.root_id,
+        sr.root_name
+    FROM purchase_sets ps
+    JOIN set_roots sr ON sr.set_num = ps.set_num
+)
+SELECT
+    CASE
+        WHEN GROUPING(year) = 1 THEN 'total'
+        WHEN GROUPING(root_id) = 1 THEN 'year'
+        ELSE 'theme'
+    END AS level,
+    year,
+    root_id,
+    root_name,
+    count(*) AS purchases
+FROM dated
+WHERE year BETWEEN :bind(from_year) AND :bind(to_year)
+GROUP BY ROLLUP (year, (root_id, root_name))
+ORDER BY year NULLS LAST, root_id NULLS LAST

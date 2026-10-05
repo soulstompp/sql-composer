@@ -1,0 +1,18 @@
+# The same summary as insert_set_summary, kept in step with MERGE: a summary row the totals still
+# have is updated, and a missing one is inserted. MERGE never deletes here, so a category the set
+# no longer has keeps its row.
+MERGE INTO set_category_summary sc
+USING (
+    SELECT :bind(set_num)::varchar AS set_num, t.*
+    FROM (
+        :compose(shared/set_category_totals.sqlc)
+    ) t
+) src
+ON sc.set_num = src.set_num
+   AND sc.version = src.version
+   AND sc.category_name = src.category_name
+WHEN MATCHED THEN
+    UPDATE SET total_parts = src.total_parts, total_spare = src.total_spare
+WHEN NOT MATCHED THEN
+    INSERT (set_num, version, category_name, total_parts, total_spare)
+    VALUES (src.set_num, src.version, src.category_name, src.total_parts, src.total_spare)

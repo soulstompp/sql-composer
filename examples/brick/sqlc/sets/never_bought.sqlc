@@ -1,0 +1,13 @@
+# The sets no builder ever bought: one row per set, keyed by set_num. NOT EXISTS keeps a set when
+# no purchase reaches it.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+)
+SELECT s.set_num, s.name, s.year, s.theme_id
+FROM lego_sets s
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM purchase_sets ps
+    WHERE ps.set_num = s.set_num
+)
+ORDER BY s.set_num

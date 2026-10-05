@@ -1,4 +1,12 @@
-WITH set_part_details AS (
+INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
+SELECT
+    $1,
+    version,
+    category_name,
+    total_parts,
+    total_spare
+FROM (
+    WITH set_part_details AS (
     SELECT
     ip.inventory_id,
     i.version,
@@ -20,16 +28,16 @@ LEFT JOIN lego_colors c ON c.id = ip.color_id
 WHERE i.set_num = $1
 
 )
-INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
 SELECT
-    $1,
     version,
     category_name,
-    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0),
-    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0)
+    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0) AS total_parts,
+    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0) AS total_spare
 FROM set_part_details
 WHERE category_name IS NOT NULL
 GROUP BY version, category_name
+
+) t
 ON CONFLICT (set_num, version, category_name) DO UPDATE
 SET total_parts = EXCLUDED.total_parts,
     total_spare = EXCLUDED.total_spare

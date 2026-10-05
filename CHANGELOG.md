@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### sql-composer
+
+- **Named relations** — `Composer::name_relations` writes every relation a statement reads once, named after its file, at the head of the statement: one `WITH`, each relation after those it reads, the statement last. Every place that composes a relation says `SELECT * FROM <name>`. A statement's own `WITH` takes the names first, a `CREATE … AS` takes them at the head of its query, and each statement of a script gets its own. A template that binds a parameter, or is composed with its slots filled, is written in place. A reserved word, two files with one name, and a `:define` are refused.
+
+### cargo-sqlc
+
+- **`--with`** — `cargo sqlc compose` names every relation a statement reads once, at the head of the statement. It cannot be combined with `--views`.
+
 ### examples
 
 - **TLS** — The Lego example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.

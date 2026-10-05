@@ -77,6 +77,33 @@ pub enum Error {
         /// What it takes: a bound parameter or an open slot.
         reason: String,
     },
+
+    /// A relation's name, taken from its file, is a word the database reserves.
+    #[error("{path} would be named {name}, which is a reserved word")]
+    ReservedName {
+        /// The template the name was taken from.
+        path: PathBuf,
+        /// The name.
+        name: String,
+    },
+
+    /// Two templates a statement reads take the same name from their files.
+    #[error("{first} and {second} would both be named {name}")]
+    NameTaken {
+        /// The name.
+        name: String,
+        /// The template that took it first.
+        first: PathBuf,
+        /// The template that would take it again.
+        second: PathBuf,
+    },
+
+    /// A `:define` met while the composer names every relation itself.
+    #[error("{path} is composed with :define, and the composer is naming every relation itself")]
+    DefinitionWhileNaming {
+        /// The template the `:define` puts in place.
+        path: PathBuf,
+    },
 }
 
 /// A specialized `Result` type for sql-composer operations.

@@ -385,6 +385,9 @@ cargo sqlc compose --verify
 
 # Name the templates a view registry registers, instead of inlining them
 cargo sqlc compose --views sqlc/views.sqlc
+
+# Name every relation a statement reads once, at the head of the statement
+cargo sqlc compose --with
 ```
 
 The compose step recursively walks all subdirectories under `--source`, composes every `.sqlc` file, and writes the output to the corresponding path under `--target`. The target directory is wiped and recreated on each run, so deleted or reorganized source files don't leave stale output behind. All composition happens to a temporary directory first — the target is only replaced after every file composes successfully.
@@ -413,6 +416,39 @@ CREATE OR REPLACE VIEW theme_closure AS :define(shared/theme_closure.sqlc);
 ```
 
 With `--views`, every composed statement says `SELECT * FROM <name>` wherever it composes `<path>`, at any depth, instead of inlining the template's body. Without it, everything inlines. A registered template that binds a parameter or leaves a slot open is refused, since a view takes no argument. The registry is read from the path as given, or else under `--source`. When it lies under `--source`, it composes like any other template, into the `CREATE VIEW` statements to run on the database: `:define` puts each view's body in place, and a view built on another names it.
+
+#### `--with`: every relation named once in its statement
+
+```sh
+cargo sqlc compose --with
+```
+
+With `--with`, each composed statement opens with one `WITH` that names every relation it reads, once each. Each relation comes after the relations it reads, and the statement comes last. A relation is named after its path under `--source`, with its directories joined by `_`: `shared/theme_closure.sqlc` is `shared_theme_closure`. Every place that composes it, at any depth, says `SELECT * FROM shared_theme_closure`. Nothing is created on the database.
+
+```sql
+-- report.sqlc
+SELECT * FROM (
+:compose(shared/theme_closure.sqlc)
+) t
+```
+
+composes to
+
+```sql
+WITH shared_theme_closure AS (
+...the body of shared/theme_closure.sqlc...
+)
+SELECT * FROM (
+SELECT * FROM shared_theme_closure
+) t
+```
+
+- A statement that opens with its own `WITH` or `WITH RECURSIVE` takes the names first, inside that clause.
+- A `CREATE … AS` takes them at the head of its query.
+- A template of several statements gets a `WITH` for each, naming only what that statement reads. The statements end at each `;` outside quotes, comments, dollar quotes and psql meta-commands.
+- A template that binds a parameter, or is composed with its slots filled, is written where it is composed, as without `--with`. What it reads is still named.
+- A name that is a reserved word is refused, and so are two files that would take one name.
+- `--with` takes the place of `:define`, and cannot be combined with `--views`. A `:define` met with `--with` is refused.
 
 #### Environment variables
 

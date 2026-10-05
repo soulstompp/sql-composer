@@ -84,8 +84,16 @@ struct ComposeArgs {
     /// inlining it. `:define` is what puts a body where the name would otherwise go, so the
     /// registry needs no exemption of its own, and a statement can give a relation a name for
     /// its own duration by defining it in a `WITH` clause. Without this, everything inlines.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "with")]
     views: Option<PathBuf>,
+
+    /// Write every relation a statement reads once, named, at the head of that statement: one
+    /// `WITH`, each relation after the relations it reads, the statement last. A relation is
+    /// named after its file and directories (`layers/figures.sqlc` is `layers_figures`). A
+    /// template that binds a parameter, or is composed with its slots filled, is written where
+    /// it is composed.
+    #[arg(long)]
+    with: bool,
 }
 
 fn main() {
@@ -107,9 +115,11 @@ fn compose_all(
     source_dir: &Path,
     dialect: Dialect,
     views: Option<&Path>,
+    with: bool,
 ) -> Result<BTreeMap<PathBuf, String>, Box<dyn std::error::Error>> {
     let mut composer = Composer::new(dialect);
     composer.add_search_path(source_dir.to_path_buf());
+    composer.name_relations = with;
     if let Some(registry) = views {
         composer.load_view_registry(registry)?;
     }
@@ -157,7 +167,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
     }
 
-    let composed = compose_all(source_dir, dialect, args.views.as_deref())?;
+    let composed = compose_all(source_dir, dialect, args.views.as_deref(), args.with)?;
 
     if composed.is_empty() {
         println!("No .sqlc files found in {}", source_dir.display());

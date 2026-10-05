@@ -2,7 +2,7 @@
 //! placeholders and resolved compose references.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::mock::MockTable;
@@ -42,6 +42,23 @@ pub struct Composer {
     /// The registry template that defines the views. Its own composes inline one level, since
     /// they are the views' definitions.
     pub view_registry: Option<PathBuf>,
+    /// Write every relation a statement reads once, named, at the head of that statement: one
+    /// `WITH`, each relation after the relations it reads, and the statement last. A relation is
+    /// named after its file and directories (`layers/figures.sqlc` is `layers_figures`), and every
+    /// place that composes it says `SELECT * FROM` that name. A template that binds a parameter,
+    /// or is composed with its slots filled, is written where it is composed, as without this.
+    pub name_relations: bool,
+}
+
+/// What a statement reads, gathered in the order its `WITH` names it.
+#[derive(Default)]
+struct Gathered {
+    /// Each relation by canonical path, with its name, every relation after those it reads.
+    order: Vec<(PathBuf, String)>,
+    /// The relations already in `order`.
+    named: HashSet<PathBuf>,
+    /// The relations being gathered now, to catch a template that reads itself.
+    open: HashSet<PathBuf>,
 }
 
 impl Composer {
@@ -53,6 +70,7 @@ impl Composer {
             mock_tables: HashMap::new(),
             views: HashMap::new(),
             view_registry: None,
+            name_relations: false,
         }
     }
 
@@ -152,6 +170,11 @@ impl Composer {
     /// underneath it, so a statement can put its vocabulary in a `WITH` clause once and have
     /// every reference to it below say the name instead of repeating the body.
     pub fn compose(&self, template: &Template) -> Result<ComposedSql> {
+        if self.name_relations {
+            return self.compose_named(template, |composer, statement| {
+                composer.compose_root(statement)
+            });
+        }
         let declared = self.declared_names(template)?;
         if declared.is_empty() {
             return self.compose_root(template);
@@ -216,12 +239,235 @@ impl Composer {
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
     ) -> Result<ComposedSql> {
+        if self.name_relations {
+            return self.compose_named(template, |composer, statement| {
+                composer.compose_with_values_root(statement, values)
+            });
+        }
+        self.compose_with_values_root(template, values)
+    }
+
+    fn compose_with_values_root<V>(
+        &self,
+        template: &Template,
+        values: &BTreeMap<String, Vec<V>>,
+    ) -> Result<ComposedSql> {
         let mut visited = HashSet::new();
         if let TemplateSource::File(ref path) = template.source {
             visited.insert(path.clone());
         }
         let slots = HashMap::new();
         self.compose_with_values_inner(template, values, &slots, &mut visited)
+    }
+
+    // ── Named relations ───────────────────────────────────────────────
+
+    /// Compose `template` with every relation it reads named once at the head of the statement
+    /// that reads it. A template of several statements gets a `WITH` for each, naming what that
+    /// statement reads. `emit` composes one statement once the names are in place.
+    fn compose_named(
+        &self,
+        template: &Template,
+        emit: impl Fn(&Composer, &Template) -> Result<ComposedSql>,
+    ) -> Result<ComposedSql> {
+        let mut closed = HashMap::new();
+        let mut sql = String::new();
+        let mut bind_params = Vec::new();
+        for elements in split_statements(&template.elements) {
+            let mut gathered = Gathered::default();
+            if let TemplateSource::File(ref path) = template.source {
+                if let Ok(root) = std::fs::canonicalize(path) {
+                    gathered.open.insert(root);
+                }
+            }
+            self.gather(&elements, &HashMap::new(), &mut gathered, &mut closed)?;
+
+            let mut named = self.clone();
+            let mut taken: HashMap<&str, &PathBuf> = HashMap::new();
+            for (path, name) in &gathered.order {
+                if let Some(first) = taken.insert(name, path) {
+                    return Err(Error::NameTaken {
+                        name: name.clone(),
+                        first: first.clone(),
+                        second: path.clone(),
+                    });
+                }
+                named.views.insert(path.clone(), name.clone());
+            }
+
+            let statement = emit(
+                &named,
+                &Template {
+                    elements,
+                    source: template.source.clone(),
+                },
+            )?;
+            bind_params.extend(statement.bind_params);
+            let mut relations = Vec::with_capacity(gathered.order.len());
+            for (path, name) in &gathered.order {
+                let body = named.compose_root(&parser::parse_template_file(path)?)?;
+                relations.push(format!("{name} AS (\n{}\n)", body.sql.trim()));
+            }
+            sql.push_str(&head_with(&statement.sql, &relations));
+        }
+        Ok(ComposedSql { sql, bind_params })
+    }
+
+    /// Walk `elements` as emitting them walks them, and gather every relation they read that can
+    /// be named, each after the relations it reads.
+    fn gather(
+        &self,
+        elements: &[Element],
+        slots: &HashMap<String, PathBuf>,
+        gathered: &mut Gathered,
+        closed: &mut HashMap<PathBuf, bool>,
+    ) -> Result<()> {
+        for element in elements {
+            match element {
+                Element::Sql(_) | Element::Bind(_) => {}
+                Element::Compose(compose_ref) => {
+                    if let ComposeTarget::Definition(path) = &compose_ref.target {
+                        return Err(Error::DefinitionWhileNaming { path: path.clone() });
+                    }
+                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let child_slots = Self::build_child_slots(compose_ref);
+                    self.gather_relation(&path, &child_slots, gathered, closed)?;
+                }
+                Element::Command(command) => {
+                    for source in &command.sources {
+                        self.gather_relation(source, &HashMap::new(), gathered, closed)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Gather what the relation at `path` reads, then the relation itself when it can be named:
+    /// composed with no slot filled, it binds nothing and leaves nothing open. One that cannot be
+    /// named is written in place, so only what it reads is gathered.
+    fn gather_relation(
+        &self,
+        path: &Path,
+        slots: &HashMap<String, PathBuf>,
+        gathered: &mut Gathered,
+        closed: &mut HashMap<PathBuf, bool>,
+    ) -> Result<()> {
+        if self.view_reference(path)?.is_some() {
+            return Ok(());
+        }
+        let resolved = std::fs::canonicalize(self.find_template(path)?)?;
+        if gathered.named.contains(&resolved) {
+            return Ok(());
+        }
+        if !gathered.open.insert(resolved.clone()) {
+            return Err(Error::CircularReference {
+                path: path.to_path_buf(),
+            });
+        }
+        let template = parser::parse_template_file(&resolved)?;
+        self.gather(&template.elements, slots, gathered, closed)?;
+        gathered.open.remove(&resolved);
+        if slots.is_empty() && self.closed(&resolved, closed)? {
+            let name = self.relation_name(&resolved, path)?;
+            gathered.named.insert(resolved.clone());
+            gathered.order.push((resolved, name));
+        }
+        Ok(())
+    }
+
+    /// Whether the template at `resolved` composes standing alone: nothing it reaches binds a
+    /// parameter or leaves a slot open.
+    fn closed(&self, resolved: &Path, closed: &mut HashMap<PathBuf, bool>) -> Result<bool> {
+        if let Some(&known) = closed.get(resolved) {
+            return Ok(known);
+        }
+        closed.insert(resolved.to_path_buf(), true);
+        let template = parser::parse_template_file(resolved)?;
+        let answer = self.closed_elements(&template.elements, &HashMap::new(), closed)?;
+        closed.insert(resolved.to_path_buf(), answer);
+        Ok(answer)
+    }
+
+    fn closed_elements(
+        &self,
+        elements: &[Element],
+        slots: &HashMap<String, PathBuf>,
+        closed: &mut HashMap<PathBuf, bool>,
+    ) -> Result<bool> {
+        for element in elements {
+            let standing = match element {
+                Element::Sql(_) => true,
+                Element::Bind(_) => false,
+                Element::Compose(compose_ref) => {
+                    match Self::resolve_compose_target(compose_ref, slots) {
+                        Err(Error::MissingSlot { .. }) => false,
+                        Err(e) => return Err(e),
+                        Ok(path) if self.view_reference(&path)?.is_some() => true,
+                        Ok(path) => {
+                            let resolved = std::fs::canonicalize(self.find_template(&path)?)?;
+                            let child_slots = Self::build_child_slots(compose_ref);
+                            if child_slots.is_empty() {
+                                self.closed(&resolved, closed)?
+                            } else {
+                                let template = parser::parse_template_file(&resolved)?;
+                                self.closed_elements(&template.elements, &child_slots, closed)?
+                            }
+                        }
+                    }
+                }
+                Element::Command(command) => {
+                    let mut all = true;
+                    for source in &command.sources {
+                        if self.view_reference(source)?.is_none() {
+                            let resolved = std::fs::canonicalize(self.find_template(source)?)?;
+                            all &= self.closed(&resolved, closed)?;
+                        }
+                    }
+                    all
+                }
+            };
+            if !standing {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The name a relation takes from its file: its path under the search path that holds it,
+    /// without the extension, each directory joined to the next by `_`.
+    fn relation_name(&self, resolved: &Path, written: &Path) -> Result<String> {
+        let relative = self
+            .search_paths
+            .iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .find_map(|root| resolved.strip_prefix(&root).ok().map(Path::to_path_buf))
+            .unwrap_or_else(|| written.to_path_buf());
+        let mut name = String::new();
+        for part in relative.with_extension("").components() {
+            if let Component::Normal(part) = part {
+                if !name.is_empty() {
+                    name.push('_');
+                }
+                name.extend(part.to_string_lossy().chars().map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '_'
+                    }
+                }));
+            }
+        }
+        if name.starts_with(|c: char| c.is_ascii_digit()) {
+            name.insert(0, '_');
+        }
+        if RESERVED.contains(&name.as_str()) {
+            return Err(Error::ReservedName {
+                path: resolved.to_path_buf(),
+                name,
+            });
+        }
+        Ok(name)
     }
 
     // ── Slot helpers ─────────────────────────────────────────────────
@@ -1052,6 +1298,288 @@ fn view_name_before(sql: &str) -> Option<String> {
     tail.trim()
         .eq_ignore_ascii_case("AS")
         .then(|| name.to_string())
+}
+
+/// The words PostgreSQL reserves, which no relation may be named.
+const RESERVED: &[&str] = &[
+    "all",
+    "analyse",
+    "analyze",
+    "and",
+    "any",
+    "array",
+    "as",
+    "asc",
+    "asymmetric",
+    "both",
+    "case",
+    "cast",
+    "check",
+    "collate",
+    "column",
+    "constraint",
+    "create",
+    "current_catalog",
+    "current_date",
+    "current_role",
+    "current_time",
+    "current_timestamp",
+    "current_user",
+    "default",
+    "deferrable",
+    "desc",
+    "distinct",
+    "do",
+    "else",
+    "end",
+    "except",
+    "false",
+    "fetch",
+    "for",
+    "foreign",
+    "from",
+    "grant",
+    "group",
+    "having",
+    "in",
+    "initially",
+    "intersect",
+    "into",
+    "lateral",
+    "leading",
+    "limit",
+    "localtime",
+    "localtimestamp",
+    "not",
+    "null",
+    "offset",
+    "on",
+    "only",
+    "or",
+    "order",
+    "placing",
+    "primary",
+    "references",
+    "returning",
+    "select",
+    "session_user",
+    "some",
+    "symmetric",
+    "system_user",
+    "table",
+    "then",
+    "to",
+    "trailing",
+    "true",
+    "union",
+    "unique",
+    "user",
+    "using",
+    "variadic",
+    "when",
+    "where",
+    "window",
+    "with",
+];
+
+/// The statements in a template's elements, split after each `;` that ends one: outside
+/// quotes, comments, dollar quoting and psql meta-commands. A template of one statement is one.
+fn split_statements(elements: &[Element]) -> Vec<Vec<Element>> {
+    let mut statements = vec![Vec::new()];
+    let mut scanner = Scanner::default();
+    for element in elements {
+        match element {
+            Element::Sql(text) => {
+                let mut start = 0;
+                for end in scanner.ends(text) {
+                    if let Some(last) = statements.last_mut() {
+                        last.push(Element::Sql(text[start..end].to_string()));
+                    }
+                    statements.push(Vec::new());
+                    start = end;
+                }
+                if start < text.len() {
+                    if let Some(last) = statements.last_mut() {
+                        last.push(Element::Sql(text[start..].to_string()));
+                    }
+                }
+            }
+            other => {
+                if let Some(last) = statements.last_mut() {
+                    last.push(other.clone());
+                }
+            }
+        }
+    }
+    statements.retain(|statement| !statement.is_empty());
+    statements
+}
+
+/// Where SQL text stands, carried from one piece of a template to the next.
+#[derive(Default)]
+enum Scan {
+    #[default]
+    Code,
+    Quoted,
+    Identifier,
+    LineComment,
+    BlockComment(u32),
+    Dollar(Vec<u8>),
+    MetaCommand,
+}
+
+#[derive(Default)]
+struct Scanner {
+    scan: Scan,
+}
+
+impl Scanner {
+    /// The offsets just past each `;` in `text` that ends a statement.
+    fn ends(&mut self, text: &str) -> Vec<usize> {
+        let bytes = text.as_bytes();
+        let mut ends = Vec::new();
+        let mut scan = std::mem::take(&mut self.scan);
+        let mut i = 0;
+        while i < bytes.len() {
+            let next = bytes.get(i + 1).copied();
+            scan = match (scan, bytes[i]) {
+                (Scan::Code, b'\'') => Scan::Quoted,
+                (Scan::Code, b'"') => Scan::Identifier,
+                (Scan::Code, b'-') if next == Some(b'-') => {
+                    i += 1;
+                    Scan::LineComment
+                }
+                (Scan::Code, b'/') if next == Some(b'*') => {
+                    i += 1;
+                    Scan::BlockComment(1)
+                }
+                (Scan::Code, b'\\') => Scan::MetaCommand,
+                (Scan::Code, b'$') => match dollar_quote(&bytes[i..]) {
+                    Some(tag) => {
+                        i += tag.len() - 1;
+                        Scan::Dollar(tag.to_vec())
+                    }
+                    None => Scan::Code,
+                },
+                (Scan::Code, b';') => {
+                    ends.push(i + 1);
+                    Scan::Code
+                }
+                (Scan::Quoted, b'\'') | (Scan::Identifier, b'"') => Scan::Code,
+                (Scan::LineComment | Scan::MetaCommand, b'\n') => Scan::Code,
+                (Scan::BlockComment(depth), b'*') if next == Some(b'/') => {
+                    i += 1;
+                    if depth == 1 {
+                        Scan::Code
+                    } else {
+                        Scan::BlockComment(depth - 1)
+                    }
+                }
+                (Scan::BlockComment(depth), b'/') if next == Some(b'*') => {
+                    i += 1;
+                    Scan::BlockComment(depth + 1)
+                }
+                (Scan::Dollar(tag), _) if bytes[i..].starts_with(&tag) => {
+                    i += tag.len() - 1;
+                    Scan::Code
+                }
+                (scan, _) => scan,
+            };
+            i += 1;
+        }
+        self.scan = scan;
+        ends
+    }
+}
+
+/// The dollar quote that opens at the start of `bytes` (`$$` or `$tag$`), if one does.
+fn dollar_quote(bytes: &[u8]) -> Option<&[u8]> {
+    let tag = bytes[1..]
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'_')
+        .count();
+    let opens = bytes.get(tag + 1) == Some(&b'$') && !bytes.get(1).is_some_and(u8::is_ascii_digit);
+    opens.then(|| &bytes[..tag + 2])
+}
+
+/// `statement` with `relations` named at the head of its query: after its leading comments and
+/// psql meta-commands, and after the `AS` of a `CREATE … AS`; as the first entries of the
+/// query's own `WITH` when it opens with one, or else in a `WITH` of their own.
+fn head_with(statement: &str, relations: &[String]) -> String {
+    if relations.is_empty() {
+        return statement.to_string();
+    }
+    let head = statement_head(statement);
+    let head = head + created_from(&statement[head..]).unwrap_or(0);
+    let (lead, rest) = statement.split_at(head);
+    let named = relations.join(",\n");
+    match with_keyword(rest) {
+        Some(end) => format!(
+            "{lead}{}\n{named},\n{}",
+            &rest[..end],
+            rest[end..].trim_start()
+        ),
+        None => format!("{lead}WITH {named}\n{rest}"),
+    }
+}
+
+/// Where a statement's own text starts: past blank lines, `--` comment lines and psql
+/// meta-commands, which stand in front of a `WITH` rather than inside it.
+fn statement_head(statement: &str) -> usize {
+    let mut at = 0;
+    for line in statement.split_inclusive('\n') {
+        let text = line.trim_start();
+        if text.is_empty() || text.starts_with("--") || text.starts_with('\\') {
+            at += line.len();
+        } else {
+            return at + (line.len() - text.len());
+        }
+    }
+    at
+}
+
+/// Where the query of a `CREATE … AS <query>` starts, when `text` is one: past the first `AS`
+/// outside parentheses and quotes, and the space after it.
+fn created_from(text: &str) -> Option<usize> {
+    let opens = text.get(..6)?.eq_ignore_ascii_case("CREATE");
+    if !opens || !text[6..].starts_with(char::is_whitespace) {
+        return None;
+    }
+    let bytes = text.as_bytes();
+    let (mut depth, mut quote) = (0u32, None);
+    for i in 0..bytes.len() {
+        match (quote, bytes[i]) {
+            (Some(q), b) if b == q => quote = None,
+            (Some(_), _) => {}
+            (None, b @ (b'\'' | b'"')) => quote = Some(b),
+            (None, b'(') => depth += 1,
+            (None, b')') => depth = depth.saturating_sub(1),
+            (None, b) if depth == 0 && b.is_ascii_whitespace() => {
+                let after = &text[i + 1..];
+                let is_as = after.get(..2).is_some_and(|w| w.eq_ignore_ascii_case("AS"))
+                    && after[2..].starts_with(char::is_whitespace);
+                if is_as {
+                    let query = &after[2..];
+                    return Some(text.len() - query.trim_start().len());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The length of the `WITH` or `WITH RECURSIVE` that `text` opens with, if it opens with one.
+fn with_keyword(text: &str) -> Option<usize> {
+    let word = |text: &str, word: &str| {
+        let head = text.get(..word.len())?;
+        let follows = text[word.len()..].starts_with(char::is_whitespace);
+        (head.eq_ignore_ascii_case(word) && follows).then_some(word.len())
+    };
+    let with = word(text, "WITH")?;
+    let after = &text[with..];
+    let gap = after.len() - after.trim_start().len();
+    Some(word(after.trim_start(), "RECURSIVE").map_or(with, |recursive| with + gap + recursive))
 }
 
 #[cfg(test)]
@@ -2265,5 +2793,223 @@ mod tests {
             "SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM v.grand\n) AS _except_1\n\
              EXCEPT\nSELECT * FROM (\nSELECT 1 AS y\n) AS _except_2\n) AS _except"
         );
+    }
+
+    // ── Named relations ───────────────────────────────────────────────
+
+    fn named_fixture(dialect: Dialect) -> (TempDir, Composer) {
+        let dir = TempDir::new().unwrap();
+        write_temp_file(&dir, "rel/grand.sqlc", "SELECT y FROM t");
+        write_temp_file(
+            &dir,
+            "rel/child.sqlc",
+            "SELECT * FROM (\n:compose(rel/grand.sqlc)\n) g",
+        );
+        write_temp_file(
+            &dir,
+            "parent.sqlc",
+            "SELECT * FROM (\n:compose(rel/child.sqlc)\n) a JOIN (\n:compose(rel/child.sqlc)\n) b \
+             USING (y) WHERE EXISTS (\n:compose(rel/grand.sqlc)\n)",
+        );
+        let mut composer = Composer::new(dialect);
+        composer.add_search_path(dir.path().to_path_buf());
+        composer.name_relations = true;
+        (dir, composer)
+    }
+
+    fn named(dir: &TempDir, composer: &Composer, name: &str) -> Result<ComposedSql> {
+        composer.compose(&file_template(dir, name))
+    }
+
+    #[test]
+    fn test_named_relations_are_written_once_at_the_head() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        assert_eq!(
+            named(&dir, &composer, "parent.sqlc").unwrap().sql,
+            "WITH rel_grand AS (\nSELECT y FROM t\n),\n\
+             rel_child AS (\nSELECT * FROM (\nSELECT * FROM rel_grand\n) g\n)\n\
+             SELECT * FROM (\nSELECT * FROM rel_child\n) a JOIN (\nSELECT * FROM rel_child\n) b \
+             USING (y) WHERE EXISTS (\nSELECT * FROM rel_grand\n)"
+        );
+    }
+
+    #[test]
+    fn test_named_relations_read_the_same_in_every_dialect() {
+        let (dir, postgres) = named_fixture(Dialect::Postgres);
+        let mut mysql = postgres.clone();
+        mysql.dialect = Dialect::Mysql;
+        assert_eq!(
+            named(&dir, &mysql, "parent.sqlc").unwrap(),
+            named(&dir, &postgres, "parent.sqlc").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_named_relations_lead_a_statements_own_with() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "recursive.sqlc",
+            "-- a statement with its own WITH\nWITH RECURSIVE r AS (\nSELECT * FROM (\n\
+             :compose(rel/grand.sqlc)\n) x\n)\nSELECT * FROM r",
+        );
+        assert_eq!(
+            named(&dir, &composer, "recursive.sqlc").unwrap().sql,
+            "-- a statement with its own WITH\nWITH RECURSIVE\nrel_grand AS (\nSELECT y FROM t\n),\n\
+             r AS (\nSELECT * FROM (\nSELECT * FROM rel_grand\n) x\n)\nSELECT * FROM r"
+        );
+    }
+
+    #[test]
+    fn test_named_relations_go_after_the_as_of_a_create() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "create.sqlc",
+            "CREATE TEMP TABLE kept (y) AS\n:compose(rel/grand.sqlc);",
+        );
+        assert_eq!(
+            named(&dir, &composer, "create.sqlc").unwrap().sql,
+            "CREATE TEMP TABLE kept (y) AS\nWITH rel_grand AS (\nSELECT y FROM t\n)\n\
+             SELECT * FROM rel_grand;"
+        );
+    }
+
+    #[test]
+    fn test_each_statement_of_a_script_names_what_it_reads() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "script.sqlc",
+            "\\echo 'one; and only one'\nSELECT ';' AS s, y FROM (\n:compose(rel/grand.sqlc)\n) a;\n\
+             -- a comment; not a statement\n:compose(rel/child.sqlc);\nSELECT 1;\n",
+        );
+        assert_eq!(
+            named(&dir, &composer, "script.sqlc").unwrap().sql,
+            "\\echo 'one; and only one'\nWITH rel_grand AS (\nSELECT y FROM t\n)\n\
+             SELECT ';' AS s, y FROM (\nSELECT * FROM rel_grand\n) a;\n\
+             -- a comment; not a statement\nWITH rel_grand AS (\nSELECT y FROM t\n),\n\
+             rel_child AS (\nSELECT * FROM (\nSELECT * FROM rel_grand\n) g\n)\n\
+             SELECT * FROM rel_child;\nSELECT 1;\n"
+        );
+    }
+
+    #[test]
+    fn test_a_statement_ends_only_outside_quotes_comments_and_dollar_quotes() {
+        let text =
+            "SELECT ';', \";\" -- ;\n/* ; /* ; */ ; */ $$;$$, $q$;$q$, $1;\n\\echo ;\nSELECT 2;";
+        let ends = Scanner::default().ends(text);
+        assert_eq!(ends.len(), 2, "{ends:?}");
+        assert!(text[..ends[0]].ends_with("$q$;$q$, $1;"));
+        assert_eq!(ends[1], text.len());
+    }
+
+    #[test]
+    fn test_named_relations_take_union_members() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "other.sqlc", "SELECT 1 AS y");
+        write_temp_file(&dir, "all.sqlc", ":union(ALL rel/grand.sqlc, other.sqlc)");
+        assert_eq!(
+            named(&dir, &composer, "all.sqlc").unwrap().sql,
+            "WITH rel_grand AS (\nSELECT y FROM t\n),\nother AS (\nSELECT 1 AS y\n)\n\
+             SELECT * FROM rel_grand\nUNION ALL\nSELECT * FROM other"
+        );
+    }
+
+    #[test]
+    fn test_a_slot_filled_composition_is_written_in_place() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "shape.sqlc", "SELECT * FROM (\n:compose(@part)\n) x");
+        write_temp_file(
+            &dir,
+            "filled.sqlc",
+            "SELECT * FROM (\n:compose(shape.sqlc, @part = rel/grand.sqlc)\n) s",
+        );
+        assert_eq!(
+            named(&dir, &composer, "filled.sqlc").unwrap().sql,
+            "WITH rel_grand AS (\nSELECT y FROM t\n)\n\
+             SELECT * FROM (\nSELECT * FROM (\nSELECT * FROM rel_grand\n) x\n) s"
+        );
+        assert!(matches!(
+            named(&dir, &composer, "shape.sqlc").unwrap_err(),
+            Error::MissingSlot { .. }
+        ));
+    }
+
+    #[test]
+    fn test_a_relation_that_binds_is_written_in_place() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "bound.sqlc", "SELECT * FROM t WHERE id = :bind(id)");
+        write_temp_file(
+            &dir,
+            "reads.sqlc",
+            "SELECT * FROM (\n:compose(bound.sqlc)\n) b",
+        );
+        let composed = named(&dir, &composer, "reads.sqlc").unwrap();
+        assert_eq!(
+            composed.sql,
+            "SELECT * FROM (\nSELECT * FROM t WHERE id = $1\n) b"
+        );
+        assert_eq!(composed.bind_params, vec!["id"]);
+    }
+
+    #[test]
+    fn test_a_define_is_refused_while_naming() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "defines.sqlc",
+            "WITH g AS (\n:define(rel/grand.sqlc)\n)\nSELECT * FROM g",
+        );
+        assert!(matches!(
+            named(&dir, &composer, "defines.sqlc").unwrap_err(),
+            Error::DefinitionWhileNaming { .. }
+        ));
+    }
+
+    #[test]
+    fn test_a_reserved_name_is_refused() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "user.sqlc", "SELECT 1 AS y");
+        write_temp_file(
+            &dir,
+            "reads.sqlc",
+            "SELECT * FROM (\n:compose(user.sqlc)\n) u",
+        );
+        match named(&dir, &composer, "reads.sqlc").unwrap_err() {
+            Error::ReservedName { name, .. } => assert_eq!(name, "user"),
+            other => panic!("expected ReservedName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_two_files_one_name_is_refused() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "a_b/c.sqlc", "SELECT 1 AS y");
+        write_temp_file(&dir, "a/b_c.sqlc", "SELECT 2 AS y");
+        write_temp_file(&dir, "both.sqlc", ":union(ALL a_b/c.sqlc, a/b_c.sqlc)");
+        match named(&dir, &composer, "both.sqlc").unwrap_err() {
+            Error::NameTaken { name, .. } => assert_eq!(name, "a_b_c"),
+            other => panic!("expected NameTaken, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_a_relation_that_reads_itself_is_refused() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "loop/a.sqlc",
+            "SELECT * FROM (\n:compose(loop/b.sqlc)\n) b",
+        );
+        write_temp_file(
+            &dir,
+            "loop/b.sqlc",
+            "SELECT * FROM (\n:compose(loop/a.sqlc)\n) a",
+        );
+        assert!(matches!(
+            named(&dir, &composer, "loop/a.sqlc").unwrap_err(),
+            Error::CircularReference { .. }
+        ));
     }
 }

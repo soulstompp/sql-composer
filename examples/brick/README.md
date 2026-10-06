@@ -1,11 +1,12 @@
 # Brick example
 
-Every sql-composer feature, and more of PostgreSQL's SQL, on the database sqlc-brickgen builds.
+sql-composer's directives at work, and more of PostgreSQL's SQL, on the database sqlc-brickgen
+builds.
 
 ## Setup
 
-The example runs on PostgreSQL 15 or later (for `MERGE`). With the server running and `psql` on the
-`PATH`, from the repository root:
+The example runs on PostgreSQL 16 or later, where `earthdistance` works from a schema of its own.
+With the server running and `psql` on the `PATH`, from the repository root:
 
 ```sh
 createdb sqlc_brick

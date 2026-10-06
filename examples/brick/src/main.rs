@@ -56,7 +56,8 @@ struct Cli {
     )]
     database_url: String,
 
-    /// Schema holding sqlc-brickgen's tables, the only schema the queries search
+    /// Schema holding sqlc-brickgen's tables; the queries search it, then the extensions' schemas,
+    /// never public
     #[arg(long, default_value = "lego")]
     schema: String,
 

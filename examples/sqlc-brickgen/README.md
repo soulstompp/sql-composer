@@ -117,6 +117,12 @@ is not a trusted extension, so only a superuser can create it: a role that is no
 superuser to create the three first, in the database and in their schema, or leaves `search` out of
 `--indexes`.
 
+On PostgreSQL 15 and earlier, `earthdistance`'s functions find `cube` and their own types on the
+`search_path` of whatever calls them: the index build, every write to the builders, and autovacuum.
+In a schema of their own they are found by none of these, and the builders' home index fails to
+build. On those versions, give `--extension-schema public`. From PostgreSQL 16 on, `earthdistance`
+names `cube` by its schema, and any schema serves.
+
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
 leaves it on); then the tables are vacuumed and analysed. `--vacuum off` leaves out the vacuum, and
 `--analyze off` the statistics; with both off the tables are left as loaded. The object-oriented

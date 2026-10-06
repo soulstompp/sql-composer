@@ -1,6 +1,6 @@
 # sql-composer
 
-> **Português europeu, grafia do AO90.** Também disponível em inglês: [`README.md`](README.md).
+> **Português europeu, grafia do AO90.** Também disponível em inglês: [`README.md`][README.md].
 
 Uma junção copiada para uma segunda consulta já são duas junções, que nascem iguais e acabam por
 divergir.
@@ -44,13 +44,13 @@ sql-composer = "0.0.5"
 
 ## Uma primeira composição
 
-Os modelos desta página leem as tabelas do [exemplo brick](examples/brick/), um catálogo de caixas
+Os modelos desta página leem as tabelas do [exemplo brick][examples/brick/], um catálogo de caixas
 de construção com as suas peças, cores e temas e com os construtores que as compram, tudo feito pelo
-[sqlc-brickgen](examples/sqlc-brickgen/).
+[sqlc-brickgen][examples/sqlc-brickgen/].
 
 As entradas de uma caixa juntam cinco tabelas: cada entrada dos inventários da caixa, com a sua
 peça, a categoria dessa peça e a sua cor. Escrita uma vez, essa junção fica num ficheiro seu,
-[`shared/set_part_details.sqlc`](examples/brick/sqlc/shared/set_part_details.sqlc):
+[`shared/set_part_details.sqlc`][examples/brick/sqlc/shared/set_part_details.sqlc]:
 
 ```sql
 # What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
@@ -86,7 +86,7 @@ que são as linhas que devolve e qual é a chave delas. O que vem depois de um `
 próprio modelo e nunca chega à base de dados.
 
 A lista das peças de uma caixa compõe essa consulta, em
-[`sets/select_set_parts.sqlc`](examples/brick/sqlc/sets/select_set_parts.sqlc):
+[`sets/select_set_parts.sqlc`][examples/brick/sqlc/sets/select_set_parts.sqlc]:
 
 ```sql
 # A set's parts, one row per line, version by version, each line with its part, category and
@@ -121,7 +121,7 @@ ORDER BY
 ```
 
 Na pasta do exemplo, o `cargo sqlc compose --source sqlc --target .sql --skip-prepare` escreve
-[`.sql/sets/select_set_parts.sql`](examples/brick/.sql/sets/select_set_parts.sql), onde a junção
+[`.sql/sets/select_set_parts.sql`][examples/brick/.sql/sets/select_set_parts.sql], onde a junção
 ficou no lugar do `:compose` e um marcador numerado no do `:bind`:
 
 ```sql
@@ -241,7 +241,7 @@ parâmetro espera e se aceita `NULL` no `Binding` analisado (`min_values`, `max_
 
 Um modelo pode deixar uma relação em aberto, numa vaga, e cada modelo que o componha preenche-a à
 sua maneira. O
-[`shared/filtered_set_parts.sqlc`](examples/brick/sqlc/shared/filtered_set_parts.sqlc) dá as
+[`shared/filtered_set_parts.sqlc`][examples/brick/sqlc/shared/filtered_set_parts.sqlc] dá as
 entradas de uma caixa que passam no filtro dado em `@filter`, seja ele qual for:
 
 ```sql
@@ -267,7 +267,7 @@ WHERE EXISTS (
 ```
 
 Um filtro é uma consulta à parte,
-[`filters/by_color.sqlc`](examples/brick/sqlc/filters/by_color.sqlc):
+[`filters/by_color.sqlc`][examples/brick/sqlc/filters/by_color.sqlc]:
 
 ```sql
 # A colour, as a filter pattern: (any part, this colour). The colour is chosen by its name; a
@@ -279,7 +279,7 @@ FROM lego_colors c
 WHERE c.name = :bind(color_name)
 ```
 
-e o [`sets/select_colored_parts.sqlc`](examples/brick/sqlc/sets/select_colored_parts.sqlc) preenche
+e o [`sets/select_colored_parts.sqlc`][examples/brick/sqlc/sets/select_colored_parts.sqlc] preenche
 a vaga com ele:
 
 ```sql
@@ -307,7 +307,7 @@ no repositório, que é o ficheiro que ele dá como `STALE`.
 ### União, interseção e diferença
 
 O `:union`, o `:intersect` e o `:except` combinam consultas inteiras, cada uma num ficheiro seu. O
-[`reports/city_only_moulds.sqlc`](examples/brick/sqlc/reports/city_only_moulds.sqlc) dá os moldes
+[`reports/city_only_moulds.sqlc`][examples/brick/sqlc/reports/city_only_moulds.sqlc] dá os moldes
 que as caixas City usam e que nenhuma caixa Technic usa:
 
 ```sql
@@ -338,7 +338,7 @@ de ignorada; o SQLite, esse, só aceita um modificador, o `ALL`, e só depois de
 
 O `:count(source)` conta as linhas de uma consulta, e o `:count(DISTINCT part_num OF source)` os
 valores distintos das colunas que nomeia; com várias fontes, conta-se a união delas. Por exemplo,
-[`reports/count_theme_parts.sqlc`](examples/brick/sqlc/reports/count_theme_parts.sqlc):
+[`reports/count_theme_parts.sqlc`][examples/brick/sqlc/reports/count_theme_parts.sqlc]:
 
 ```sql
 # How many distinct moulds (part numbers) the sets of a theme scope use, the theme and every theme
@@ -361,7 +361,7 @@ cabeça da instrução.
 Poupa as cópias, porque uma relação que dois modelos compõem fica escrita duas vezes em qualquer
 instrução que componha ambos: a instrução composta leva uma cópia da relação por cada caminho que lá
 vai dar, e a base de dados planeia cada uma delas. O
-[`reports/shared_moulds.sqlc`](examples/brick/sqlc/reports/shared_moulds.sqlc) lê o fecho dos temas
+[`reports/shared_moulds.sqlc`][examples/brick/sqlc/reports/shared_moulds.sqlc] lê o fecho dos temas
 pelas suas duas fontes, e a sua instrução composta tem por isso esse fecho duas vezes.
 
 Com o `--with`, cada instrução composta abre com um único `WITH`, que nomeia cada relação que a
@@ -372,7 +372,8 @@ compõem leem `SELECT * FROM shared_theme_closure`. A instrução dos moldes que
 partilham passa então a ter o fecho uma só vez, e na base de dados não se cria nada.
 
 - Uma instrução que já abra com o seu próprio `WITH` ou `WITH RECURSIVE` recebe os nomes à cabeça
-  dessa cláusula, e um `CREATE … AS` recebe-os à cabeça da sua consulta.
+  dessa cláusula, e um `CREATE … AS` recebe-os à cabeça da sua consulta; qualquer outra instrução
+  recebe-os à sua frente, e o MySQL não aceita `WITH` antes de um `INSERT`.
 - Um modelo com várias instruções leva um `WITH` por instrução, cada um a nomear só o que essa
   instrução lê; uma instrução acaba em cada `;` que não esteja entre aspas, num comentário, entre
   aspas de dólar ou num metacomando do psql.
@@ -462,7 +463,7 @@ aceita `WITH` antes de um `INSERT`.
 
 ## O percurso
 
-O [exemplo brick](examples/brick/README.md) percorre a álgebra relacional um modelo de cada vez,
+O [exemplo brick][examples/brick/README.md] percorre a álgebra relacional um modelo de cada vez,
 sobre as tabelas de cima, com um subcomando por passo: seleção, projeção e junção, composição, uma
 relação passada como argumento, o fecho dos temas, união, interseção e diferença e, daí em diante,
 mais do SQL do PostgreSQL, com funções de janela, `DISTINCT ON`, `LATERAL`, `ROLLUP`,
@@ -768,7 +769,7 @@ crates/
   sql-composer-sqlx/      # integração com o sqlx (verify, validate)
   cargo-sqlc/             # o comando cargo sqlc
 examples/
-  brick/                  # todas as diretivas, e mais do SQL do PostgreSQL, na base de dados do sqlc-brickgen
+  brick/                  # todas as diretivas menos o :define, e mais do SQL do PostgreSQL, na base de dados do sqlc-brickgen
   sqlc-brickgen/          # sqlc-brickgen: um catálogo grande, feito a partir de um real, para o PostgreSQL
 ```
 
@@ -776,9 +777,24 @@ Os pacotes estão na versão 0.0.5, e uma versão 0.0 pode mudar a API.
 
 ## Licença
 
-MIT, com direitos de autor de Kenneth Allen Flegal: ver [LICENSE](LICENSE). Cada pacote publicado
+MIT, com direitos de autor de Kenneth Allen Flegal: ver [LICENSE][LICENSE]. Cada pacote publicado
 traz o mesmo ficheiro.
 
 As tabelas do exemplo brick são feitas a partir de um catálogo real de caixas de construção, cuja
 origem o README do exemplo indica. LEGO® é uma marca do LEGO Group, que não patrocina, não autoriza
 nem subscreve este projeto.
+
+[README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/README.md
+[examples/brick/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/brick
+[examples/sqlc-brickgen/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/sqlc-brickgen
+[examples/brick/sqlc/shared/set_part_details.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/shared/set_part_details.sqlc
+[examples/brick/sqlc/sets/select_set_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/sets/select_set_parts.sqlc
+[examples/brick/.sql/sets/select_set_parts.sql]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/.sql/sets/select_set_parts.sql
+[examples/brick/sqlc/shared/filtered_set_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/shared/filtered_set_parts.sqlc
+[examples/brick/sqlc/filters/by_color.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/filters/by_color.sqlc
+[examples/brick/sqlc/sets/select_colored_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/sets/select_colored_parts.sqlc
+[examples/brick/sqlc/reports/city_only_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/city_only_moulds.sqlc
+[examples/brick/sqlc/reports/count_theme_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/count_theme_parts.sqlc
+[examples/brick/sqlc/reports/shared_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/shared_moulds.sqlc
+[examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
+[LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE

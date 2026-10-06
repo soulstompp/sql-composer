@@ -33,7 +33,7 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use sqlx::PgConnection;
+use sqlx::{AssertSqlSafe, PgConnection};
 use tracing::info;
 
 use crate::load::{
@@ -615,14 +615,15 @@ pub async fn build(
             let ranges = if m == Method::Hash {
                 Vec::new()
             } else {
-                let (min, max) = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(&format!(
-                    "SELECT min({col})::bigint, max({col})::bigint FROM {generated}.{table}",
-                    col = c.name,
-                    table = t.name
-                ))
-                .fetch_one(&mut *conn)
-                .await
-                .map_err(|e| format!("reading {generated}.{}'s range: {e}", t.name))?;
+                let (min, max) =
+                    sqlx::query_as::<_, (Option<i64>, Option<i64>)>(AssertSqlSafe(format!(
+                        "SELECT min({col})::bigint, max({col})::bigint FROM {generated}.{table}",
+                        col = c.name,
+                        table = t.name
+                    )))
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(|e| format!("reading {generated}.{}'s range: {e}", t.name))?;
                 equal_ranges(
                     i128::from(min.unwrap_or(0)),
                     i128::from(max.unwrap_or(0)),
@@ -731,16 +732,17 @@ async fn check_each_row_in_one_partition_and_each_key_unique(
     let mut rows = Vec::new();
     for (t, c) in kept {
         let table = t.name;
-        let parts = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(&format!(
-            "SELECT p.relname::text, pg_get_expr(p.relpartbound, p.oid), \
+        let parts =
+            sqlx::query_as::<_, (String, Option<String>, Option<String>)>(AssertSqlSafe(format!(
+                "SELECT p.relname::text, pg_get_expr(p.relpartbound, p.oid), \
              (SELECT string_agg(pg_get_constraintdef(k.oid), ' AND ') FROM pg_constraint k \
               WHERE k.conrelid = p.oid AND k.contype = 'c') \
              FROM pg_inherits i JOIN pg_class p ON p.oid = i.inhrelid \
              WHERE i.inhparent = '{schema}.{table}'::regclass ORDER BY p.relname"
-        ))
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(|e| format!("reading {schema}.{table}'s partitions: {e}"))?;
+            )))
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(|e| format!("reading {schema}.{table}'s partitions: {e}"))?;
         if parts.is_empty() {
             broken.push(format!("{schema}.{table}: no partitions"));
             continue;

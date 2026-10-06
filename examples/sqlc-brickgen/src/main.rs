@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
+use sqlx::AssertSqlSafe;
 use tracing::{error, info, info_span, warn, Instrument};
 use tracing_subscriber::EnvFilter;
 
@@ -409,10 +410,12 @@ async fn run(cli: Cli) -> Result<(), String> {
     let started = Instant::now();
     let cat = {
         let mut conn = pool.acquire().await.map_err(|e| format!("connect: {e}"))?;
-        sqlx::query(&format!("SET statement_timeout = '{build_timeout}'"))
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(AssertSqlSafe(format!(
+            "SET statement_timeout = '{build_timeout}'"
+        )))
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
         let absent = catalogue::missing(&mut conn, &cli.source_schema)
             .await
             .map_err(|e| format!("reading {}: {e}", cli.source_schema))?;
@@ -440,10 +443,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 repeated.join(", ")
             ));
         }
-        sqlx::query(&format!("SET statement_timeout = '{}'", cli.wave_timeout))
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(AssertSqlSafe(format!(
+            "SET statement_timeout = '{}'",
+            cli.wave_timeout
+        )))
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
         cat
     };
     let real = Real::new(cat);
@@ -709,7 +715,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         let t = Instant::now();
         for m in partitions::Method::ALL {
             let s = partitions::method_schema(&cli.schema, m);
-            sqlx::query(&format!("DROP SCHEMA IF EXISTS {s} CASCADE"))
+            sqlx::query(AssertSqlSafe(format!("DROP SCHEMA IF EXISTS {s} CASCADE")))
                 .execute(&pool)
                 .await
                 .map_err(|e| format!("dropping {s}: {e}"))?;

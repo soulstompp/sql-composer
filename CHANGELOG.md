@@ -8,10 +8,20 @@
 - **`:union` wraps its sources** — Each source of a `:union`, and the whole, is a derived table of its own, as with `:intersect` and `:except`. A source that is itself a `:union` with another modifier no longer regroups with its neighbours, and a source ending in `ORDER BY` and `LIMIT` no longer ends the whole union. `:count` over several sources takes the same union. A column list on a `:union` is refused.
 - **Mock tables stand for tables** — `Composer::add_mock_table` gives a table rows of your own: each composed statement that names the table gets `<name> AS (<rows>)` at the head of its `WITH`, and reads the rows in the table's place. A `MockTable` declares its columns in order with their types (`column`), takes rows of optional values (`row`), and writes each value cast to its column's type (`to_sql`). `MockColumn` is new; `add_row` and `mock_rows!` are gone, and `Composer::mock_tables` is a `BTreeMap`.
 - **`driver::resolve_values_by_use`** — For positional placeholders: each use of a bind name takes the name's values again from the first.
+- **winnow 1** — The template parser is built on winnow 1.
 
 ### sql-composer-mysql
 
 - **A bind name used twice** — Both drivers fill each use of a name with its values, where they stopped with `MissingBinding` at the second use.
+- **mysql 28 and mysql_async 0.37** — The crate re-exports both, at these versions.
+
+### sql-composer-rusqlite
+
+- **rusqlite 0.40** — The crate re-exports it, at this version.
+
+### sql-composer-sqlx
+
+- **sqlx 0.9 and sqlparser 0.63** — `verify_postgres` connects with sqlx 0.9. Its PostgreSQL driver, 0.9.0, does not read the operating system's user: a URL that names no user connects as `anonymous` unless `PGUSER` is set, or the application builds `whoami` 2 with its default features.
 
 ### cargo-sqlc
 
@@ -26,6 +36,7 @@
 - **City's and Technic's sets fold into one template** — `shared/scope_sets.sqlc` takes the scope as its `@scope` slot, and each scope returns its own id, from which the label is read.
 - **Laws** — Each template has a law against a second spelling of its answer in direct SQL, and two laws run templates on mock tables. CI runs `cargo sqlc compose --verify` on the example, so its `.sql` files can no longer fall behind their templates.
 - **TLS** — The example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
+- **sqlx 0.9** — The example runs on sqlx 0.9, and a URL that names no user still connects as the operating system's user.
 
 ### All crates
 

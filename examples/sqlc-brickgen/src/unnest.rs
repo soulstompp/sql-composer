@@ -1,7 +1,7 @@
 //! The other way to write a batch: one `INSERT … SELECT FROM UNNEST(…)` per level, every column
 //! bound as an array.
 
-use sqlx::{Postgres, Transaction};
+use sqlx::{AssertSqlSafe, Postgres, Transaction};
 
 use crate::calendar;
 use crate::load::{table, Level};
@@ -49,7 +49,7 @@ pub async fn insert(
                 .sum::<u64>()
                 + 12 * w.sets.len() as u64;
             let sql = q("lego_sets", "text[], text[], int4[], int4[], int4[]");
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -65,7 +65,7 @@ pub async fn insert(
             let c: Vec<&str> = w.inventories.iter().map(|r| r.set_num.as_str()).collect();
             let bytes = c.iter().map(|s| s.len() as u64).sum::<u64>() + 8 * a.len() as u64;
             let sql = q("lego_inventories", "int4[], int4[], text[]");
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -88,7 +88,7 @@ pub async fn insert(
                 "lego_inventory_parts",
                 "int4[], text[], int4[], int4[], bool[]",
             );
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -104,7 +104,7 @@ pub async fn insert(
             let c: Vec<i32> = w.nests.iter().map(|r| r.quantity).collect();
             let bytes = b.iter().map(|s| s.len() as u64).sum::<u64>() + 8 * a.len() as u64;
             let sql = q("lego_inventory_sets", "int4[], text[], int4[]");
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -132,7 +132,7 @@ pub async fn insert(
                 "lego_builders",
                 "int4[], text[], int4[], int4[], float8[], float8[]",
             );
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -164,7 +164,7 @@ pub async fn insert(
                 .sum::<u64>()
                 + 8 * a.len() as u64;
             let sql = q("lego_collection", "int4[], int4[], text[], text[], text[]");
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -204,7 +204,7 @@ pub async fn insert(
                 "lego_purchases",
                 "int8[], int4[], int4[], text[], timestamptz[], text[], timestamptz[]",
             );
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)
@@ -235,7 +235,7 @@ pub async fn insert(
                 "trap_manifest",
                 "text[], text[], text[], text[], text[], int8[], text[], text[]",
             );
-            let r = sqlx::query(&sql)
+            let r = sqlx::query(AssertSqlSafe(sql.as_str()))
                 .bind(a)
                 .bind(b)
                 .bind(c)

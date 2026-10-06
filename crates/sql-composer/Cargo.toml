@@ -10,7 +10,7 @@ readme = "../../README.md"
 edition = "2021"
 
 [dependencies]
-winnow = "0.7"
+winnow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"], optional = true }
 

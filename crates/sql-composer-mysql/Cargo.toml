@@ -9,8 +9,8 @@ edition = "2021"
 
 [dependencies]
 sql-composer = { version = "0.0.5", path = "../sql-composer" }
-mysql_async = "0.35"
-mysql = { version = "27", optional = true }
+mysql_async = "0.37"
+mysql = { version = "28", optional = true }
 thiserror = "2"
 
 [features]

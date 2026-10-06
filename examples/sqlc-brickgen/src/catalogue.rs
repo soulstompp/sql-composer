@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::RangeInclusive;
 
-use sqlx::PgConnection;
+use sqlx::{AssertSqlSafe, PgConnection};
 
 use crate::text;
 
@@ -229,10 +229,10 @@ impl Catalogue {
     /// Reads the eight real tables from `schema`.
     pub async fn read(pool: &mut PgConnection, schema: &str) -> Result<Catalogue, sqlx::Error> {
         let q = |t: &str| format!("{schema}.{t}");
-        let colours = sqlx::query_as::<_, (i32, String, String, String)>(&format!(
+        let colours = sqlx::query_as::<_, (i32, String, String, String)>(AssertSqlSafe(format!(
             "SELECT id, name, rgb, is_trans::text FROM {} ORDER BY id",
             q("lego_colors")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()
@@ -243,10 +243,10 @@ impl Catalogue {
             is_trans,
         })
         .collect();
-        let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(&format!(
+        let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(AssertSqlSafe(format!(
             "SELECT id, name, parent_id FROM {} ORDER BY id",
             q("lego_themes")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()
@@ -256,19 +256,19 @@ impl Catalogue {
             parent_id,
         })
         .collect();
-        let categories = sqlx::query_as::<_, (i32, String)>(&format!(
+        let categories = sqlx::query_as::<_, (i32, String)>(AssertSqlSafe(format!(
             "SELECT id, name FROM {} ORDER BY id",
             q("lego_part_categories")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()
         .map(|(id, name)| Category { id, name })
         .collect();
-        let parts: Vec<Part> = sqlx::query_as::<_, (String, String, i32)>(&format!(
+        let parts: Vec<Part> = sqlx::query_as::<_, (String, String, i32)>(AssertSqlSafe(format!(
             "SELECT part_num, name, part_cat_id FROM {} ORDER BY part_num COLLATE \"C\"",
             q("lego_parts")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()
@@ -279,10 +279,10 @@ impl Catalogue {
         })
         .collect();
         let sets = sqlx::query_as::<_, (String, String, Option<i32>, Option<i32>, Option<i32>)>(
-            &format!(
+            AssertSqlSafe(format!(
                 "SELECT set_num, name, year, theme_id, num_parts FROM {} ORDER BY set_num COLLATE \"C\"",
                 q("lego_sets")
-            ),
+            )),
         )
         .fetch_all(&mut *pool)
         .await?
@@ -295,10 +295,10 @@ impl Catalogue {
             num_parts,
         })
         .collect();
-        let inventories = sqlx::query_as::<_, (i32, i32, String)>(&format!(
+        let inventories = sqlx::query_as::<_, (i32, i32, String)>(AssertSqlSafe(format!(
             "SELECT id, version, set_num FROM {} ORDER BY id",
             q("lego_inventories")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()
@@ -308,17 +308,17 @@ impl Catalogue {
             set_num,
         })
         .collect();
-        let raw_lines = sqlx::query_as::<_, (i32, String, i32, i32, bool)>(&format!(
+        let raw_lines = sqlx::query_as::<_, (i32, String, i32, i32, bool)>(AssertSqlSafe(format!(
             "SELECT inventory_id, part_num, color_id, quantity, is_spare FROM {} \
              ORDER BY inventory_id, part_num COLLATE \"C\", color_id, is_spare, quantity",
             q("lego_inventory_parts")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?;
-        let nests = sqlx::query_as::<_, (i32, String, i32)>(&format!(
+        let nests = sqlx::query_as::<_, (i32, String, i32)>(AssertSqlSafe(format!(
             "SELECT inventory_id, set_num, quantity FROM {} ORDER BY inventory_id, set_num COLLATE \"C\", quantity",
             q("lego_inventory_sets")
-        ))
+        )))
         .fetch_all(&mut *pool)
         .await?
         .into_iter()

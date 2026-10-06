@@ -10,8 +10,8 @@ edition = "2021"
 
 [dependencies]
 sql-composer = { version = "0.0.5", path = "../sql-composer" }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio"] }
-sqlparser = { version = "0.53", optional = true }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+sqlparser = { version = "0.63", optional = true }
 tokio = { version = "1", features = ["rt"] }
 thiserror = "2"
 

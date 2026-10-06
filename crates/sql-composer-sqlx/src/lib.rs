@@ -34,7 +34,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(feature = "postgres")]
 pub async fn verify_postgres(database_url: &str, statements: &[&ComposedSql]) -> Result<()> {
     use sqlx::postgres::PgPoolOptions;
-    use sqlx::Executor;
+    use sqlx::{AssertSqlSafe, Executor};
 
     let pool = PgPoolOptions::new()
         .max_connections(1)
@@ -42,14 +42,16 @@ pub async fn verify_postgres(database_url: &str, statements: &[&ComposedSql]) ->
         .await?;
 
     for (i, stmt) in statements.iter().enumerate() {
-        pool.execute(sqlx::query(&format!(
+        pool.execute(sqlx::query(AssertSqlSafe(format!(
             "PREPARE _sqlc_verify_{i} AS {}",
             stmt.sql
-        )))
+        ))))
         .await?;
 
-        pool.execute(sqlx::query(&format!("DEALLOCATE _sqlc_verify_{i}")))
-            .await?;
+        pool.execute(sqlx::query(AssertSqlSafe(format!(
+            "DEALLOCATE _sqlc_verify_{i}"
+        ))))
+        .await?;
     }
 
     pool.close().await;

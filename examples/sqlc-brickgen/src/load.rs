@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{ConnectOptions, Connection, PgConnection, PgPool, Postgres, Transaction};
+use sqlx::{
+    AssertSqlSafe, ConnectOptions, Connection, PgConnection, PgPool, Postgres, Transaction,
+};
 use tracing::{debug, error, info, warn};
 
 use crate::catalogue::{Catalogue, Theme};
@@ -606,15 +608,19 @@ pub async fn pool(url: &str, size: u32, s: &Settings) -> Result<PgPool, sqlx::Er
             let sync = sync.to_string();
             let timeout = timeout.clone();
             Box::pin(async move {
-                sqlx::query(&format!("SET application_name = 'sqlc-brickgen/{n}'"))
+                sqlx::query(AssertSqlSafe(format!(
+                    "SET application_name = 'sqlc-brickgen/{n}'"
+                )))
+                .execute(&mut *conn)
+                .await?;
+                sqlx::query(AssertSqlSafe(format!("SET synchronous_commit = {sync}")))
                     .execute(&mut *conn)
                     .await?;
-                sqlx::query(&format!("SET synchronous_commit = {sync}"))
-                    .execute(&mut *conn)
-                    .await?;
-                sqlx::query(&format!("SET statement_timeout = '{timeout}'"))
-                    .execute(&mut *conn)
-                    .await?;
+                sqlx::query(AssertSqlSafe(format!(
+                    "SET statement_timeout = '{timeout}'"
+                )))
+                .execute(&mut *conn)
+                .await?;
                 sqlx::query("SET client_min_messages = warning")
                     .execute(&mut *conn)
                     .await?;
@@ -641,7 +647,7 @@ pub async fn build_session(url: &str, s: &Settings) -> Result<PgConnection, sqlx
         ),
         "SET client_min_messages = warning".to_string(),
     ] {
-        sqlx::query(&q).execute(&mut c).await?;
+        sqlx::query(AssertSqlSafe(q)).execute(&mut c).await?;
     }
     Ok(c)
 }
@@ -715,17 +721,22 @@ fn create_table(s: &Settings, t: &TableDef) -> String {
 
 /// Drops and recreates the schema. The reference tables are created later, in the transaction that loads them.
 pub async fn create_schema(pool: &PgPool, s: &Settings) -> Result<(), sqlx::Error> {
-    sqlx::query(&format!("DROP SCHEMA IF EXISTS {} CASCADE", s.schema))
-        .execute(pool)
-        .await?;
-    sqlx::query(&format!("CREATE SCHEMA {}", s.schema))
+    sqlx::query(AssertSqlSafe(format!(
+        "DROP SCHEMA IF EXISTS {} CASCADE",
+        s.schema
+    )))
+    .execute(pool)
+    .await?;
+    sqlx::query(AssertSqlSafe(format!("CREATE SCHEMA {}", s.schema)))
         .execute(pool)
         .await?;
     for t in TABLES
         .iter()
         .filter(|t| !REFERENCE_TABLES.contains(&t.name))
     {
-        sqlx::query(&create_table(s, t)).execute(pool).await?;
+        sqlx::query(AssertSqlSafe(create_table(s, t)))
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }
@@ -749,15 +760,17 @@ pub async fn create_extensions(pool: &PgPool, s: &Settings) -> Result<ExtensionS
         .collect();
     let schema = &s.extension_schema;
     if !missing.is_empty() {
-        sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
-            .execute(pool)
-            .await
-            .map_err(|err| format!("creating schema {schema} for the extensions: {err}"))?;
+        sqlx::query(AssertSqlSafe(format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema}"
+        )))
+        .execute(pool)
+        .await
+        .map_err(|err| format!("creating schema {schema} for the extensions: {err}"))?;
     }
     for e in &missing {
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA {schema}"
-        ))
+        )))
         .execute(pool)
         .await
         .map_err(|err| {
@@ -927,7 +940,9 @@ pub async fn load_reference_tables(
             .await
             .map_err(|e| err(t.name, enc.rows, e, false))?;
         let res = async {
-            sqlx::query(&create_table(s, t)).execute(&mut *tx).await?;
+            sqlx::query(AssertSqlSafe(create_table(s, t)))
+                .execute(&mut *tx)
+                .await?;
             copy_batch(&mut tx, s, t, &enc, s.freeze_reference_tables).await
         }
         .await;
@@ -1170,10 +1185,10 @@ pub async fn finish(
         if s.indexes.keys && s.index_timing == IndexTiming::After {
             if let Some(k) = t.key {
                 let started = Instant::now();
-                sqlx::query(&format!(
+                sqlx::query(AssertSqlSafe(format!(
                     "ALTER TABLE {}.{name} ADD PRIMARY KEY ({k})",
                     s.schema
-                ))
+                )))
                 .execute(&mut *conn)
                 .await?;
                 steps.push((format!("primary key {name}"), started.elapsed()));
@@ -1184,21 +1199,21 @@ pub async fn finish(
                 );
             }
         }
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "ALTER TABLE {}.{name} RESET (autovacuum_enabled)",
             s.schema
-        ))
+        )))
         .execute(&mut *conn)
         .await?;
     }
-    sqlx::query(&clock_function(&s.schema))
+    sqlx::query(AssertSqlSafe(clock_function(&s.schema)))
         .execute(&mut *conn)
         .await?;
     for ix in composite {
         let started = Instant::now();
         let name = index_name(ix.table, ix.parts);
         let on = format!("{}.{}", s.schema, ix.table);
-        sqlx::query(&ix.create_sql(&name, &on, &s.schema))
+        sqlx::query(AssertSqlSafe(ix.create_sql(&name, &on, &s.schema)))
             .execute(&mut *conn)
             .await?;
         steps.push((format!("composite {name}"), started.elapsed()));
@@ -1211,10 +1226,10 @@ pub async fn finish(
     }
     for (table, name, columns) in unique {
         let started = Instant::now();
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "ALTER TABLE {}.{table} ADD CONSTRAINT {name} UNIQUE ({columns})",
             s.schema
-        ))
+        )))
         .execute(&mut *conn)
         .await?;
         steps.push((format!("unique {name}"), started.elapsed()));
@@ -1227,13 +1242,13 @@ pub async fn finish(
     }
     for x in searches {
         let started = Instant::now();
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "CREATE INDEX {} ON {}.{} {}",
             x.name,
             s.schema,
             x.table,
             x.sql_in(extension_schemas)
-        ))
+        )))
         .execute(&mut *conn)
         .await?;
         steps.push((format!("search {}", x.name), started.elapsed()));
@@ -1247,10 +1262,10 @@ pub async fn finish(
     if s.vacuum {
         for t in &TABLES {
             let started = Instant::now();
-            sqlx::query(&format!(
+            sqlx::query(AssertSqlSafe(format!(
                 "VACUUM (ANALYZE {}) {}.{}",
                 s.analyze, s.schema, t.name
-            ))
+            )))
             .execute(&mut *conn)
             .await?;
             steps.push((format!("vacuum {}", t.name), started.elapsed()));
@@ -1258,7 +1273,7 @@ pub async fn finish(
     } else if s.analyze {
         for t in &TABLES {
             let started = Instant::now();
-            sqlx::query(&format!("ANALYZE {}.{}", s.schema, t.name))
+            sqlx::query(AssertSqlSafe(format!("ANALYZE {}.{}", s.schema, t.name)))
                 .execute(&mut *conn)
                 .await?;
             steps.push((format!("analyze {}", t.name), started.elapsed()));
@@ -1316,10 +1331,10 @@ pub async fn write_run(
 ) -> Result<(), sqlx::Error> {
     let keys: Vec<String> = pairs.iter().map(|p| p.0.clone()).collect();
     let values: Vec<String> = pairs.iter().map(|p| p.1.clone()).collect();
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO {}.generator_run (key, value) SELECT * FROM UNNEST($1::text[], $2::text[])",
         s.schema
-    ))
+    )))
     .bind(keys)
     .bind(values)
     .execute(pool)

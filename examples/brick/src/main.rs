@@ -9,7 +9,7 @@ use sql_composer::types::Dialect;
 use sql_composer::MockTable;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::Query;
-use sqlx::{Connection, PgConnection, PgPool, Postgres, Row};
+use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool, Postgres, Row};
 
 /// The set the examples use by default: Café Corner, a single-version set.
 const DEFAULT_SET: &str = "10182-1";
@@ -219,7 +219,7 @@ fn bound<'q>(
         );
     }
     let mut taken: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut query = sqlx::query(&result.sql);
+    let mut query = sqlx::query(AssertSqlSafe(result.sql.as_str()));
     for param in &result.bind_params {
         let nth = taken.entry(param.as_str()).or_insert(0);
         let value = values
@@ -1175,11 +1175,11 @@ async fn lines_where(
     predicate: &str,
     arg: &str,
 ) -> BTreeSet<LineKey> {
-    sqlx::query(&format!(
+    sqlx::query(AssertSqlSafe(format!(
         "SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare \
          FROM lego_inventory_parts ip JOIN lego_inventories i ON i.id = ip.inventory_id \
          WHERE i.set_num = $1 AND {predicate}"
-    ))
+    )))
     .bind(set_num)
     .bind(arg)
     .fetch_all(pool)
@@ -1301,11 +1301,11 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         .await
         .expect("query failed")
         .get(0);
-    let walked: i64 = sqlx::query_scalar(&format!(
+    let walked: i64 = sqlx::query_scalar(AssertSqlSafe(format!(
         "{WALK_UP} SELECT count(DISTINCT ip.part_num) FROM lego_inventory_parts ip \
          JOIN lego_inventories i ON i.id = ip.inventory_id \
          WHERE i.set_num IN (SELECT set_num FROM up WHERE theme_id = $1)"
-    ))
+    )))
     .bind(STAR_WARS_THEME_ID)
     .fetch_one(pool)
     .await
@@ -1501,7 +1501,7 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         .iter()
         .map(|r| (r.get("root_id"), r.get("set_num")))
         .collect();
-    let numbered: BTreeSet<(i32, String)> = sqlx::query_as(&format!(
+    let numbered: BTreeSet<(i32, String)> = sqlx::query_as(AssertSqlSafe(format!(
         "{WALK_UP} SELECT theme_id, set_num FROM ( \
            SELECT u.theme_id, u.set_num, row_number() OVER (PARTITION BY u.theme_id \
              ORDER BY s.year DESC NULLS LAST, s.set_num DESC) AS nth \
@@ -1509,7 +1509,7 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
            JOIN lego_sets s ON s.set_num = u.set_num \
            WHERE r.parent_id IS NULL) n \
          WHERE nth <= 3"
-    ))
+    )))
     .fetch_all(pool)
     .await
     .expect("query failed")
@@ -1578,10 +1578,10 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
     let (median, sized) = row.map_or((None, 0), |r| {
         (r.get::<Option<f64>, _>("median"), r.get::<i64, _>("sized"))
     });
-    let mut listed: Vec<i32> = sqlx::query_scalar(&format!(
+    let mut listed: Vec<i32> = sqlx::query_scalar(AssertSqlSafe(format!(
         "{WALK_UP} SELECT s.num_parts FROM up u JOIN lego_sets s ON s.set_num = u.set_num \
          WHERE u.theme_id = $1 AND s.num_parts IS NOT NULL"
-    ))
+    )))
     .bind(STAR_WARS_THEME_ID)
     .fetch_all(pool)
     .await
@@ -1698,11 +1698,11 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         .iter()
         .map(|r| r.get("builder_id"))
         .collect();
-    let counted: BTreeSet<i32> = sqlx::query_scalar(&format!(
+    let counted: BTreeSet<i32> = sqlx::query_scalar(AssertSqlSafe(format!(
         "{WALK_UP}, scope AS (SELECT set_num FROM up WHERE theme_id = $1) \
          SELECT c.builder_id FROM lego_collection c JOIN scope ON scope.set_num = c.set_num \
          GROUP BY c.builder_id HAVING count(DISTINCT c.set_num) = (SELECT count(*) FROM scope)"
-    ))
+    )))
     .bind(SPYBIOTICS_THEME_ID)
     .fetch_all(pool)
     .await
@@ -2019,10 +2019,10 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
                        sin(radians(b.latitude - c.latitude) / 2) ^ 2 \
                        + cos(radians(c.latitude)) * cos(radians(b.latitude)) \
                          * sin(radians(b.longitude - c.longitude) / 2) ^ 2))";
-    let truth: BTreeMap<i32, f64> = sqlx::query(&format!(
+    let truth: BTreeMap<i32, f64> = sqlx::query(AssertSqlSafe(format!(
         "SELECT b.builder_id, {haversine} FROM lego_cities c, lego_builders b \
          WHERE c.city_id = $1 AND {haversine} <= $2 * 1000"
-    ))
+    )))
     .bind(DEFAULT_CITY_ID)
     .bind(DEFAULT_KM)
     .fetch_all(pool)
@@ -2121,14 +2121,14 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         .expect("query failed");
     let roots: BTreeSet<i32> = rows.iter().map(|r| r.get("root_id")).collect();
     let purchases: i64 = rows.iter().map(|r| r.get::<i64, _>("purchases")).sum();
-    let truth: i64 = sqlx::query_scalar(&format!(
+    let truth: i64 = sqlx::query_scalar(AssertSqlSafe(format!(
         "SELECT count(*) FROM lego_purchases p \
          JOIN lego_collection col ON col.builder_id = p.builder_id AND col.row_no = p.row_no \
          JOIN lego_sets s ON s.set_num = col.set_num \
          JOIN lego_builders b ON b.builder_id = p.builder_id \
          JOIN lego_cities c ON c.city_id = $1 \
          WHERE s.theme_id IN (SELECT id FROM lego_themes) AND {haversine} <= $2 * 1000"
-    ))
+    )))
     .bind(DEFAULT_CITY_ID)
     .bind(DEFAULT_KM)
     .fetch_one(pool)

@@ -28,7 +28,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use sqlx::PgConnection;
+use sqlx::{AssertSqlSafe, PgConnection};
 use tracing::info;
 
 use crate::calendar::{ZONE_COUNTRIES, ZONE_NAMES};
@@ -591,7 +591,7 @@ pub struct Built {
 }
 
 pub(crate) async fn exec(conn: &mut PgConnection, sql: &str) -> Result<(), String> {
-    sqlx::query(sql)
+    sqlx::query(AssertSqlSafe(sql))
         .execute(&mut *conn)
         .await
         .map(|_| ())
@@ -599,7 +599,7 @@ pub(crate) async fn exec(conn: &mut PgConnection, sql: &str) -> Result<(), Strin
 }
 
 pub(crate) async fn count(conn: &mut PgConnection, sql: &str) -> Result<i64, String> {
-    sqlx::query_as::<_, (i64,)>(sql)
+    sqlx::query_as::<_, (i64,)>(AssertSqlSafe(sql))
         .fetch_one(&mut *conn)
         .await
         .map(|r| r.0)
@@ -622,9 +622,9 @@ pub async fn build(
     exec(conn, &format!("CREATE SCHEMA {oo}")).await?;
     let mut hierarchies = Vec::new();
     if classes.sets {
-        let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(&format!(
+        let themes = sqlx::query_as::<_, (i32, String, Option<i32>)>(AssertSqlSafe(format!(
             "SELECT id, name, parent_id FROM {generated}.lego_themes"
-        ))
+        )))
         .fetch_all(&mut *conn)
         .await
         .map_err(|e| format!("reading the themes: {e}"))?;
@@ -636,13 +636,13 @@ pub async fn build(
     }
     if classes.builders {
         let streets: BTreeMap<String, (i32, i32)> =
-            sqlx::query_as::<_, (String, i32, i32)>(&format!(
+            sqlx::query_as::<_, (String, i32, i32)>(AssertSqlSafe(format!(
                 "SELECT c.zone, min(s.street_id), max(s.street_id) \
                  FROM {generated}.lego_streets s \
                  JOIN {generated}.lego_postcodes p ON p.postcode_id = s.postcode_id \
                  JOIN {generated}.lego_cities c ON c.city_id = p.city_id \
                  GROUP BY c.zone"
-            ))
+            )))
             .fetch_all(&mut *conn)
             .await
             .map_err(|e| format!("reading the streets: {e}"))?
@@ -768,10 +768,10 @@ async fn check_placement(
         for c in &h.classes {
             let name = &c.name;
             // the class's CHECKs as the catalogue holds them, its own and its inherited ones
-            let from_catalogue = sqlx::query_as::<_, (Option<String>,)>(&format!(
+            let from_catalogue = sqlx::query_as::<_, (Option<String>,)>(AssertSqlSafe(format!(
                 "SELECT string_agg('(' || pg_get_expr(conbin, conrelid) || ') IS TRUE', ' AND ' ORDER BY conname)
                  FROM pg_constraint WHERE conrelid = '{oo}.{name}'::regclass AND contype = 'c'"
-            ))
+            )))
             .fetch_one(&mut *conn)
             .await
             .map_err(|e| format!("reading {oo}.{name}'s checks: {e}"))?

@@ -16,7 +16,10 @@ name = "sqlc-brickgen"
 path = "src/main.rs"
 
 [dependencies]
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
+# sqlx-postgres 0.9.0 builds whoami without `std`, so a URL that names no user connects as
+# `anonymous`; whoami's default features have it read the operating system's user again.
+whoami = "2"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

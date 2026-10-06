@@ -185,6 +185,11 @@ struct Cli {
     /// extensions they need).
     #[arg(long, default_value = "keys,composite,search")]
     indexes: String,
+    /// The schema the search indexes' extensions are created in, apart from the real catalogue in
+    /// `public`; created with the first of them. An extension the database already has stays
+    /// where it is.
+    #[arg(long, default_value = "extensions")]
+    extension_schema: String,
     /// Create the tables UNLOGGED (for scratch runs).
     #[arg(long)]
     unlogged: bool,
@@ -354,6 +359,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             ));
         }
     }
+    // The extensions outlive the run, so they may not be created in a schema a run drops.
+    let mut dropped = [Some(cli.schema.clone()), cli.oo_schema.clone()]
+        .into_iter()
+        .flatten()
+        .chain(partitions::Method::ALL.map(|m| partitions::method_schema(&cli.schema, m)));
+    if dropped.any(|s| same_schema(&s, &cli.extension_schema)) {
+        return Err(format!(
+            "--extension-schema {} names the --schema, the --oo-schema or a --partitioning schema, \
+             and a run drops them",
+            cli.extension_schema
+        ));
+    }
     let sets = cli.sets.unwrap_or(cli.size.sets());
     let build_timeout = cli
         .build_timeout
@@ -373,6 +390,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         },
         indexes: load::Indexes::parse(&cli.indexes)?,
+        extension_schema: cli.extension_schema.clone(),
         unlogged: cli.unlogged,
         synchronous_commit: on(&cli.synchronous_commit)?,
         wave_timeout: cli.wave_timeout.clone(),

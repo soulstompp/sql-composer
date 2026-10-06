@@ -107,11 +107,15 @@ repeats neither key, and stops before writing anything if it does.
 `--indexes` says which of these are built: `keys` (the primary keys and the unique keys),
 `composite` and `search`, as a list, or `none`. All three are built by default; the clock function
 is created whatever the list. The search indexes need the extensions `cube`, `earthdistance` and
-`pg_trgm`. When `search` is in the list, the generator creates each one in `public` before it writes
-anything, unless the database has it already, in any schema; each search index names the schema its
-extension is in. `earthdistance` is not a trusted extension, so only a superuser can create it: a
-role that is not one needs a superuser to run `CREATE EXTENSION earthdistance CASCADE` in the
-database first, or leaves `search` out of `--indexes`.
+`pg_trgm`. When `search` is in the list, the generator creates each one before it writes anything,
+unless the database has it already, in any schema. It creates them in a schema of their own,
+`extensions`, apart from the real catalogue in `public`, and creates that schema with the first of
+them. `--extension-schema` names another, but never one a run drops (`--schema`, `--oo-schema`, a
+`--partitioning` schema). Each search index names the schema its extension is in; a query that
+calls the extensions' functions finds them with that schema on its `search_path`. `earthdistance`
+is not a trusted extension, so only a superuser can create it: a role that is not one needs a
+superuser to create the three first, in the database and in their schema, or leaves `search` out of
+`--indexes`.
 
 Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
 leaves it on); then the tables are vacuumed and analysed. `--vacuum off` leaves out the vacuum, and

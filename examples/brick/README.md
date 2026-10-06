@@ -9,11 +9,6 @@ The example runs on PostgreSQL 15 or later (for `MERGE`). With the server runnin
 
 ```sh
 createdb sqlc_brick
-psql -X -q -v ON_ERROR_STOP=1 -d sqlc_brick \
-    -c 'CREATE SCHEMA extensions' \
-    -c 'CREATE EXTENSION cube SCHEMA extensions' \
-    -c 'CREATE EXTENSION earthdistance SCHEMA extensions' \
-    -c 'CREATE EXTENSION pg_trgm SCHEMA extensions'
 curl -sSfL https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql \
     | psql -X -q -v ON_ERROR_STOP=1 -o /dev/null -d sqlc_brick
 cargo run --release -p sqlc-brickgen -- --database-url postgres:///sqlc_brick \
@@ -22,24 +17,25 @@ cargo run -p brick-example -- migrate
 ```
 
 1. `createdb` makes the example's database.
-2. The first `psql` creates the extensions the searches need, in a schema of their own,
-   `extensions`: `cube` and `earthdistance` for distances on the earth, and `pg_trgm` for patterns.
-   Their own schema keeps them apart from `public`, which the next step fills.
-3. The second `psql` loads Neon's sample dump into `public`: the real catalogue the generator reads.
-   The load stops at the first failed statement.
-4. The generator writes the catalogue and 20 thousand synthesized sets, with their builders,
+2. `psql` loads Neon's sample dump into `public`: the real catalogue the generator reads. The load
+   stops at the first failed statement.
+3. The generator writes the catalogue and 20 thousand synthesized sets, with their builders,
    collections and purchases, into the schema `lego`, which it drops and recreates on every run.
    `--traps none` leaves out the traps it plants. `--indexes keys,composite,search` builds the keys,
    the composite indexes for the joins, and the search indexes: the parts' names by their words and
    by trigram, the sets' names by trigram, the builders' homes on the earth, and the postcodes by
-   their prefix. It finds the extensions where step 2 put them.
-5. `migrate` adds the example's own tables (`set_category_summary`, `inventory_tracking`) to the
+   their prefix. Before it writes anything, it creates the extensions those indexes need in a schema
+   of their own, `extensions`, apart from `public`: `cube` and `earthdistance` for distances on the
+   earth, and `pg_trgm` for patterns. Only a superuser can create `earthdistance`; for any other
+   role, the generator stops and says what a superuser has to run.
+4. `migrate` adds the example's own tables (`set_category_summary`, `inventory_tracking`) to the
    same schema. Each migration is safe to run again, and runs again after the generator, whose run
    drops them with the schema.
 
 The queries search the schema `lego`, then the schemas that hold the three extensions, and never
 `public`, where the seed lies under the same table names. `--schema` names another schema than
-`lego`.
+`lego`. Extensions the database already held in `public` stay there, out of the queries' reach, and
+the searches by place then stop at their first call to `ll_to_earth`.
 
 ### Connecting
 

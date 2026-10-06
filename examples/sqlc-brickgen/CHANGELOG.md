@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.2
+
+- **The search extensions in a schema of their own** — `cube`, `earthdistance` and `pg_trgm` are created in `--extension-schema`, `extensions` by default, which the generator creates with the first of them; 0.0.1 created them in `public`, beside the real catalogue. An extension the database already has stays where it is. A schema a run drops (`--schema`, `--oo-schema`, a `--partitioning` schema) is refused. `--extension-schema public` creates them where 0.0.1 did.
+
 ## 0.0.1
 
 The first release on crates.io. The generator first shipped as `lego-generator`, an example in

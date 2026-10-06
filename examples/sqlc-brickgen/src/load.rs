@@ -107,6 +107,7 @@ pub struct Settings {
     pub method: Method,
     pub index_timing: IndexTiming,
     pub indexes: Indexes,
+    pub extension_schema: String,
     pub unlogged: bool,
     pub synchronous_commit: bool,
     pub wave_timeout: String,
@@ -729,14 +730,33 @@ pub async fn create_schema(pool: &PgPool, s: &Settings) -> Result<(), sqlx::Erro
     Ok(())
 }
 
-/// Creates in `public` the extensions the search indexes need, when they are built and the
-/// database does not have them already in some schema, and returns the schema each one is in. Run
-/// before the load, so that a role that may not create one stops before anything is written.
+/// Creates the extensions the search indexes need, when they are built and the database does not
+/// have them already in some schema, in the extension schema, which it creates first if need be;
+/// returns the schema each one is in. Run before the load, so that a role that may not create one
+/// stops before anything is written.
 pub async fn create_extensions(pool: &PgPool, s: &Settings) -> Result<ExtensionSchemas, String> {
     let wanted = extensions_for(s.indexes);
-    for e in &wanted {
+    let names: Vec<String> = wanted.iter().map(|e| e.to_string()).collect();
+    let present: Vec<String> =
+        sqlx::query_scalar("SELECT extname::text FROM pg_extension WHERE extname = ANY($1)")
+            .bind(&names)
+            .fetch_all(pool)
+            .await
+            .map_err(|err| format!("reading the extensions: {err}"))?;
+    let missing: Vec<&str> = wanted
+        .into_iter()
+        .filter(|e| !present.iter().any(|p| p == e))
+        .collect();
+    let schema = &s.extension_schema;
+    if !missing.is_empty() {
+        sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
+            .execute(pool)
+            .await
+            .map_err(|err| format!("creating schema {schema} for the extensions: {err}"))?;
+    }
+    for e in &missing {
         sqlx::query(&format!(
-            "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA public"
+            "CREATE EXTENSION IF NOT EXISTS {e} WITH SCHEMA {schema}"
         ))
         .execute(pool)
         .await
@@ -744,12 +764,11 @@ pub async fn create_extensions(pool: &PgPool, s: &Settings) -> Result<ExtensionS
             format!(
                 "creating extension {e}: {err}. The search indexes need cube, earthdistance and \
                  pg_trgm, in any schema; earthdistance can be created only by a superuser, so \
-                 have one run `CREATE EXTENSION earthdistance CASCADE` in this database, or \
-                 leave search out of --indexes"
+                 have one run `CREATE EXTENSION earthdistance SCHEMA {schema} CASCADE` in this \
+                 database, or leave search out of --indexes"
             )
         })?;
     }
-    let names: Vec<String> = wanted.iter().map(|e| e.to_string()).collect();
     let schemas: ExtensionSchemas = sqlx::query_as::<_, (String, String)>(
         "SELECT e.extname::text, quote_ident(n.nspname)::text \
          FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace \
@@ -1319,6 +1338,7 @@ mod tests {
             method: Method::Copy,
             index_timing,
             indexes,
+            extension_schema: "extensions".into(),
             unlogged: false,
             synchronous_commit: false,
             wave_timeout: "300s".into(),

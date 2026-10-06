@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use sql_composer::composer::{ComposedSql, Composer};
 use sql_composer::parser::parse_template_file;
 use sql_composer::types::Dialect;
+use sql_composer::MockTable;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::Query;
 use sqlx::{Connection, PgConnection, PgPool, Postgres, Row};
@@ -164,6 +165,21 @@ fn text<'a>(name: &'a str, v: &str) -> (&'a str, Value) {
 fn compose(sqlc_dir: &Path, template: &str) -> ComposedSql {
     let mut composer = Composer::new(Dialect::Postgres);
     composer.add_search_path(sqlc_dir.to_path_buf());
+    let tpl = parse_template_file(&sqlc_dir.join(template))
+        .unwrap_or_else(|e| panic!("parse {template}: {e}"));
+    composer
+        .compose(&tpl)
+        .unwrap_or_else(|e| panic!("compose {template}: {e}"))
+}
+
+/// Compose a template with mock tables: each statement that names a mocked table reads the mock's
+/// rows instead of the table's.
+fn compose_mocked(sqlc_dir: &Path, template: &str, mocks: Vec<MockTable>) -> ComposedSql {
+    let mut composer = Composer::new(Dialect::Postgres);
+    composer.add_search_path(sqlc_dir.to_path_buf());
+    for mock in mocks {
+        composer.add_mock_table(mock);
+    }
     let tpl = parse_template_file(&sqlc_dir.join(template))
         .unwrap_or_else(|e| panic!("parse {template}: {e}"));
     composer
@@ -2125,6 +2141,81 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
             "{purchases} purchases over {} root themes, {truth} in the tables",
             rows.len()
         ),
+    );
+
+    // 27. On rows of the example's own, the division keeps a builder who owns every set of a
+    //     scope, drops one missing a set, and keeps nobody for a scope with no sets, which the
+    //     catalogue never has.
+    let themes = MockTable::new("lego_themes")
+        .column("id", "integer")
+        .column("name", "varchar")
+        .column("parent_id", "integer")
+        .row(&[Some("1"), Some("Castle"), None])
+        .row(&[Some("2"), Some("Knights"), Some("1")])
+        .row(&[Some("3"), Some("Unreleased"), None]);
+    let sets = MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("theme_id", "integer")
+        .row(&[Some("100-1"), Some("1")])
+        .row(&[Some("200-1"), Some("2")]);
+    let builders = MockTable::new("lego_builders")
+        .column("builder_id", "integer")
+        .column("name", "varchar")
+        .row(&[Some("10"), Some("Owns both")])
+        .row(&[Some("11"), Some("Owns one")])
+        .row(&[Some("12"), Some("Owns none")]);
+    let collection = MockTable::new("lego_collection")
+        .column("builder_id", "integer")
+        .column("row_no", "integer")
+        .column("set_num", "varchar")
+        .row(&[Some("10"), Some("1"), Some("100-1")])
+        .row(&[Some("10"), Some("2"), Some("200-1")])
+        .row(&[Some("11"), Some("1"), Some("100-1")]);
+    let division = compose_mocked(
+        sqlc_dir,
+        "builders/complete_scope.sqlc",
+        vec![themes, sets, builders, collection],
+    );
+    let mut kept = Vec::new();
+    for theme_id in [1, 3] {
+        let ids: Vec<i32> = bound(&division, &[int("theme_id", theme_id)])
+            .fetch_all(pool)
+            .await
+            .expect("query failed")
+            .iter()
+            .map(|r| r.get("builder_id"))
+            .collect();
+        kept.push(ids);
+    }
+    all_hold &= verdict(
+        "on mocked rows, the division keeps the owner of every set, and nobody for an empty scope",
+        kept[0] == vec![10] && kept[1].is_empty(),
+        &format!(
+            "Castle keeps {:?}, the empty scope keeps {:?}",
+            kept[0], kept[1]
+        ),
+    );
+
+    // 28. On rows of the example's own, a year with no release between two that have one is
+    //     listed with 0.
+    let releases = MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("year", "integer")
+        .row(&[Some("100-1"), Some("1990")])
+        .row(&[Some("200-1"), Some("1992")])
+        .row(&[Some("300-1"), Some("1992")]);
+    let years = compose_mocked(sqlc_dir, "reports/release_years.sqlc", vec![releases]);
+    let listed: Vec<(i32, i64)> = bound(&years, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("year"), r.get("sets")))
+        .collect();
+    all_hold &= verdict(
+        "on mocked rows, 1991 between releases in 1990 and 1992 is listed with 0",
+        listed == vec![(1990, 1), (1991, 0), (1992, 2)],
+        &format!("{listed:?}"),
     );
 
     println!(

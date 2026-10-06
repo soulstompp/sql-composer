@@ -62,6 +62,9 @@ struct Gathered {
     open: HashSet<PathBuf>,
 }
 
+/// Composes one source of a command, standing alone, on the positional path.
+type ComposeSource<'a> = &'a dyn Fn(&Template, &mut HashSet<PathBuf>) -> Result<ComposedSql>;
+
 impl Composer {
     /// Create a new composer with the given dialect.
     pub fn new(dialect: Dialect) -> Self {
@@ -951,7 +954,10 @@ impl Composer {
                     bind_params.extend(composed.bind_params);
                 }
                 Element::Command(command) => {
-                    let composed = self.compose_command(command, visited)?;
+                    let composed =
+                        self.compose_command(command, visited, &|template, visited| {
+                            self.compose_inner(template, &HashMap::new(), visited)
+                        })?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -1009,7 +1015,15 @@ impl Composer {
                     bind_params.extend(composed.bind_params);
                 }
                 Element::Command(command) => {
-                    let composed = self.compose_command(command, visited)?;
+                    let composed =
+                        self.compose_command(command, visited, &|template, visited| {
+                            self.compose_with_values_inner(
+                                template,
+                                values,
+                                &HashMap::new(),
+                                visited,
+                            )
+                        })?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -1068,20 +1082,29 @@ impl Composer {
 
     /// Compose a command (count/union) into SQL (positional path).
     ///
-    /// Command sources are standalone templates — they get empty slots.
+    /// Command sources are standalone templates — they get empty slots. `compose_source`
+    /// composes each one, with the statement's values when it is composed with them, so a list
+    /// bound inside a source gets a placeholder for each value.
     fn compose_command(
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
+        compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         match command.kind {
-            CommandKind::Union => self.compose_set_operation(command, "UNION", "_union", visited),
-            CommandKind::Count => self.compose_count(command, visited),
-            CommandKind::Intersect => {
-                self.compose_set_operation(command, "INTERSECT", "_intersect", visited)
+            CommandKind::Union => {
+                self.compose_set_operation(command, "UNION", "_union", visited, compose_source)
             }
+            CommandKind::Count => self.compose_count(command, visited, compose_source),
+            CommandKind::Intersect => self.compose_set_operation(
+                command,
+                "INTERSECT",
+                "_intersect",
+                visited,
+                compose_source,
+            ),
             CommandKind::Except => {
-                self.compose_set_operation(command, "EXCEPT", "_except", visited)
+                self.compose_set_operation(command, "EXCEPT", "_except", visited, compose_source)
             }
         }
     }
@@ -1091,13 +1114,12 @@ impl Composer {
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
+        compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         let columns = match &command.columns {
             Some(cols) => cols.join(", "),
             None => "*".to_string(),
         };
-
-        let empty_slots = HashMap::new();
 
         // If multiple sources, wrap a union first
         let inner = if command.sources.len() > 1 {
@@ -1108,7 +1130,7 @@ impl Composer {
                 columns: None,
                 sources: command.sources.clone(),
             };
-            self.compose_set_operation(&union_cmd, "UNION", "_union", visited)?
+            self.compose_set_operation(&union_cmd, "UNION", "_union", visited, compose_source)?
         } else {
             let source = &command.sources[0];
             match self.view_reference(source)? {
@@ -1119,7 +1141,7 @@ impl Composer {
                 None => {
                     let resolved = self.find_template(source)?;
                     let template = parser::parse_template_file(&resolved)?;
-                    self.compose_inner(&template, &empty_slots, visited)?
+                    compose_source(&template, visited)?
                 }
             }
         };
@@ -1146,9 +1168,9 @@ impl Composer {
         keyword: &str,
         alias: &str,
         visited: &mut HashSet<PathBuf>,
+        compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         let operator = Self::set_operator(command, keyword)?;
-        let empty_slots = HashMap::new();
         let mut parts = Vec::new();
         let mut all_params = Vec::new();
 
@@ -1158,7 +1180,7 @@ impl Composer {
                 None => {
                     let resolved = self.find_template(source)?;
                     let template = parser::parse_template_file(&resolved)?;
-                    let composed = self.compose_inner(&template, &empty_slots, visited)?;
+                    let composed = compose_source(&template, visited)?;
                     all_params.extend(composed.bind_params);
                     composed.sql
                 }
@@ -2776,6 +2798,51 @@ mod tests {
         let (dir, composer) = set_operation_fixture(Dialect::Postgres);
         write_temp_file(&dir, "cols.sqlc", ":union(id OF a.sqlc, b.sqlc)");
         assert!(composer.compose(&file_template(&dir, "cols.sqlc")).is_err());
+    }
+
+    #[test]
+    fn test_a_list_in_a_commands_source_takes_every_value_on_mysql() {
+        let (dir, composer) = set_operation_fixture(Dialect::Mysql);
+        write_temp_file(
+            &dir,
+            "listed.sqlc",
+            "SELECT id FROM a WHERE k IN (:bind(ks))",
+        );
+        let values: BTreeMap<String, Vec<i32>> = crate::bind_values!("ks" => [1, 2, 3]);
+        for (template, source) in [
+            (
+                ":union(listed.sqlc, b.sqlc)",
+                "SELECT id FROM a WHERE k IN (?, ?, ?)\n) AS _union_1",
+            ),
+            (
+                ":except(b.sqlc, listed.sqlc)",
+                "SELECT id FROM a WHERE k IN (?, ?, ?)\n) AS _except_2",
+            ),
+            (
+                ":count(listed.sqlc)",
+                "SELECT id FROM a WHERE k IN (?, ?, ?)\n) AS _count_sub",
+            ),
+            (
+                ":count(listed.sqlc, b.sqlc)",
+                "SELECT id FROM a WHERE k IN (?, ?, ?)\n) AS _union_1",
+            ),
+        ] {
+            write_temp_file(&dir, "command.sqlc", template);
+            let composed = composer
+                .compose_with_values(&file_template(&dir, "command.sqlc"), &values)
+                .unwrap();
+            assert!(
+                composed.sql.contains(source),
+                "{template}: {}",
+                composed.sql
+            );
+            assert_eq!(composed.bind_params, vec!["ks", "ks", "ks"], "{template}");
+            assert_eq!(
+                crate::driver::resolve_values_by_use(&composed, &values).unwrap(),
+                vec![1, 2, 3],
+                "{template}"
+            );
+        }
     }
 
     #[test]

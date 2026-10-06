@@ -1,10 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.0.5
 
 ### sql-composer
 
 - **Named relations** — `Composer::name_relations` writes every relation a statement reads once, named after its file, at the head of the statement: one `WITH`, each relation after those it reads, the statement last. Every place that composes a relation says `SELECT * FROM <name>`. A statement's own `WITH` takes the names first, a `CREATE … AS` takes them at the head of its query, and each statement of a script gets its own. A template that binds a parameter, or is composed with its slots filled, is written in place. A reserved word, two files with one name, and a `:define` are refused.
+- **`:union` wraps its sources** — Each source of a `:union`, and the whole, is a derived table of its own, as with `:intersect` and `:except`. A source that is itself a `:union` with another modifier no longer regroups with its neighbours, and a source ending in `ORDER BY` and `LIMIT` no longer ends the whole union. `:count` over several sources takes the same union. A column list on a `:union` is refused.
+- **Mock tables stand for tables** — `Composer::add_mock_table` gives a table rows of your own: each composed statement that names the table gets `<name> AS (<rows>)` at the head of its `WITH`, and reads the rows in the table's place. A `MockTable` declares its columns in order with their types (`column`), takes rows of optional values (`row`), and writes each value cast to its column's type (`to_sql`). `MockColumn` is new; `add_row` and `mock_rows!` are gone, and `Composer::mock_tables` is a `BTreeMap`.
+- **`driver::resolve_values_by_use`** — For positional placeholders: each use of a bind name takes the name's values again from the first.
+
+### sql-composer-mysql
+
+- **A bind name used twice** — Both drivers fill each use of a name with its values, where they stopped with `MissingBinding` at the second use.
 
 ### cargo-sqlc
 
@@ -12,9 +19,17 @@
 
 ### examples
 
-- **TLS** — The Lego example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
-- **The composed statements are checked** — CI runs `cargo sqlc compose --verify` on the Lego example, so its `.sql` files can no longer fall behind their templates. Its composite indexes migration is now `migrations/20260930000000_composite_indexes.sql`.
-- **The catalogue generator is `sqlc-brickgen`** — `examples/lego-generator/` builds the crate and binary `sqlc-brickgen`, formerly `lego-generator`, with its own version and its own changelog, [`examples/lego-generator/CHANGELOG.md`](examples/lego-generator/CHANGELOG.md).
+- **The brick example** — `examples/lego` is `examples/brick` (crate `brick-example`, binary `brick`, database `sqlc_brick`, `SQLC_BRICK_DATABASE_URL`), and runs on the database sqlc-brickgen builds, which already holds the composite indexes for its joins; the `setup` subcommand and its downloader are gone.
+- **The catalogue generator is `sqlc-brickgen`** — `examples/sqlc-brickgen/` builds the crate and binary `sqlc-brickgen`, formerly `lego-generator`, with its own version and its own changelog, [`examples/sqlc-brickgen/CHANGELOG.md`](examples/sqlc-brickgen/CHANGELOG.md).
+- **More of PostgreSQL's SQL** — Templates on the builders, collections and purchases: window functions, `DISTINCT ON`, `LATERAL`, `ROLLUP`, `percentile_cont`, `generate_series`, an anti-join, division, `array_agg`, `jsonb` and `MERGE`.
+- **Searches** — By the words of a part's name (`websearch_to_tsquery`, `ts_rank`, `ts_headline`), by a regular expression (`~*`, `regexp_match`), and by place (`earth_box` and `earth_distance` for a radius, `<->` for the nearest first), each served by an index the generator builds. Words and patterns fill the `@filter` slot; the builders near a city or in a postcode district fill a new `@area` slot. The setup creates `cube`, `earthdistance` and `pg_trgm` in a schema of their own, and the example searches it after its own, never `public`.
+- **City's and Technic's sets fold into one template** — `shared/scope_sets.sqlc` takes the scope as its `@scope` slot, and each scope returns its own id, from which the label is read.
+- **Laws** — Each template has a law against a second spelling of its answer in direct SQL, and two laws run templates on mock tables. CI runs `cargo sqlc compose --verify` on the example, so its `.sql` files can no longer fall behind their templates.
+- **TLS** — The example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
+
+### All crates
+
+- Version bump to 0.0.5.
 
 ## 0.0.4
 

@@ -283,6 +283,8 @@ e o [`sets/select_colored_parts.sqlc`](examples/brick/sqlc/sets/select_colored_p
 a vaga com ele:
 
 ```sql
+# A set's lines in the colour color_name, one row per line, keyed by the line: the set's lines with
+# the colour's filter in the @filter slot.
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
 ```
 
@@ -290,8 +292,9 @@ Uma vaga, só a preenche o `:compose` que a nomeia. Um modelo composto dentro de
 nenhuma das vagas de quem o compõe, pelo que cada nível passa adiante aquilo de que precisa; e o `@`
 só quer dizer vaga dentro de `:compose(…)`, já que fora daí `@name` é SQL e passa tal como está.
 
-Poupa a consulta de base escrita uma vez por filtro: um filtro por categoria preenche a mesma vaga
-com `filters/by_category.sqlc`, e a base continua a ser um único ficheiro.
+Poupa a consulta de base escrita uma vez por filtro: a mesma vaga recebe uma categoria
+(`filters/by_category.sqlc`), as palavras de uma pesquisa (`filters/by_words.sqlc`) e uma expressão
+regular (`filters/by_pattern.sqlc`), e a base continua a ser um único ficheiro.
 
 Na instrução composta, o corpo do filtro fica onde estava o `:compose(@filter)`.
 
@@ -320,19 +323,16 @@ fazia.
 
 Poupam o corpo de uma consulta colado ao lado do de outra.
 
-Na instrução composta, o `:intersect` e o `:except` embrulham cada fonte numa tabela derivada sua,
-`SELECT * FROM (…) AS _except_1`, e embrulham também o todo, `(…) AS _except`. É que, em SQL, o
-`INTERSECT` liga com mais força do que o `UNION` e o `EXCEPT`, e estes dois, entre si, agrupam-se
-da esquerda para a direita, de modo que uma fonte sem embrulho se reagruparia com o que tem à volta
+Na instrução composta, cada fonte vai embrulhada numa tabela derivada sua,
+`SELECT * FROM (…) AS _except_1`, e o todo também, `(…) AS _except`. É que, em SQL, o `INTERSECT`
+liga com mais força do que o `UNION` e o `EXCEPT`, e estes dois, entre si, agrupam-se da esquerda
+para a direita, de modo que uma fonte sem embrulho se reagruparia com o que tem à volta
 (`a EXCEPT b UNION c` quer dizer `(a EXCEPT b) UNION c`) e daria uma tabela plausível, sem erro
-nenhum. O embrulho mantém cada fonte inteira e permite que um `:intersect` ou um `:except` sirva de
-fonte a um `:union`; o `:union`, esse, escreve as fontes lado a lado, sem embrulho nenhum.
+nenhum. O embrulho mantém cada fonte inteira, seja ela outra operação de conjuntos ou uma consulta
+que acabe em `ORDER BY` e `LIMIT`, pelo que qualquer uma das três pode servir de fonte a outra.
 
-Por isso, uma fonte de um `:union` que seja ela própria um `:union` com outro modificador
-reagrupa-se: sendo `bc` composto como `:union(ALL b, c)`, o `:union(a, bc)` dá
-`a UNION b UNION ALL c`, que se lê `(a UNION b) UNION ALL c` e guarda todas as linhas de `c`,
-repetidas ou não. Como o `:intersect` e o `:except` comparam linhas inteiras, uma lista de colunas é
-recusada em vez de ignorada; e o SQLite só aceita um modificador, o `ALL`, e só depois de `UNION`.
+Uma operação de conjuntos compara linhas inteiras, e por isso uma lista de colunas é recusada em vez
+de ignorada; o SQLite, esse, só aceita um modificador, o `ALL`, e só depois de `UNION`.
 
 ### `:count`: uma relação reduzida a um número
 
@@ -425,6 +425,41 @@ comentário, e a instrução composta sai alterada e, as mais das vezes, continu
 destes escreve-se pela sua função (`jsonb_extract_path_text` em vez de `#>>`), e o `#` fica longe
 dos literais de texto e das linhas `--`.
 
+## Tabelas simuladas: um modelo sobre linhas à escolha
+
+Uma tabela simulada dá a uma tabela linhas à escolha de quem testa, e todas as instruções compostas
+depois disso que nomeiem a tabela leem essas linhas em vez das da tabela, de modo que um modelo pode
+ser posto à prova exatamente sobre as linhas de que um caso precisa, incluindo as que os dados reais
+nunca têm:
+
+```rust,ignore
+use sql_composer::MockTable;
+
+composer.add_mock_table(
+    MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("year", "integer")
+        .row(&[Some("100-1"), Some("1990")])
+        .row(&[Some("200-1"), Some("1992")]),
+);
+```
+
+Poupa as tabelas de teste criadas, preenchidas e apagadas à volta de cada caso, e a cópia de uma
+consulta reescrita para as ler.
+
+Na instrução composta, a simulação fica à cabeça de cada instrução que nomeie a tabela, no seu
+`WITH`: `lego_sets AS (SELECT CAST('100-1' AS varchar) AS set_num, … UNION ALL …)`. Um nome de
+`WITH` vale pela tabela com o mesmo nome em todo o sítio onde a instrução a nomeia pelo nome
+simples, pelo que o compositor continua sem analisar SQL nenhum. Uma instrução com o seu próprio
+`WITH` recebe a simulação como primeira entrada, e uma simulação sem linhas mantém as colunas e não
+devolve nada; cada valor é convertido no tipo da sua coluna, escrito como o dialeto o escreve, e
+`None` é `NULL`.
+
+A simulação deixa de valer onde o nome simples não chega: um nome com esquema, como
+`lego.lego_sets`, e uma vista leem a própria tabela, tal como uma instrução que só nomeie a tabela
+entre aspas duplas. Uma instrução que escreva na tabela escreve na própria tabela, e o MySQL não
+aceita `WITH` antes de um `INSERT`.
+
 ## O percurso
 
 O [exemplo brick](examples/brick/README.md) percorre a álgebra relacional um modelo de cada vez,
@@ -433,8 +468,17 @@ relação passada como argumento, o fecho dos temas, união, interseção e dife
 mais do SQL do PostgreSQL, com funções de janela, `DISTINCT ON`, `LATERAL`, `ROLLUP`,
 `percentile_cont`, `generate_series`, uma antijunção, divisão, `array_agg`, `jsonb` e `MERGE`.
 
+Pesquisa também com os índices que o gerador constrói: pelas palavras de um nome
+(`websearch_to_tsquery`, com a ordem dada pelo `ts_rank` e as palavras marcadas pelo
+`ts_headline`), por uma expressão regular (`~*`, e o `regexp_match` para ler o tamanho de um tijolo
+no próprio nome) e por lugar (`earth_box` e `earth_distance` para um raio, `<->` para os mais
+próximos primeiro). Cada pesquisa preenche uma vaga como qualquer filtro: as palavras e os padrões
+entram em `@filter`, e os construtores perto de uma cidade ou de um distrito postal entram em
+`@area`.
+
 Acaba no `laws`, que são todas as promessas que o exemplo faz, cada uma conferida com uma segunda
-escrita da mesma resposta em SQL direto; se alguma falhar, o `laws` sai com 1.
+escrita da mesma resposta em SQL direto, e duas delas sobre tabelas simuladas; se alguma falhar, o
+`laws` sai com 1.
 
 ## Referência
 
@@ -484,7 +528,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
 | `:define(path)` | o corpo da relação, e o nome à frente do seu `AS` vale por ela daí para baixo |
 | `:bind(name)` | o marcador do dialeto; um por valor, quando o nome recebe uma lista |
 | `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | o mesmo, com o que se espera registado no `Binding` |
-| `:union(a, b, …)` | as fontes unidas por `UNION`, lado a lado e sem embrulho; `ALL` ou `DISTINCT` à cabeça, dentro dos parênteses |
+| `:union(a, b, …)` | as fontes unidas por `UNION`, cada uma embrulhada, e o todo também; `ALL` ou `DISTINCT` à cabeça, dentro dos parênteses |
 | `:intersect(a, b, …)` | as fontes unidas por `INTERSECT`, cada uma embrulhada, e o todo também |
 | `:except(a, b, …)` | `a` menos cada uma das fontes seguintes, cada uma embrulhada, e o todo também |
 | `:count(a)`, `:count(DISTINCT col OF a)` | `SELECT COUNT(…) FROM (…) AS _count_sub` |
@@ -512,7 +556,8 @@ assert_eq!(result.bind_params, vec!["theme_id", "year"]);
 O `parse_template_file` lê um modelo de um ficheiro. O `Composer::add_search_path` acrescenta uma
 pasta a partir da qual se leem os caminhos do `:compose`, o `compose_with_values` recebe os valores
 de cada parâmetro e escreve um marcador por valor, o `load_view_registry` carrega um registo de
-vistas, e com `name_relations = true` compõe-se como com o `--with`.
+vistas, o `add_mock_table` dá a uma tabela linhas à escolha, e com `name_relations = true`
+compõe-se como com o `--with`.
 
 | tipo | o que é |
 |---|---|
@@ -527,6 +572,8 @@ vistas, e com `name_relations = true` compõe-se como com o `--with`.
 | `Composer` | compõe modelos em SQL para um dialeto |
 | `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
 | `Dialect` | `Postgres`, `Mysql` ou `Sqlite` |
+| `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
+| `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |
 
 A funcionalidade `serde` deriva `Serialize` e `Deserialize` para os tipos principais, e a `std`,
 ligada por omissão, compila com a biblioteca padrão.
@@ -651,8 +698,8 @@ sql-composer-mysql = "0.0.5"  # síncrono e assíncrono, ambos ligados por omiss
 A funcionalidade `sync` traz o pacote `mysql` e, com ele, o tipo síncrono; a `async` liga o tipo
 assíncrono, que assenta no `mysql_async`, de que o controlador depende sempre.
 
-No MySQL, um nome usado duas vezes são dois marcadores, e aí ambos os tipos param com
-`MissingBinding`, sejam quais forem os valores que o nome receba.
+No MySQL, um nome usado duas vezes são dois marcadores, e cada um recebe de novo os valores do
+nome, a partir do primeiro.
 
 ```rust,ignore
 // Assíncrono (mysql_async)

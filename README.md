@@ -276,6 +276,8 @@ and [`sets/select_colored_parts.sqlc`](examples/brick/sqlc/sets/select_colored_p
 the slot with it:
 
 ```sql
+# A set's lines in the colour color_name, one row per line, keyed by the line: the set's lines with
+# the colour's filter in the @filter slot.
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
 ```
 
@@ -283,8 +285,9 @@ A slot is filled only by the `:compose` that names it. A template composed insid
 none of its caller's slots, so each level passes on what it needs. `@` means a slot only inside
 `:compose(…)`; anywhere else, `@name` is SQL and passes through.
 
-It saves the base query written once for each filter. A category filter fills the same slot with
-`filters/by_category.sqlc`, and the base stays one file.
+It saves the base query written once for each filter. The same slot takes a category
+(`filters/by_category.sqlc`), the words of a search (`filters/by_words.sqlc`) and a regular
+expression (`filters/by_pattern.sqlc`), and the base stays one file.
 
 In the composed statement, the filter's body stands where `:compose(@filter)` was.
 
@@ -311,19 +314,16 @@ and `DISTINCT` says the default out loud.
 
 It saves one query's body pasted beside another's.
 
-In the composed statement, `:intersect` and `:except` wrap each source in a derived table of its
-own, `SELECT * FROM (…) AS _except_1`, and wrap the whole, `(…) AS _except`. In SQL, `INTERSECT`
-binds more tightly than `UNION` and `EXCEPT`, and those two group from left to right. Without its
+In the composed statement, each source is wrapped in a derived table of its own,
+`SELECT * FROM (…) AS _except_1`, and so is the whole, `(…) AS _except`. In SQL, `INTERSECT` binds
+more tightly than `UNION` and `EXCEPT`, and those two group from left to right. Without its
 wrapping, a source would regroup with its neighbours: `a EXCEPT b UNION c` means
-`(a EXCEPT b) UNION c`, a plausible table with no error. The wrapping keeps each source whole, and
-lets an `:intersect` or an `:except` be a `:union` source. `:union` writes its sources side by side,
-with no wrapping.
+`(a EXCEPT b) UNION c`, a plausible table with no error. The wrapping keeps each source whole,
+another set operation or a query ending in `ORDER BY` and `LIMIT` among them, so any of the three
+can be another's source.
 
-So a `:union` source that is itself a `:union` with another modifier regroups. With `bc` composed as
-`:union(ALL b, c)`, `:union(a, bc)` composes to `a UNION b UNION ALL c`. That is
-`(a UNION b) UNION ALL c`, which keeps every row of `c`, duplicates and all. `:intersect` and
-`:except` compare whole rows, so a column list is refused rather than ignored. SQLite takes one
-modifier, `ALL`, and only after `UNION`.
+A set operation compares whole rows, so a column list is refused rather than ignored. SQLite takes
+one modifier, `ALL`, and only after `UNION`.
 
 ### `:count`: a relation reduced to one figure
 
@@ -411,6 +411,39 @@ quoted identifier, a `--` comment or an operator (`#>>`, `#-`) starts a comment 
 statement comes out changed, and usually still runs. Spell an operator by its function
 (`jsonb_extract_path_text` for `#>>`), and keep `#` out of strings and `--` lines.
 
+## Mock tables: a template on rows of your own
+
+A mock gives a table rows of your own. Every statement composed after it that names the table reads
+the mock's rows instead, so a template can be checked on exactly the rows a case needs, the ones the
+real data never holds among them:
+
+```rust,ignore
+use sql_composer::MockTable;
+
+composer.add_mock_table(
+    MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("year", "integer")
+        .row(&[Some("100-1"), Some("1990")])
+        .row(&[Some("200-1"), Some("1992")]),
+);
+```
+
+It saves the test tables created, filled and dropped around each case, and the copy of a query
+rewritten to read them.
+
+In the composed statement, the mock stands at the head of each statement that names the table, in
+its `WITH`: `lego_sets AS (SELECT CAST('100-1' AS varchar) AS set_num, … UNION ALL …)`. A `WITH`
+name stands for the table of the same name wherever the statement names it bare, so the composer
+still parses none of the SQL. A statement with its own `WITH` takes the mock as its first entry, and
+a mock with no rows keeps its columns and returns nothing. Each value is cast to its column's type,
+written as the dialect spells it, and `None` is `NULL`.
+
+A mock stops where the bare name does not reach. A schema-qualified name such as `lego.lego_sets`
+and a view read the table itself, and so does a statement that names the table only in double
+quotes. A statement that writes the table writes the table itself. MySQL takes no `WITH` before an
+`INSERT`.
+
 ## The walk
 
 The [brick example](examples/brick/README.md) walks the relational algebra one template at a time,
@@ -420,8 +453,15 @@ difference. Then it goes on into more of PostgreSQL's SQL: window functions, `DI
 `LATERAL`, `ROLLUP`, `percentile_cont`, `generate_series`, an anti-join, division, `array_agg`,
 `jsonb` and `MERGE`.
 
+It searches with the indexes the generator builds: by the words of a name (`websearch_to_tsquery`,
+ranked with `ts_rank` and marked with `ts_headline`), by a regular expression (`~*`, and
+`regexp_match` to read a brick's size out of its name), and by place (`earth_box` and
+`earth_distance` for a radius, `<->` for the nearest first). Each search fills a slot as any filter
+does: words and patterns take `@filter`, and the builders near a city or in a postcode district take
+`@area`.
+
 It ends at `laws`: every promise the example makes, each checked against a second spelling of the
-same answer in direct SQL. `laws` exits 1 if any of them fails.
+same answer in direct SQL, and two run on mock tables. `laws` exits 1 if any of them fails.
 
 ## Reference
 
@@ -466,7 +506,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
 | `:define(path)` | the relation's body, and the name in front of its `AS` stands for it below |
 | `:bind(name)` | the dialect's placeholder; one per value for a name bound to a list |
 | `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | the same, with the expectation recorded on the `Binding` |
-| `:union(a, b, …)` | the sources joined by `UNION`, unwrapped; `ALL` or `DISTINCT` first, inside the parentheses |
+| `:union(a, b, …)` | the sources joined by `UNION`, each wrapped, the whole wrapped; `ALL` or `DISTINCT` first, inside the parentheses |
 | `:intersect(a, b, …)` | the sources joined by `INTERSECT`, each wrapped, the whole wrapped |
 | `:except(a, b, …)` | `a` less every later source, each wrapped, the whole wrapped |
 | `:count(a)`, `:count(DISTINCT col OF a)` | `SELECT COUNT(…) FROM (…) AS _count_sub` |
@@ -493,8 +533,8 @@ assert_eq!(result.bind_params, vec!["theme_id", "year"]);
 
 `parse_template_file` reads a template from a file. `Composer::add_search_path` adds a directory
 `:compose` paths are read under. `compose_with_values` takes each binding's values and writes one
-placeholder for each value. `load_view_registry` loads a view registry, and
-`name_relations = true` composes as `--with` does.
+placeholder for each value. `load_view_registry` loads a view registry, `add_mock_table` gives a
+table rows of your own, and `name_relations = true` composes as `--with` does.
 
 | type | what it is |
 |---|---|
@@ -509,6 +549,8 @@ placeholder for each value. `load_view_registry` loads a view registry, and
 | `Composer` | composes templates into SQL for one dialect |
 | `ComposedSql` | the composed SQL, and its bind names in placeholder order |
 | `Dialect` | `Postgres`, `Mysql` or `Sqlite` |
+| `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
+| `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |
 
 The feature `serde` derives `Serialize` and `Deserialize` for the core types, and `std` (on by
 default) builds with the standard library.
@@ -633,8 +675,8 @@ sql-composer-mysql = "0.0.5"  # sync and async, both on by default
 The feature `sync` brings in the `mysql` crate and the sync type. `async` turns on the async type,
 built on `mysql_async`, which the driver always depends on.
 
-A name used twice is two placeholders on MySQL, and both types stop there with `MissingBinding`,
-whatever values the name is given.
+A name used twice is two placeholders on MySQL, and each takes the name's values again from the
+first.
 
 ```rust,ignore
 // Async (mysql_async)

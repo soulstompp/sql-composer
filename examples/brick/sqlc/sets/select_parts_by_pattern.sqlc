@@ -1,0 +1,3 @@
+# A set's lines whose part names match the regular expression pattern, one row per line, keyed by
+# the line: the set's lines with the pattern's filter in the @filter slot.
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_pattern.sqlc)

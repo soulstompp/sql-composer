@@ -8,7 +8,7 @@ use sql_composer::parser::parse_template_file;
 use sql_composer::types::Dialect;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::Query;
-use sqlx::{PgPool, Postgres, Row};
+use sqlx::{Connection, PgConnection, PgPool, Postgres, Row};
 
 /// The set the examples use by default: Café Corner, a single-version set.
 const DEFAULT_SET: &str = "10182-1";
@@ -24,6 +24,17 @@ const SPYBIOTICS_THEME_ID: i32 = 463;
 const DEFAULT_BUILDER: i32 = 3326;
 /// The years the purchase rollup covers by default.
 const ROLLUP_YEARS: (i32, i32) = (2016, 2017);
+/// The search the word filter runs on the default set by default.
+const DEFAULT_WORDS: &str = "window";
+/// The regular expression the pattern filter runs on the default set by default.
+const DEFAULT_PATTERN: &str = r"^(plate|tile) 1 x \d+$";
+/// The search the ranked part search runs by default.
+const SEARCH_WORDS: &str = "technic beam";
+/// The city the geo searches start from by default: London, and the radius round it in km.
+const DEFAULT_CITY_ID: i32 = 67;
+const DEFAULT_KM: i32 = 5;
+/// The postcodes the postcode search reads by default: London's SW district, by its prefix.
+const DEFAULT_POSTCODES: &str = "^SW";
 
 /// Every set paired with its own theme and every theme above it, walked up from the set: the direct
 /// spelling the laws check a theme scope against.
@@ -106,6 +117,28 @@ enum Commands {
     Document { set_num: String },
     /// Keep a set's summary in step with MERGE
     Merge { set_num: String },
+    /// A set's lines whose part names match a search (full text, @slot composition)
+    ByWords { set_num: String, words: String },
+    /// A set's lines whose part names match a regular expression (~*, @slot composition)
+    ByPattern { set_num: String, pattern: String },
+    /// The parts whose names match a search, best match first (ts_rank, ts_headline)
+    Search {
+        words: String,
+        #[arg(default_value_t = 10)]
+        top: i32,
+    },
+    /// The bricks whose names give their size (regexp_match)
+    BrickSizes,
+    /// What the builders near a city bought, by root theme (earthdistance, @slot composition)
+    BoughtNear { city_id: i32, km: i32 },
+    /// What the builders whose postcode matches a pattern bought, by root theme (~, @slot)
+    BoughtIn { pattern: String },
+    /// The builders nearest a city, nearest first (<->, LATERAL)
+    Nearest {
+        city_id: i32,
+        #[arg(default_value_t = 5)]
+        top: i32,
+    },
     /// Check the example's laws; exits 1 if any fails
     Laws,
     /// Run all examples with default values, then the laws
@@ -232,10 +265,27 @@ fn quote_ident(name: &str) -> String {
 async fn main() {
     let cli = Cli::parse();
 
-    // Every connection searches the generator's schema alone. The database's `public` schema holds
-    // the catalogue the generator read, under the same table names, so a search that reached it
-    // would read that catalogue wherever the generator's table is missing.
-    let search_path = quote_ident(&cli.schema);
+    // Every connection searches the generator's schema, then the schemas holding the extensions
+    // the searches use, and never `public`. The database's `public` schema holds the catalogue the
+    // generator read, under the same table names, so a search that reached it would read that
+    // catalogue wherever the generator's table is missing.
+    let mut search_path = vec![quote_ident(&cli.schema)];
+    {
+        let mut conn = PgConnection::connect(&cli.database_url)
+            .await
+            .expect("failed to connect to database");
+        let schemas: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT n.nspname FROM pg_extension e \
+             JOIN pg_namespace n ON n.oid = e.extnamespace \
+             WHERE e.extname IN ('cube', 'earthdistance', 'pg_trgm') AND n.nspname <> 'public' \
+             ORDER BY 1",
+        )
+        .fetch_all(&mut conn)
+        .await
+        .expect("query failed");
+        search_path.extend(schemas.iter().map(|s| quote_ident(s)));
+    }
+    let search_path = search_path.join(", ");
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .after_connect(move |conn, _| {
@@ -312,6 +362,15 @@ async fn main() {
         Commands::Colors { set_num } => cmd_colors(&pool, dir, &set_num).await,
         Commands::Document { set_num } => cmd_document(&pool, dir, &set_num).await,
         Commands::Merge { set_num } => cmd_merge(&pool, dir, &set_num).await,
+        Commands::ByWords { set_num, words } => cmd_by_words(&pool, dir, &set_num, &words).await,
+        Commands::ByPattern { set_num, pattern } => {
+            cmd_by_pattern(&pool, dir, &set_num, &pattern).await
+        }
+        Commands::Search { words, top } => cmd_search(&pool, dir, &words, top).await,
+        Commands::BrickSizes => cmd_brick_sizes(&pool, dir).await,
+        Commands::BoughtNear { city_id, km } => cmd_bought_near(&pool, dir, city_id, km).await,
+        Commands::BoughtIn { pattern } => cmd_bought_in(&pool, dir, &pattern).await,
+        Commands::Nearest { city_id, top } => cmd_nearest(&pool, dir, city_id, top).await,
         Commands::Laws => {
             if !cmd_laws(&pool, dir).await {
                 std::process::exit(1);
@@ -907,6 +966,163 @@ async fn cmd_merge(pool: &PgPool, sqlc_dir: &Path, set_num: &str) {
         .rows_affected();
 
     println!("Merged {affected} category summary rows for set {set_num}.");
+}
+
+// ── full text and regular expressions ──────────────────────────────
+
+/// A set's lines as the filtered listings print them, the first twenty.
+fn print_lines(rows: &[PgRow]) {
+    for row in rows.iter().take(20) {
+        println!(
+            "  v{} {:<45} {:<20} {:<15} qty={}",
+            row.get::<i32, _>("version"),
+            shown(row.get::<Option<String>, _>("part_name")),
+            shown(row.get::<Option<String>, _>("category_name")),
+            shown(row.get::<Option<String>, _>("color_name")),
+            row.get::<i32, _>("quantity"),
+        );
+    }
+    if rows.len() > 20 {
+        println!("  ... and {} more", rows.len() - 20);
+    }
+}
+
+async fn cmd_by_words(pool: &PgPool, sqlc_dir: &Path, set_num: &str, words: &str) {
+    let result = compose(sqlc_dir, "sets/select_parts_by_words.sqlc");
+    print_header("sets/select_parts_by_words", &result);
+
+    let rows = bound(&result, &[text("set_num", set_num), text("words", words)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!(
+        "{} lines of set {set_num} whose part names match '{words}':",
+        rows.len()
+    );
+    print_lines(&rows);
+}
+
+async fn cmd_by_pattern(pool: &PgPool, sqlc_dir: &Path, set_num: &str, pattern: &str) {
+    let result = compose(sqlc_dir, "sets/select_parts_by_pattern.sqlc");
+    print_header("sets/select_parts_by_pattern", &result);
+
+    let rows = bound(
+        &result,
+        &[text("pattern", pattern), text("set_num", set_num)],
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+
+    println!(
+        "{} lines of set {set_num} whose part names match /{pattern}/:",
+        rows.len()
+    );
+    print_lines(&rows);
+}
+
+async fn cmd_search(pool: &PgPool, sqlc_dir: &Path, words: &str, top: i32) {
+    let result = compose(sqlc_dir, "parts/search_parts.sqlc");
+    print_header("parts/search_parts", &result);
+
+    let rows = bound(&result, &[int("top", top), text("words", words)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("The {} parts that best match '{words}':", rows.len());
+    for row in &rows {
+        println!(
+            "  {:<10} {:.4}  {}",
+            row.get::<String, _>("part_num"),
+            row.get::<f32, _>("rank"),
+            row.get::<String, _>("marked"),
+        );
+    }
+}
+
+async fn cmd_brick_sizes(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "parts/brick_sizes.sqlc");
+    print_header("parts/brick_sizes", &result);
+
+    let rows = bound(&result, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("{} bricks whose names give their size:", rows.len());
+    for row in &rows {
+        println!(
+            "  {:<10} {:>2} x {:<2}  {}",
+            row.get::<String, _>("part_num"),
+            row.get::<i32, _>("width"),
+            row.get::<i32, _>("length"),
+            row.get::<String, _>("name"),
+        );
+    }
+}
+
+// ── places ──────────────────────────────────────────────────────────
+
+/// What an area's builders bought, by root theme, as the area listings print it.
+fn print_area_purchases(rows: &[PgRow]) {
+    for row in rows.iter().take(10) {
+        println!(
+            "  {:<35} {:>6} purchases by {:>4} builders",
+            row.get::<String, _>("root_name"),
+            row.get::<i64, _>("purchases"),
+            row.get::<i64, _>("builders"),
+        );
+    }
+    if rows.len() > 10 {
+        println!("  ... and {} more root themes", rows.len() - 10);
+    }
+}
+
+async fn cmd_bought_near(pool: &PgPool, sqlc_dir: &Path, city_id: i32, km: i32) {
+    let result = compose(sqlc_dir, "builders/bought_near.sqlc");
+    print_header("builders/bought_near", &result);
+
+    let rows = bound(&result, &[int("city_id", city_id), int("km", km)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("What the builders within {km} km of city {city_id} bought, by root theme:");
+    print_area_purchases(&rows);
+}
+
+async fn cmd_bought_in(pool: &PgPool, sqlc_dir: &Path, pattern: &str) {
+    let result = compose(sqlc_dir, "builders/bought_in_postcodes.sqlc");
+    print_header("builders/bought_in_postcodes", &result);
+
+    let rows = bound(&result, &[text("pattern", pattern)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("What the builders whose postcode matches /{pattern}/ bought, by root theme:");
+    print_area_purchases(&rows);
+}
+
+async fn cmd_nearest(pool: &PgPool, sqlc_dir: &Path, city_id: i32, top: i32) {
+    let result = compose(sqlc_dir, "builders/nearest.sqlc");
+    print_header("builders/nearest", &result);
+
+    let rows = bound(&result, &[int("city_id", city_id), int("top", top)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+
+    println!("The {} builders nearest city {city_id}:", rows.len());
+    for row in &rows {
+        println!(
+            "  builder {:>6}  {:>8.0} m",
+            row.get::<i32, _>("builder_id"),
+            row.get::<f64, _>("metres"),
+        );
+    }
 }
 
 // ── laws ────────────────────────────────────────────────────────────
@@ -1647,6 +1863,270 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         ),
     );
 
+    // 19. The word filter keeps exactly the set's lines whose part names hold every word of a
+    //     plain search, stem for stem: the search's words all among the name's.
+    let by_words = compose(sqlc_dir, "sets/select_parts_by_words.sqlc");
+    for words in [DEFAULT_WORDS, "door frame"] {
+        let (keys, rows) = keys_of(
+            pool,
+            &by_words,
+            &[text("set_num", DEFAULT_SET), text("words", words)],
+        )
+        .await;
+        let truth = lines_where(
+            pool,
+            DEFAULT_SET,
+            "ip.part_num IN (SELECT p.part_num FROM lego_parts p \
+             WHERE tsvector_to_array(to_tsvector('english', p.name)) \
+             @> tsvector_to_array(to_tsvector('english', $2)))",
+            words,
+        )
+        .await;
+        all_hold &= verdict(
+            &format!("by-words keeps the set's lines whose part names hold '{words}'"),
+            !keys.is_empty() && rows == keys.len() && keys == truth,
+            &format!(
+                "{rows} rows, {} distinct lines, {} in the tables",
+                keys.len(),
+                truth.len()
+            ),
+        );
+    }
+
+    // 20. The pattern filter keeps exactly the set's lines whose part names match the regular
+    //     expression, case aside.
+    let by_pattern = compose(sqlc_dir, "sets/select_parts_by_pattern.sqlc");
+    let (keys, rows) = keys_of(
+        pool,
+        &by_pattern,
+        &[
+            text("pattern", DEFAULT_PATTERN),
+            text("set_num", DEFAULT_SET),
+        ],
+    )
+    .await;
+    let truth = lines_where(
+        pool,
+        DEFAULT_SET,
+        "ip.part_num IN (SELECT p.part_num FROM lego_parts p WHERE regexp_like(p.name, $2, 'i'))",
+        DEFAULT_PATTERN,
+    )
+    .await;
+    all_hold &= verdict(
+        &format!("by-pattern keeps the set's lines whose part names match /{DEFAULT_PATTERN}/"),
+        !keys.is_empty() && rows == keys.len() && keys == truth,
+        &format!(
+            "{rows} rows, {} distinct lines, {} in the tables",
+            keys.len(),
+            truth.len()
+        ),
+    );
+
+    // 21. The ranked search lists every part whose name holds the search's words, each once, best
+    //     match first and, between equal matches, by part_num.
+    let search = compose(sqlc_dir, "parts/search_parts.sqlc");
+    let listed: Vec<String> = bound(&search, &[int("top", 100_000), text("words", SEARCH_WORDS)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| r.get("part_num"))
+        .collect();
+    let truth: Vec<String> = sqlx::query_scalar(
+        "SELECT part_num FROM lego_parts \
+         WHERE tsvector_to_array(to_tsvector('english', name)) \
+               @> tsvector_to_array(to_tsvector('english', $1)) \
+         ORDER BY ts_rank(to_tsvector('english', name), plainto_tsquery('english', $1)) DESC, \
+                  part_num",
+    )
+    .bind(SEARCH_WORDS)
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        &format!("the search for '{SEARCH_WORDS}' lists every part holding its words, best first"),
+        !listed.is_empty() && listed == truth,
+        &format!(
+            "{} listed against {} in the tables",
+            listed.len(),
+            truth.len()
+        ),
+    );
+
+    // 22. The brick sizes are the bricks named "Brick <width> x <length>", read the long way: the
+    //     name cut at " x " into two parts, each all digits.
+    let sizes = compose(sqlc_dir, "parts/brick_sizes.sqlc");
+    let composed: Vec<(String, Option<i32>, Option<i32>)> = bound(&sizes, &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("part_num"), r.get("width"), r.get("length")))
+        .collect();
+    let truth: Vec<(String, Option<i32>, Option<i32>)> = sqlx::query_as(
+        "SELECT part_num, split_part(rest, ' x ', 1)::integer, split_part(rest, ' x ', 2)::integer \
+         FROM (SELECT part_num, substr(name, 7) AS rest FROM lego_parts \
+               WHERE left(name, 6) = 'Brick ') b \
+         WHERE split_part(rest, ' x ', 3) = '' \
+           AND split_part(rest, ' x ', 1) <> '' \
+           AND translate(split_part(rest, ' x ', 1), '0123456789', '') = '' \
+           AND split_part(rest, ' x ', 2) <> '' \
+           AND translate(split_part(rest, ' x ', 2), '0123456789', '') = '' \
+         ORDER BY 2, 3, 1",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        "the brick sizes are the bricks named by their width and length",
+        !composed.is_empty() && composed == truth,
+        &format!(
+            "{} read by the pattern, {} cut apart",
+            composed.len(),
+            truth.len()
+        ),
+    );
+
+    // 23. The builders near a city are the builders whose homes lie within the distance by the
+    //     haversine formula, on a sphere the earth's size: the cube only lets the index pass over
+    //     the homes far away.
+    let near = compose(sqlc_dir, "areas/near_city.sqlc");
+    let near_values = [int("city_id", DEFAULT_CITY_ID), int("km", DEFAULT_KM)];
+    let composed: BTreeMap<i32, f64> = bound(&near, &near_values)
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("builder_id"), r.get("metres")))
+        .collect();
+    let haversine = "2 * earth() * asin(sqrt( \
+                       sin(radians(b.latitude - c.latitude) / 2) ^ 2 \
+                       + cos(radians(c.latitude)) * cos(radians(b.latitude)) \
+                         * sin(radians(b.longitude - c.longitude) / 2) ^ 2))";
+    let truth: BTreeMap<i32, f64> = sqlx::query(&format!(
+        "SELECT b.builder_id, {haversine} FROM lego_cities c, lego_builders b \
+         WHERE c.city_id = $1 AND {haversine} <= $2 * 1000"
+    ))
+    .bind(DEFAULT_CITY_ID)
+    .bind(DEFAULT_KM)
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .iter()
+    .map(|r| (r.get(0), r.get(1)))
+    .collect();
+    let same_metres = composed
+        .iter()
+        .zip(&truth)
+        .all(|((a, ma), (b, mb))| a == b && (ma - mb).abs() < 0.01);
+    all_hold &= verdict(
+        &format!(
+            "the builders within {DEFAULT_KM} km of city {DEFAULT_CITY_ID} are the haversine's"
+        ),
+        !composed.is_empty() && composed.len() == truth.len() && same_metres,
+        &format!(
+            "{} by the index, {} by the formula",
+            composed.len(),
+            truth.len()
+        ),
+    );
+
+    // 24. The builders whose postcode matches an anchored pattern are the builders whose postcode
+    //     begins with its prefix, read with LIKE.
+    let postcodes = compose(sqlc_dir, "areas/postcodes.sqlc");
+    let rows = bound(&postcodes, &[text("pattern", DEFAULT_POSTCODES)])
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+    let composed: BTreeSet<i32> = rows.iter().map(|r| r.get("builder_id")).collect();
+    let truth: BTreeSet<i32> = sqlx::query_scalar(
+        "SELECT b.builder_id FROM lego_builders b \
+         JOIN lego_streets st ON st.street_id = b.street_id \
+         JOIN lego_postcodes pc ON pc.postcode_id = st.postcode_id \
+         WHERE pc.code LIKE $1",
+    )
+    .bind(format!("{}%", DEFAULT_POSTCODES.trim_start_matches('^')))
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .collect();
+    all_hold &= verdict(
+        &format!("the builders in /{DEFAULT_POSTCODES}/ are those whose postcode begins with it"),
+        !composed.is_empty() && rows.len() == composed.len() && composed == truth,
+        &format!(
+            "{} rows, {} builders, {} by LIKE",
+            rows.len(),
+            composed.len(),
+            truth.len()
+        ),
+    );
+
+    // 25. The builders nearest a city are as near as the nearest found by measuring every home:
+    //     the same distances, nearest first, though builders who share a home may trade places.
+    let nearest = compose(sqlc_dir, "builders/nearest.sqlc");
+    let top = 5;
+    let millimetres = |m: f64| (m * 1000.0).round() as i64;
+    let composed: Vec<i64> = bound(
+        &nearest,
+        &[int("city_id", DEFAULT_CITY_ID), int("top", top)],
+    )
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .iter()
+    .map(|r| millimetres(r.get("metres")))
+    .collect();
+    let truth: Vec<i64> = sqlx::query_scalar::<_, f64>(
+        "SELECT earth_distance(ll_to_earth(c.latitude, c.longitude), \
+                               ll_to_earth(b.latitude, b.longitude)) AS metres \
+         FROM lego_cities c, lego_builders b WHERE c.city_id = $1 ORDER BY metres LIMIT $2",
+    )
+    .bind(DEFAULT_CITY_ID)
+    .bind(i64::from(top))
+    .fetch_all(pool)
+    .await
+    .expect("query failed")
+    .into_iter()
+    .map(millimetres)
+    .collect();
+    all_hold &= verdict(
+        &format!("the {top} builders nearest city {DEFAULT_CITY_ID} are as near as any"),
+        composed.len() == top as usize && composed == truth,
+        &format!("{composed:?} mm against {truth:?}"),
+    );
+
+    // 26. What the builders near a city bought adds up: each root theme once, and the purchases
+    //     together are all the purchases those builders made of sets with a theme.
+    let bought = compose(sqlc_dir, "builders/bought_near.sqlc");
+    let rows = bound(&bought, &near_values)
+        .fetch_all(pool)
+        .await
+        .expect("query failed");
+    let roots: BTreeSet<i32> = rows.iter().map(|r| r.get("root_id")).collect();
+    let purchases: i64 = rows.iter().map(|r| r.get::<i64, _>("purchases")).sum();
+    let truth: i64 = sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM lego_purchases p \
+         JOIN lego_collection col ON col.builder_id = p.builder_id AND col.row_no = p.row_no \
+         JOIN lego_sets s ON s.set_num = col.set_num \
+         JOIN lego_builders b ON b.builder_id = p.builder_id \
+         JOIN lego_cities c ON c.city_id = $1 \
+         WHERE s.theme_id IN (SELECT id FROM lego_themes) AND {haversine} <= $2 * 1000"
+    ))
+    .bind(DEFAULT_CITY_ID)
+    .bind(DEFAULT_KM)
+    .fetch_one(pool)
+    .await
+    .expect("query failed");
+    all_hold &= verdict(
+        &format!("what the builders near city {DEFAULT_CITY_ID} bought adds up to their purchases"),
+        purchases > 0 && roots.len() == rows.len() && purchases == truth,
+        &format!(
+            "{purchases} purchases over {} root themes, {truth} in the tables",
+            rows.len()
+        ),
+    );
+
     println!(
         "=== Laws: {} ===",
         if all_hold { "all hold" } else { "SOME FAIL" }
@@ -1699,6 +2179,13 @@ async fn cmd_all(pool: &PgPool, sqlc_dir: &Path) -> bool {
     cmd_colors(pool, sqlc_dir, VERSIONED_SET).await;
     cmd_document(pool, sqlc_dir, DEFAULT_SET).await;
     cmd_merge(pool, sqlc_dir, VERSIONED_SET).await;
+    cmd_by_words(pool, sqlc_dir, DEFAULT_SET, DEFAULT_WORDS).await;
+    cmd_by_pattern(pool, sqlc_dir, DEFAULT_SET, DEFAULT_PATTERN).await;
+    cmd_search(pool, sqlc_dir, SEARCH_WORDS, 10).await;
+    cmd_brick_sizes(pool, sqlc_dir).await;
+    cmd_bought_near(pool, sqlc_dir, DEFAULT_CITY_ID, DEFAULT_KM).await;
+    cmd_bought_in(pool, sqlc_dir, DEFAULT_POSTCODES).await;
+    cmd_nearest(pool, sqlc_dir, DEFAULT_CITY_ID, 5).await;
 
     println!("\n=== All examples complete ===");
     cmd_laws(pool, sqlc_dir).await

@@ -1,0 +1,18 @@
+# The parts whose names match a search, best match first: up to top rows, keyed by part_num, each
+# with its rank and its name with the matched words between asterisks. The search is written as a
+# web search engine takes one (websearch_to_tsquery). ts_rank scores how well a name matches, and of
+# two that score the same the lower part_num comes first, so the order is total.
+SELECT
+    p.part_num,
+    p.name,
+    ts_rank(to_tsvector('english', p.name), websearch_to_tsquery('english', :bind(words))) AS rank,
+    ts_headline(
+        'english',
+        p.name,
+        websearch_to_tsquery('english', :bind(words)),
+        'StartSel=*, StopSel=*, HighlightAll=true'
+    ) AS marked
+FROM lego_parts p
+WHERE to_tsvector('english', p.name) @@ websearch_to_tsquery('english', :bind(words))
+ORDER BY rank DESC, p.part_num
+LIMIT :bind(top)

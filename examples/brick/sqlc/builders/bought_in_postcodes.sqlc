@@ -1,0 +1,3 @@
+# What the builders whose postcode matches pattern bought, by root theme: the area purchases with
+# the postcodes in the @area slot.
+:compose(shared/area_purchases.sqlc, @area = areas/postcodes.sqlc)

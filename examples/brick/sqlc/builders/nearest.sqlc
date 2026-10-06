@@ -1,0 +1,19 @@
+# The builders whose homes are nearest a city: up to top rows, keyed by builder_id, nearest first,
+# with the distance in metres. The city is chosen by its city_id. <-> measures the straight line
+# through the earth between two places, which orders them as the distance on the surface does, and
+# the builders' home index walks the homes in that order inside the LATERAL, so only the nearest are
+# read. It orders by that distance alone: builders who share a home are the same distance away, and
+# which of them the limit keeps is the index's.
+SELECT n.builder_id, n.metres
+FROM lego_cities c
+CROSS JOIN LATERAL (
+    SELECT
+        b.builder_id,
+        earth_distance(ll_to_earth(c.latitude, c.longitude), ll_to_earth(b.latitude, b.longitude))
+            AS metres
+    FROM lego_builders b
+    ORDER BY ll_to_earth(b.latitude, b.longitude) <-> ll_to_earth(c.latitude, c.longitude)
+    LIMIT :bind(top)
+) n
+WHERE c.city_id = :bind(city_id)
+ORDER BY n.metres, n.builder_id

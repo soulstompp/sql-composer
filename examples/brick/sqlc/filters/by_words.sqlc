@@ -1,0 +1,9 @@
+# The parts whose names match a search, as filter patterns: (this part, any colour). The search is
+# written as a web search engine takes one (websearch_to_tsquery): words that must all be there,
+# "a phrase", or, and -a word to leave out, each word taken to its English stem. The parts' words
+# index serves it. A filter's contract is in shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
+WHERE to_tsvector('english', p.name) @@ websearch_to_tsquery('english', :bind(words))

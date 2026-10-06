@@ -1,0 +1,16 @@
+# The builders whose homes lie within km kilometres of a city, on the earth's surface: one row per
+# builder, keyed by builder_id, with the distance in metres. The city is chosen by its city_id.
+# earth_box is the cube that holds the circle, and the builders' home index serves it;
+# earth_distance then keeps the homes inside the circle itself, since the cube's corners lie
+# outside it.
+SELECT
+    b.builder_id,
+    earth_distance(ll_to_earth(c.latitude, c.longitude), ll_to_earth(b.latitude, b.longitude))
+        AS metres
+FROM lego_cities c
+JOIN lego_builders b
+  ON earth_box(ll_to_earth(c.latitude, c.longitude), :bind(km) * 1000)
+     @> ll_to_earth(b.latitude, b.longitude)
+WHERE c.city_id = :bind(city_id)
+  AND earth_distance(ll_to_earth(c.latitude, c.longitude), ll_to_earth(b.latitude, b.longitude))
+      <= :bind(km) * 1000

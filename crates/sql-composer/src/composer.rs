@@ -1,6 +1,7 @@
 //! The composer transforms parsed templates into final SQL with dialect-specific
 //! placeholders and resolved compose references.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -180,16 +181,20 @@ impl Composer {
                 composer.compose_root(statement)
             })?
         } else {
-            let declared = self.declared_names(template)?;
-            if declared.is_empty() {
-                self.compose_root(template)?
-            } else {
-                let mut scoped = self.clone();
-                scoped.views.extend(declared);
-                scoped.compose_root(template)?
-            }
+            self.scoped(template)?.compose_root(template)?
         };
         Ok(self.with_mocks(composed))
+    }
+
+    /// This composer with the names `template` declares for itself standing for their relations.
+    fn scoped(&self, template: &Template) -> Result<Cow<'_, Composer>> {
+        let declared = self.declared_names(template)?;
+        if declared.is_empty() {
+            return Ok(Cow::Borrowed(self));
+        }
+        let mut scoped = self.clone();
+        scoped.views.extend(declared);
+        Ok(Cow::Owned(scoped))
     }
 
     /// `composed` with each of its statements given, at its head, the mock tables it names.
@@ -282,7 +287,8 @@ impl Composer {
                 composer.compose_with_values_root(statement, values)
             })?
         } else {
-            self.compose_with_values_root(template, values)?
+            self.scoped(template)?
+                .compose_with_values_root(template, values)?
         };
         Ok(self.with_mocks(composed))
     }
@@ -2628,6 +2634,30 @@ mod tests {
              SELECT * FROM (\nSELECT * FROM child\n) a JOIN (\nSELECT * FROM child\n) b \
              USING (y) WHERE EXISTS (\nSELECT * FROM v.grand\n)"
         );
+    }
+
+    #[test]
+    fn test_a_defined_name_is_said_underneath_when_composing_with_values() {
+        // The drivers compose with values. A name the statement defines is said there as
+        // `compose` says it: the body once at the head, the name everywhere underneath.
+        let (dir, _) = view_fixture();
+        write_temp_file(
+            &dir,
+            "statement.sqlc",
+            "WITH grand AS (\n:define(grand.sqlc)\n)\n:compose(child.sqlc)\nWHERE y = :bind(y)",
+        );
+        let mut composer = Composer::new(Dialect::Postgres);
+        composer.add_search_path(dir.path().to_path_buf());
+        let template = file_template(&dir, "statement.sqlc");
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([("y".into(), vec![7])]);
+        let composed = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(
+            composed.sql,
+            "WITH grand AS (\nSELECT y FROM t\n)\n\
+             SELECT * FROM (\nSELECT * FROM grand\n) g\nWHERE y = $1"
+        );
+        assert_eq!(composed.sql, composer.compose(&template).unwrap().sql);
+        assert_eq!(composed.bind_params, vec!["y"]);
     }
 
     #[test]

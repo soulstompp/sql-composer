@@ -9,6 +9,7 @@
 - **Mock tables stand for tables** — `Composer::add_mock_table` gives a table rows of your own: each composed statement that names the table gets `<name> AS (<rows>)` at the head of its `WITH`, and reads the rows in the table's place. A `MockTable` declares its columns in order with their types (`column`), takes rows of optional values (`row`), and writes each value cast to its column's type (`to_sql`). `MockColumn` is new; `add_row` and `mock_rows!` are gone, and `Composer::mock_tables` is a `BTreeMap`.
 - **`driver::resolve_values_by_use`** — For positional placeholders: each use of a bind name takes the name's values again from the first.
 - **A list inside a command's source, on MySQL** — `compose_with_values` gives a list bound inside a `:union`, `:intersect`, `:except` or `:count` source a `?` for each value. It wrote one `?`, which took only the list's first value.
+- **A defined name, in the drivers** — `compose_with_values`, which every driver calls, says a name the template `:define`s everywhere underneath it, as `compose` does. It spliced the definition's body in again at each reference: the same rows, with each copy planned.
 - **winnow 1** — The template parser is built on winnow 1.
 
 ### sql-composer-mysql

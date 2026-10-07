@@ -80,7 +80,7 @@ struct ComposeArgs {
     verify: bool,
 
     /// A view registry: every `CREATE VIEW <name> AS :define(<path>)` in this template makes
-    /// the composed SQL say `SELECT * FROM <name>` wherever <path> is composed, instead of
+    /// the composed SQL say `SELECT * FROM <name>` wherever `<path>` is composed, instead of
     /// inlining it. `:define` is what puts a body where the name would otherwise go, so the
     /// registry needs no exemption of its own, and a statement can give a relation a name for
     /// its own duration by defining it in a `WITH` clause. Without this, everything inlines.

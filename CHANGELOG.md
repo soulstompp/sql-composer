@@ -29,6 +29,7 @@
 ### cargo-sqlc
 
 - **`--with`** — `cargo sqlc compose` names every relation a statement reads once, at the head of the statement. It cannot be combined with `--views`.
+- **Only `.sqlc` files are composed** — `cargo sqlc compose` skips a file with no extension, as it skips one with another, and `--verify` reads only the target's `.sql` files. A stray `notes` was composed to `notes.sql`, and a target's `README` was reported stale.
 
 ### examples
 

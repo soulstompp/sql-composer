@@ -130,7 +130,7 @@ fn compose_all(
         let entry = entry?;
         let path = entry.path();
 
-        if !path.is_file() || path.extension().is_some_and(|ext| ext != "sqlc") {
+        if !path.is_file() || !path.extension().is_some_and(|ext| ext == "sqlc") {
             continue;
         }
 
@@ -248,7 +248,7 @@ fn run_verify(
             let entry = entry?;
             let path = entry.path();
 
-            if !path.is_file() || path.extension().is_some_and(|ext| ext != "sql") {
+            if !path.is_file() || !path.extension().is_some_and(|ext| ext == "sql") {
                 continue;
             }
 
@@ -312,4 +312,41 @@ fn run_sqlx_prepare() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo sqlx prepare succeeded");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_only_sqlc_files_are_composed() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("parts.sqlc"), "SELECT 1").unwrap();
+        std::fs::write(source.path().join("notes"), "SELECT 2").unwrap();
+        std::fs::write(source.path().join("notes.txt"), "SELECT 3").unwrap();
+
+        let composed = compose_all(source.path(), Dialect::Postgres, None, false).unwrap();
+
+        assert_eq!(
+            composed.keys().collect::<Vec<_>>(),
+            vec![Path::new("parts.sql")]
+        );
+    }
+
+    #[test]
+    fn test_verify_reads_only_sql_files_in_the_target() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("parts.sql"), "SELECT 1").unwrap();
+        std::fs::write(
+            target.path().join("README"),
+            "kept beside the composed files",
+        )
+        .unwrap();
+        let composed = BTreeMap::from([(PathBuf::from("parts.sql"), "SELECT 1".to_string())]);
+
+        assert!(run_verify(&composed, target.path()).is_ok());
+
+        std::fs::write(target.path().join("old.sql"), "SELECT 2").unwrap();
+        assert!(run_verify(&composed, target.path()).is_err());
+    }
 }

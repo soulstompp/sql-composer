@@ -716,9 +716,9 @@ sql-composer-sqlx = "0.0.5"                                        # checks agai
 
 `verify_postgres`, under the feature `postgres` (on by default), prepares each statement on a live
 PostgreSQL and deallocates it again. That checks its syntax, and that its tables and columns exist.
-`validate_syntax`, under the feature `validate`, parses a statement offline with `sqlparser`, every
-placeholder read as `1`. It checks syntax only. The feature `mysql` builds sqlx with MySQL, and no
-function of this crate uses it.
+`verify_mysql`, under the feature `mysql`, does the same on a live MySQL. `validate_syntax`, under
+the feature `validate`, parses a statement offline with `sqlparser`, every placeholder read as `1`.
+It checks syntax only.
 
 ```rust,ignore
 use sql_composer_sqlx::verify_postgres;

@@ -741,9 +741,9 @@ sql-composer-sqlx = "0.0.5"                                        # confere no 
 
 O `verify_postgres`, da funcionalidade `postgres`, ligada por omissão, prepara cada instrução num
 PostgreSQL em funcionamento e depois liberta-a, o que confere a sintaxe e confirma que as tabelas e
-as colunas existem. Já o `validate_syntax`, da funcionalidade `validate`, analisa a instrução sem
+as colunas existem, e o `verify_mysql`, da funcionalidade `mysql`, faz o mesmo num MySQL em
+funcionamento. Já o `validate_syntax`, da funcionalidade `validate`, analisa a instrução sem
 ligação nenhuma, com o `sqlparser` e cada marcador lido como `1`, e por isso só confere a sintaxe.
-Quanto à funcionalidade `mysql`, compila o sqlx com o MySQL, mas nenhuma função deste pacote a usa.
 
 ```rust,ignore
 use sql_composer_sqlx::verify_postgres;

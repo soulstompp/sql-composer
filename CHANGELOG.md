@@ -31,6 +31,7 @@
 
 ### sql-composer-sqlx
 
+- **`verify_mysql`** — Under the feature `mysql`, prepares each composed statement on a live MySQL, which checks its syntax and that its tables and columns exist, as `verify_postgres` does on PostgreSQL. The feature built sqlx with MySQL and added no function.
 - **sqlx 0.9 and sqlparser 0.63** — `verify_postgres` connects with sqlx 0.9. Its PostgreSQL driver, 0.9.0, does not read the operating system's user: a URL that names no user connects as `anonymous` unless `PGUSER` is set, or the application builds `whoami` 2 with its default features.
 
 ### cargo-sqlc

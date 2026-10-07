@@ -58,6 +58,29 @@ pub async fn verify_postgres(database_url: &str, statements: &[&ComposedSql]) ->
     Ok(())
 }
 
+/// Verify composed SQL statements against a MySQL database.
+///
+/// Connects to the database and prepares each statement on the server, which checks its
+/// syntax and that the tables and columns it names exist.
+#[cfg(feature = "mysql")]
+pub async fn verify_mysql(database_url: &str, statements: &[&ComposedSql]) -> Result<()> {
+    use sqlx::mysql::MySqlPoolOptions;
+    use sqlx::{AssertSqlSafe, Executor, SqlSafeStr};
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await?;
+
+    for stmt in statements {
+        pool.prepare(AssertSqlSafe(stmt.sql.clone()).into_sql_str())
+            .await?;
+    }
+
+    pool.close().await;
+    Ok(())
+}
+
 /// Validate SQL syntax without a database connection.
 ///
 /// Uses sqlparser to check that the composed SQL is syntactically valid.
@@ -113,6 +136,57 @@ fn normalize_placeholders(sql: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Tests that need a server, run with `cargo test --all-features -- --ignored` and the
+    /// server's URL in the variable the test names.
+    mod verify_tests {
+        use sql_composer::composer::ComposedSql;
+
+        fn statement(sql: &str) -> ComposedSql {
+            ComposedSql {
+                sql: sql.into(),
+                bind_params: vec![],
+            }
+        }
+
+        fn run<F: std::future::Future>(future: F) -> F::Output {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(future)
+        }
+
+        #[cfg(feature = "postgres")]
+        #[test]
+        #[ignore = "needs a PostgreSQL server: set SQLC_TEST_POSTGRES_URL"]
+        fn test_verify_postgres_refuses_what_the_server_refuses() {
+            let url = std::env::var("SQLC_TEST_POSTGRES_URL").expect("SQLC_TEST_POSTGRES_URL");
+            let good = statement("SELECT $1::integer + 1 AS n");
+            run(async {
+                crate::verify_postgres(&url, &[&good]).await.unwrap();
+                for broken in ["SELEC 1", "SELECT * FROM sqlc_no_such_table"] {
+                    let refused = crate::verify_postgres(&url, &[&good, &statement(broken)]).await;
+                    assert!(refused.is_err(), "{broken}");
+                }
+            });
+        }
+
+        #[cfg(feature = "mysql")]
+        #[test]
+        #[ignore = "needs a MySQL server: set SQLC_TEST_MYSQL_URL"]
+        fn test_verify_mysql_refuses_what_the_server_refuses() {
+            let url = std::env::var("SQLC_TEST_MYSQL_URL").expect("SQLC_TEST_MYSQL_URL");
+            let good = statement("SELECT ? + 1 AS n");
+            run(async {
+                crate::verify_mysql(&url, &[&good]).await.unwrap();
+                for broken in ["SELEC 1", "SELECT * FROM sqlc_no_such_table"] {
+                    let refused = crate::verify_mysql(&url, &[&good, &statement(broken)]).await;
+                    assert!(refused.is_err(), "{broken}");
+                }
+            });
+        }
+    }
     #[cfg(feature = "validate")]
     mod validate_tests {
         use crate::{normalize_placeholders, validate_syntax};

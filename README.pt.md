@@ -350,8 +350,9 @@ Poupa a fonte colada à mão dentro de um `SELECT COUNT(…)`.
 
 Na instrução composta, fica `SELECT COUNT(DISTINCT part_num) FROM (…) AS _count_sub`.
 
-Com várias fontes, o `DISTINCT` ou o `ALL` da contagem passa também para a união delas, como
-`UNION DISTINCT` ou `UNION ALL`, e o SQLite recusa o primeiro.
+Com várias fontes, o `ALL` da contagem passa também para a união delas, como `UNION ALL`; não o
+havendo, a união é um `UNION` escrito sem mais nada, que tira as linhas repetidas e que o SQLite
+também aceita.
 
 ### Cada relação nomeada uma só vez
 

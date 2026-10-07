@@ -10,6 +10,7 @@
 - **`driver::resolve_values_by_use`** — For positional placeholders: each use of a bind name takes the name's values again from the first.
 - **A list inside a command's source, on MySQL** — `compose_with_values` gives a list bound inside a `:union`, `:intersect`, `:except` or `:count` source a `?` for each value. It wrote one `?`, which took only the list's first value.
 - **A defined name, in the drivers** — `compose_with_values`, which every driver calls, says a name the template `:define`s everywhere underneath it, as `compose` does. It spliced the definition's body in again at each reference: the same rows, with each copy planned.
+- **A distinct count of several sources, on SQLite** — `:count(DISTINCT col OF a, b)` unions its sources with a bare `UNION`, which removes duplicate rows already. It wrote `UNION DISTINCT`, which SQLite refuses.
 - **winnow 1** — The template parser is built on winnow 1.
 
 ### sql-composer-mysql

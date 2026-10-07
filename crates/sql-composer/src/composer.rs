@@ -859,15 +859,13 @@ impl Composer {
 
         let empty_slots = HashMap::new();
         if command.sources.len() > 1 {
-            let union_cmd = Command {
-                kind: CommandKind::Union,
-                distinct: command.distinct,
-                all: command.all,
-                columns: None,
-                sources: command.sources.clone(),
-            };
             self.emit_set_operation_numbered(
-                &union_cmd, "UNION", "_union", index_map, sql, visited,
+                &Self::count_union(command),
+                "UNION",
+                "_union",
+                index_map,
+                sql,
+                visited,
             )?;
         } else {
             let source = &command.sources[0];
@@ -1129,14 +1127,13 @@ impl Composer {
 
         // If multiple sources, wrap a union first
         let inner = if command.sources.len() > 1 {
-            let union_cmd = Command {
-                kind: CommandKind::Union,
-                distinct: command.distinct,
-                all: command.all,
-                columns: None,
-                sources: command.sources.clone(),
-            };
-            self.compose_set_operation(&union_cmd, "UNION", "_union", visited, compose_source)?
+            self.compose_set_operation(
+                &Self::count_union(command),
+                "UNION",
+                "_union",
+                visited,
+                compose_source,
+            )?
         } else {
             let source = &command.sources[0];
             match self.view_reference(source)? {
@@ -1207,6 +1204,19 @@ impl Composer {
             sql,
             bind_params: all_params,
         })
+    }
+
+    /// The union a `:count` of several sources counts. The count's `ALL` goes into it, and its
+    /// `DISTINCT` does not: a bare `UNION` already removes duplicates, and SQLite has no
+    /// `UNION DISTINCT`.
+    fn count_union(command: &Command) -> Command {
+        Command {
+            kind: CommandKind::Union,
+            distinct: false,
+            all: command.all,
+            columns: None,
+            sources: command.sources.clone(),
+        }
     }
 
     /// The operator a `:union`, `:intersect` or `:except` command writes, with its modifier.

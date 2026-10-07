@@ -233,4 +233,28 @@ mod tests {
 
         assert_eq!(rows, vec!["6001-1".to_string()]);
     }
+
+    #[test]
+    fn test_a_distinct_count_of_several_sources_runs() {
+        let conn = SqliteConnection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE a (id INTEGER)", []).unwrap();
+        conn.execute("CREATE TABLE b (id INTEGER)", []).unwrap();
+        conn.execute("INSERT INTO a (id) VALUES (1), (2)", [])
+            .unwrap();
+        conn.execute("INSERT INTO b (id) VALUES (2), (3)", [])
+            .unwrap();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.sqlc"), "SELECT id FROM a").unwrap();
+        std::fs::write(dir.path().join("b.sqlc"), "SELECT id FROM b").unwrap();
+        let input = ":count(DISTINCT id OF a.sqlc, b.sqlc)";
+        let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
+        let mut composer = Composer::new(Dialect::Sqlite);
+        composer.add_search_path(dir.path().to_path_buf());
+
+        let (sql, _) = conn.compose(&composer, &template, BTreeMap::new()).unwrap();
+        let count: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
+
+        assert_eq!(count, 3);
+    }
 }

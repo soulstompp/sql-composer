@@ -341,8 +341,8 @@ It saves the source pasted by hand into a `SELECT COUNT(…)`.
 
 In the composed statement, it is `SELECT COUNT(DISTINCT part_num) FROM (…) AS _count_sub`.
 
-With several sources, the count's `DISTINCT` or `ALL` goes into their union too, as
-`UNION DISTINCT` or `UNION ALL`, and SQLite refuses the first.
+With several sources, the count's `ALL` goes into their union too, as `UNION ALL`. Otherwise the
+union is a bare `UNION`, which removes duplicate rows and which SQLite takes as well.
 
 ### Each relation named once
 

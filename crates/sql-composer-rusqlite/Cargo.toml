@@ -14,3 +14,4 @@ thiserror = "2"
 
 [dev-dependencies]
 rusqlite = { version = "0.40", features = ["bundled"] }
+tempfile = "3"

@@ -30,8 +30,8 @@ cargo run -p brick-example -- migrate
    earth, and `pg_trgm` for patterns. Only a superuser can create `earthdistance`; for any other
    role, the generator stops and says what a superuser has to run.
 4. `migrate` adds the example's own tables (`set_category_summary`, `inventory_tracking`) to the
-   same schema. Each migration is safe to run again, and runs again after the generator, whose run
-   drops them with the schema.
+   same schema. It is safe to run again, and runs again after the generator, whose run drops them
+   with the schema.
 
 The queries search the schema `lego`, then the schemas that hold the three extensions, and never
 `public`, where the seed lies under the same table names. `--schema` names another schema than

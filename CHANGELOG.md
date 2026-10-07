@@ -50,6 +50,7 @@
 - **City's and Technic's sets fold into one template** — `shared/scope_sets.sqlc` takes the scope as its `@scope` slot, and each scope returns its own id, from which the label is read.
 - **Laws** — `laws` checks the templates' answers against second spellings in direct SQL, and runs two templates on mock tables. CI runs `cargo sqlc compose --verify` on the example, so its `.sql` files can no longer fall behind their templates.
 - **TLS** — The example reaches a server that requires TLS (rustls); ask for it with the URL's `sslmode`.
+- **One migration** — `migrate` creates the example's two tables with their version columns and keys in one migration, which is safe to run again.
 - **sqlx 0.9** — The example runs on sqlx 0.9, and a URL that names no user still connects as the operating system's user.
 
 ### All crates

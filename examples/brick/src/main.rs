@@ -407,16 +407,12 @@ async fn main() {
 async fn cmd_migrate(pool: &PgPool) {
     println!("Running migrations...");
 
-    let migrations = [
-        include_str!("../migrations/20240101000000_example_tables.sql"),
-        include_str!("../migrations/20260926000000_versions.sql"),
-    ];
-    for migration_sql in migrations {
-        sqlx::raw_sql(migration_sql)
-            .execute(pool)
-            .await
-            .expect("migration failed");
-    }
+    sqlx::raw_sql(include_str!(
+        "../migrations/20240101000000_example_tables.sql"
+    ))
+    .execute(pool)
+    .await
+    .expect("migration failed");
 
     println!("Migrations complete.");
 }

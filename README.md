@@ -227,9 +227,11 @@ SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids)) AND is_trans = 
 becomes `... WHERE id IN ($1, $2, $3) AND is_trans = $4`, with `bind_params`
 `["color_ids", "color_ids", "color_ids", "is_trans"]`.
 
-`:bind(name EXPECTING 1..20)` and `:bind(name NULL)` record how many values a binding expects and
-whether it takes `NULL`, on the parsed `Binding` (`min_values`, `max_values`, `nullable`), for the
-calling code to read. Composing does not check them.
+`:bind(name EXPECTING 1..20)` says how many values a binding takes, and `EXPECTING 2` says at least
+two. `compose_with_values` refuses a count outside them (`ValueCount`). `:bind(name NULL)` says a
+binding takes `NULL`, and the SQLite, DuckDB and MySQL drivers refuse a NULL given to one that does
+not say so (`NullValue`). The PostgreSQL drivers' values show a NULL only once they are sent, so
+there `NULL` is only recorded, on the parsed `Binding` (`nullable`).
 
 ### Slots: a relation passed as an argument
 
@@ -506,7 +508,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
 | `:compose(@slot)` | the relation a caller fills `@slot` with |
 | `:define(path)` | the relation's body, and the name in front of its `AS` stands for it below |
 | `:bind(name)` | the dialect's placeholder; one per value for a name bound to a list |
-| `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | the same, with the expectation recorded on the `Binding` |
+| `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | the same; a count outside `n..m` is refused, and, except on PostgreSQL, a NULL where `NULL` is not written |
 | `:union(a, b, …)` | the sources joined by `UNION`, each wrapped, the whole wrapped; `ALL` or `DISTINCT` first, inside the parentheses |
 | `:intersect(a, b, …)` | the sources joined by `INTERSECT`, each wrapped, the whole wrapped |
 | `:except(a, b, …)` | `a` less every later source, each wrapped, the whole wrapped |

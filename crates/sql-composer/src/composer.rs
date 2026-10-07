@@ -9,7 +9,8 @@ use crate::error::{Error, Result};
 use crate::mock::MockTable;
 use crate::parser;
 use crate::types::{
-    Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Template, TemplateSource,
+    Binding, Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Template,
+    TemplateSource,
 };
 
 /// The result of composing a template: final SQL and ordered bind parameter names.
@@ -277,20 +278,77 @@ impl Composer {
     /// ```
     ///
     /// For bindings with only one value, behavior is identical to [`Composer::compose()`].
+    ///
+    /// A binding given fewer values than its `EXPECTING` asks, or more, is refused
+    /// ([`Error::ValueCount`]).
     pub fn compose_with_values<V>(
         &self,
         template: &Template,
         values: &BTreeMap<String, Vec<V>>,
     ) -> Result<ComposedSql> {
+        self.compose_with_values_and_nulls(template, values, |_| false)
+    }
+
+    /// [`Composer::compose_with_values`] for a driver that can tell a NULL value: `is_null`
+    /// says which values are NULL, and a NULL given to a `:bind` written without `NULL` is
+    /// refused ([`Error::NullValue`]).
+    pub fn compose_with_values_and_nulls<V>(
+        &self,
+        template: &Template,
+        values: &BTreeMap<String, Vec<V>>,
+        is_null: impl Fn(&V) -> bool,
+    ) -> Result<ComposedSql> {
+        let scoped = self.scoped(template)?;
+        scoped.check_values(template, values, &is_null)?;
         let composed = if self.name_relations {
             self.compose_named(template, |composer, statement| {
                 composer.compose_with_values_root(statement, values)
             })?
         } else {
-            self.scoped(template)?
-                .compose_with_values_root(template, values)?
+            scoped.compose_with_values_root(template, values)?
         };
         Ok(self.with_mocks(composed))
+    }
+
+    /// Each `:bind` the template composes, held to what it says of its values: their count to
+    /// its `EXPECTING`, and no NULL unless it says `NULL`. A name given no values is left to
+    /// the driver, which reports it missing.
+    fn check_values<V>(
+        &self,
+        template: &Template,
+        values: &BTreeMap<String, Vec<V>>,
+        is_null: &impl Fn(&V) -> bool,
+    ) -> Result<()> {
+        let mut visited = HashSet::new();
+        if let TemplateSource::File(ref path) = template.source {
+            visited.insert(path.clone());
+        }
+        for binding in self.collect_bindings(template, &HashMap::new(), &mut visited)? {
+            let Some(given) = values.get(&binding.name) else {
+                continue;
+            };
+            let too_few = binding
+                .min_values
+                .is_some_and(|min| given.len() < min as usize);
+            let too_many = binding
+                .max_values
+                .is_some_and(|max| given.len() > max as usize);
+            if too_few || too_many {
+                let min = binding.min_values.unwrap_or(0);
+                return Err(Error::ValueCount {
+                    name: binding.name,
+                    given: given.len(),
+                    expected: match binding.max_values {
+                        Some(max) => format!("{min}..{max}"),
+                        None => format!("at least {min}"),
+                    },
+                });
+            }
+            if !binding.nullable && given.iter().any(is_null) {
+                return Err(Error::NullValue { name: binding.name });
+            }
+        }
+        Ok(())
     }
 
     fn compose_with_values_root<V>(
@@ -592,13 +650,28 @@ impl Composer {
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
     ) -> Result<BTreeSet<String>> {
-        let mut names = BTreeSet::new();
+        Ok(self
+            .collect_bindings(template, slots, visited)?
+            .into_iter()
+            .map(|binding| binding.name)
+            .collect())
+    }
+
+    /// Every `:bind` a template composes, through its compose references and commands, in
+    /// document order.
+    fn collect_bindings(
+        &self,
+        template: &Template,
+        slots: &HashMap<String, PathBuf>,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<Binding>> {
+        let mut bindings = Vec::new();
 
         for element in &template.elements {
             match element {
                 Element::Sql(_) => {}
                 Element::Bind(binding) => {
-                    names.insert(binding.name.clone());
+                    bindings.push(binding.clone());
                 }
                 Element::Compose(compose_ref) => {
                     let path = Self::resolve_compose_target(compose_ref, slots)?;
@@ -606,26 +679,26 @@ impl Composer {
                         continue;
                     }
                     let child_slots = Self::build_child_slots(compose_ref);
-                    let sub = self.collect_compose_bind_names(&path, &child_slots, visited)?;
-                    names.extend(sub);
+                    let sub = self.collect_compose_bindings(&path, &child_slots, visited)?;
+                    bindings.extend(sub);
                 }
                 Element::Command(command) => {
-                    let sub = self.collect_command_bind_names(command, visited)?;
-                    names.extend(sub);
+                    let sub = self.collect_command_bindings(command, visited)?;
+                    bindings.extend(sub);
                 }
             }
         }
 
-        Ok(names)
+        Ok(bindings)
     }
 
-    /// Collect bind names from a compose reference's resolved template.
-    fn collect_compose_bind_names(
+    /// Collect the bindings of a compose reference's resolved template.
+    fn collect_compose_bindings(
         &self,
         path: &Path,
         child_slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
-    ) -> Result<BTreeSet<String>> {
+    ) -> Result<Vec<Binding>> {
         let resolved = self.find_template(path)?;
 
         if !visited.insert(resolved.clone()) {
@@ -635,21 +708,21 @@ impl Composer {
         }
 
         let template = parser::parse_template_file(&resolved)?;
-        let names = self.collect_bind_names(&template, child_slots, visited)?;
+        let bindings = self.collect_bindings(&template, child_slots, visited)?;
 
         visited.remove(&resolved);
-        Ok(names)
+        Ok(bindings)
     }
 
-    /// Collect bind names from all sources in a command.
+    /// Collect the bindings of all sources in a command.
     ///
     /// Command sources are standalone templates — they get empty slots.
-    fn collect_command_bind_names(
+    fn collect_command_bindings(
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
-    ) -> Result<BTreeSet<String>> {
-        let mut names = BTreeSet::new();
+    ) -> Result<Vec<Binding>> {
+        let mut bindings = Vec::new();
         let empty_slots = HashMap::new();
         for source in &command.sources {
             if self.view_reference(source)?.is_some() {
@@ -657,10 +730,10 @@ impl Composer {
             }
             let resolved = self.find_template(source)?;
             let template = parser::parse_template_file(&resolved)?;
-            let sub = self.collect_bind_names(&template, &empty_slots, visited)?;
-            names.extend(sub);
+            let sub = self.collect_bindings(&template, &empty_slots, visited)?;
+            bindings.extend(sub);
         }
-        Ok(names)
+        Ok(bindings)
     }
 
     /// Build an index map for `compose` (single-value bindings).
@@ -1838,6 +1911,93 @@ mod tests {
             "SELECT * FROM users WHERE id IN (?1, ?2) AND status = ?3"
         );
         assert_eq!(result.bind_params, vec!["ids", "ids", "status"]);
+    }
+
+    /// A template that composes `inner.sqlc`, whose bindings are written as `inner` says.
+    fn nested_bind_fixture(dialect: Dialect, inner: &str) -> (TempDir, Composer, Template) {
+        let dir = TempDir::new().unwrap();
+        write_temp_file(&dir, "inner.sqlc", inner);
+        write_temp_file(
+            &dir,
+            "outer.sqlc",
+            "SELECT * FROM (\n:compose(inner.sqlc)\n) i",
+        );
+        let mut composer = Composer::new(dialect);
+        composer.add_search_path(dir.path().to_path_buf());
+        let template = file_template(&dir, "outer.sqlc");
+        (dir, composer, template)
+    }
+
+    #[test]
+    fn test_a_count_outside_expecting_is_refused() {
+        for dialect in [Dialect::Postgres, Dialect::Mysql, Dialect::Sqlite] {
+            let (_dir, composer, template) = nested_bind_fixture(
+                dialect,
+                "SELECT id FROM t WHERE id IN (:bind(ids EXPECTING 2..3)) AND k >= :bind(k EXPECTING 2)",
+            );
+            let compose = |ids: Vec<i32>, k: Vec<i32>| {
+                composer.compose_with_values(
+                    &template,
+                    &BTreeMap::from([("ids".to_string(), ids), ("k".to_string(), k)]),
+                )
+            };
+            for (ids, k, refused) in [
+                (vec![1, 2], vec![7, 8], None),
+                (vec![1, 2, 3], vec![7, 8, 9], None),
+                (vec![1], vec![7, 8], Some(("ids", 1, "2..3"))),
+                (vec![1, 2, 3, 4], vec![7, 8], Some(("ids", 4, "2..3"))),
+                (vec![1, 2], vec![7], Some(("k", 1, "at least 2"))),
+            ] {
+                match (compose(ids.clone(), k.clone()), refused) {
+                    (Ok(_), None) => {}
+                    (
+                        Err(Error::ValueCount {
+                            name,
+                            given,
+                            expected,
+                        }),
+                        Some(want),
+                    ) => {
+                        assert_eq!(
+                            (name.as_str(), given, expected.as_str()),
+                            want,
+                            "{dialect:?}"
+                        );
+                    }
+                    (other, want) => {
+                        panic!("{dialect:?} {ids:?} {k:?}: got {other:?}, wanted {want:?}")
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_a_null_is_refused_where_the_bind_does_not_take_it() {
+        let is_null = |v: &Option<i32>| v.is_none();
+        for dialect in [Dialect::Postgres, Dialect::Mysql, Dialect::Sqlite] {
+            let (_refusing_dir, composer, refusing) =
+                nested_bind_fixture(dialect, "SELECT id FROM t WHERE a = :bind(a)");
+            let (_taking_dir, composer_taking, taking) = nested_bind_fixture(
+                dialect,
+                "SELECT id FROM t WHERE a IS NOT DISTINCT FROM :bind(a NULL)",
+            );
+            let null = BTreeMap::from([("a".to_string(), vec![None])]);
+            let seven = BTreeMap::from([("a".to_string(), vec![Some(7)])]);
+
+            assert!(matches!(
+                composer.compose_with_values_and_nulls(&refusing, &null, is_null),
+                Err(Error::NullValue { ref name }) if name == "a"
+            ));
+            assert!(composer
+                .compose_with_values_and_nulls(&refusing, &seven, is_null)
+                .is_ok());
+            assert!(composer_taking
+                .compose_with_values_and_nulls(&taking, &null, is_null)
+                .is_ok());
+            // Without a test of its own, composing sees no NULL.
+            assert!(composer.compose_with_values(&refusing, &null).is_ok());
+        }
     }
 
     // ── Alphabetical ordering tests ───────────────────────────────────

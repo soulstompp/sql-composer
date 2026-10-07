@@ -28,6 +28,24 @@ pub enum Error {
         name: String,
     },
 
+    /// A binding was given a number of values outside what its `EXPECTING` says.
+    #[error("binding '{name}' was given {given} value(s), and expects {expected}")]
+    ValueCount {
+        /// The name of the binding.
+        name: String,
+        /// How many values it was given.
+        given: usize,
+        /// What its `EXPECTING` says: `2..3`, or `at least 2`.
+        expected: String,
+    },
+
+    /// A binding written without `NULL` was given a NULL.
+    #[error("binding '{name}' was given a NULL, and its :bind does not say NULL")]
+    NullValue {
+        /// The name of the binding.
+        name: String,
+    },
+
     /// A compose reference could not be resolved.
     #[error("compose reference not found: {path}")]
     ComposeNotFound {

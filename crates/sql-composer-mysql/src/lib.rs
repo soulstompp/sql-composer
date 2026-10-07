@@ -62,6 +62,29 @@ use sql_composer::composer::Composer;
 use sql_composer::driver;
 use sql_composer::types::Template;
 
+/// Compose for MySQL's positional `?`: a name used twice is filled at each use, and a value
+/// `is_null` calls NULL is refused where its `:bind` does not say `NULL`.
+fn compose_positional<V: Clone>(
+    composer: &Composer,
+    template: &Template,
+    values: &BTreeMap<String, Vec<V>>,
+    is_null: impl Fn(&V) -> bool,
+) -> Result<(String, Vec<V>), sql_composer::Error> {
+    let composed = composer.compose_with_values_and_nulls(template, values, is_null)?;
+    let ordered = driver::resolve_values_by_use(&composed, values)?;
+    Ok((composed.sql, ordered))
+}
+
+#[cfg(feature = "async")]
+fn is_null_async(value: &mysql_async::Value) -> bool {
+    matches!(value, mysql_async::Value::NULL)
+}
+
+#[cfg(feature = "sync")]
+fn is_null_sync(value: &mysql::Value) -> bool {
+    matches!(value, mysql::Value::NULL)
+}
+
 // ---------------------------------------------------------------------------
 // Async: MysqlConn (mysql_async)
 // ---------------------------------------------------------------------------
@@ -122,9 +145,12 @@ impl driver::ComposerConnectionAsync for MysqlConn {
         template: &Template,
         values: BTreeMap<String, Vec<Self::Value>>,
     ) -> Result<(String, Vec<Self::Value>), AsyncError> {
-        let composed = composer.compose_with_values(template, &values)?;
-        let ordered = driver::resolve_values_by_use(&composed, &values)?;
-        Ok((composed.sql, ordered))
+        Ok(compose_positional(
+            composer,
+            template,
+            &values,
+            is_null_async,
+        )?)
     }
 }
 
@@ -188,9 +214,12 @@ impl driver::ComposerConnection for MysqlConnection {
         template: &Template,
         values: BTreeMap<String, Vec<Self::Value>>,
     ) -> Result<(String, Vec<Self::Value>), SyncError> {
-        let composed = composer.compose_with_values(template, &values)?;
-        let ordered = driver::resolve_values_by_use(&composed, &values)?;
-        Ok((composed.sql, ordered))
+        Ok(compose_positional(
+            composer,
+            template,
+            &values,
+            is_null_sync,
+        )?)
     }
 }
 
@@ -256,5 +285,47 @@ mod tests {
             ordered,
             vec![mysql_async::Value::from(7), mysql_async::Value::from(7)]
         );
+    }
+
+    #[test]
+    fn test_a_null_is_refused_where_the_bind_does_not_take_it() {
+        let composer = Composer::new(Dialect::Mysql);
+        let refusing =
+            parse_template("SELECT :bind(a)", TemplateSource::Literal("test".into())).unwrap();
+        let taking = parse_template(
+            "SELECT :bind(a NULL)",
+            TemplateSource::Literal("test".into()),
+        )
+        .unwrap();
+
+        #[cfg(feature = "async")]
+        {
+            use mysql_async::Value;
+            let null = sql_composer::bind_values!("a" => [Value::NULL]);
+            let seven = sql_composer::bind_values!("a" => [Value::from(7)]);
+            assert!(matches!(
+                super::compose_positional(&composer, &refusing, &null, super::is_null_async),
+                Err(sql_composer::Error::NullValue { .. })
+            ));
+            assert!(
+                super::compose_positional(&composer, &refusing, &seven, super::is_null_async)
+                    .is_ok()
+            );
+            let (_, ordered) =
+                super::compose_positional(&composer, &taking, &null, super::is_null_async).unwrap();
+            assert_eq!(ordered, vec![Value::NULL]);
+        }
+        #[cfg(feature = "sync")]
+        {
+            use mysql::Value;
+            let null = sql_composer::bind_values!("a" => [Value::NULL]);
+            assert!(matches!(
+                super::compose_positional(&composer, &refusing, &null, super::is_null_sync),
+                Err(sql_composer::Error::NullValue { .. })
+            ));
+            assert!(
+                super::compose_positional(&composer, &taking, &null, super::is_null_sync).is_ok()
+            );
+        }
     }
 }

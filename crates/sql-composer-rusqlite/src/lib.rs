@@ -98,10 +98,20 @@ impl ComposerConnection for SqliteConnection {
         template: &Template,
         mut values: BTreeMap<String, Vec<Self::Value>>,
     ) -> Result<(String, Vec<Self::Value>), Error> {
-        let composed = composer.compose_with_values(template, &values)?;
+        let composed = composer
+            .compose_with_values_and_nulls(template, &values, |value| is_null(value.as_ref()))?;
         let ordered = driver::resolve_values(&composed, &mut values)?;
         Ok((composed.sql, ordered))
     }
+}
+
+/// Whether a value is NULL, as the database will read it.
+fn is_null(value: &dyn rusqlite::types::ToSql) -> bool {
+    use rusqlite::types::{ToSqlOutput, Value, ValueRef};
+    matches!(
+        value.to_sql(),
+        Ok(ToSqlOutput::Borrowed(ValueRef::Null) | ToSqlOutput::Owned(Value::Null))
+    )
 }
 
 #[cfg(test)]
@@ -256,5 +266,45 @@ mod tests {
         let count: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
 
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_a_null_is_refused_where_the_bind_does_not_take_it() {
+        let conn = SqliteConnection::open_in_memory().unwrap();
+        let composer = Composer::new(Dialect::Sqlite);
+        let refusing = parse_template(
+            "SELECT :bind(a) AS a",
+            TemplateSource::Literal("test".into()),
+        )
+        .unwrap();
+        let taking = parse_template(
+            "SELECT :bind(a NULL) AS a",
+            TemplateSource::Literal("test".into()),
+        )
+        .unwrap();
+
+        for null in [boxed(None::<i32>), boxed(rusqlite::types::Null)] {
+            let refused = conn.compose(&composer, &refusing, bind_values!("a" => [null]));
+            assert!(matches!(
+                refused,
+                Err(Error::Composer(sql_composer::Error::NullValue { .. }))
+            ));
+        }
+        assert!(conn
+            .compose(&composer, &refusing, bind_values!("a" => [boxed(7)]))
+            .is_ok());
+
+        let (sql, params) = conn
+            .compose(
+                &composer,
+                &taking,
+                bind_values!("a" => [boxed(None::<i32>)]),
+            )
+            .unwrap();
+        let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
+        let a: Option<i32> = conn
+            .query_row(&sql, refs.as_slice(), |row| row.get(0))
+            .unwrap();
+        assert_eq!(a, None);
     }
 }

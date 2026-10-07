@@ -233,9 +233,12 @@ SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids)) AND is_trans = 
 fica `... WHERE id IN ($1, $2, $3) AND is_trans = $4`, e o `bind_params` passa a ser
 `["color_ids", "color_ids", "color_ids", "is_trans"]`.
 
-Quanto ao `:bind(name EXPECTING 1..20)` e ao `:bind(name NULL)`, registam quantos valores um
-parâmetro espera e se aceita `NULL` no `Binding` analisado (`min_values`, `max_values`,
-`nullable`), onde o código da aplicação os pode ler; a composição, essa, não os verifica.
+O `:bind(name EXPECTING 1..20)` diz quantos valores um parâmetro aceita, e o `EXPECTING 2`, que
+aceita pelo menos dois; uma contagem fora disso, o `compose_with_values` recusa-a (`ValueCount`).
+Já o `:bind(name NULL)` diz que o parâmetro aceita `NULL`, e os controladores do SQLite, do DuckDB
+e do MySQL recusam um NULL dado a um parâmetro que não o diga (`NullValue`); nos do PostgreSQL, os
+valores só mostram que são NULL depois de enviados, pelo que aí o `NULL` fica apenas registado no
+`Binding` analisado (`nullable`).
 
 ### Vagas: uma relação passada como argumento
 
@@ -529,7 +532,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
 | `:compose(@slot)` | a relação com que quem compõe preenche `@slot` |
 | `:define(path)` | o corpo da relação, e o nome à frente do seu `AS` vale por ela daí para baixo |
 | `:bind(name)` | o marcador do dialeto; um por valor, quando o nome recebe uma lista |
-| `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | o mesmo, com o que se espera registado no `Binding` |
+| `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | o mesmo; uma contagem fora de `n..m` é recusada, e, exceto no PostgreSQL, também um NULL onde não se escreveu `NULL` |
 | `:union(a, b, …)` | as fontes unidas por `UNION`, cada uma embrulhada, e o todo também; `ALL` ou `DISTINCT` à cabeça, dentro dos parênteses |
 | `:intersect(a, b, …)` | as fontes unidas por `INTERSECT`, cada uma embrulhada, e o todo também |
 | `:except(a, b, …)` | `a` menos cada uma das fontes seguintes, cada uma embrulhada, e o todo também |

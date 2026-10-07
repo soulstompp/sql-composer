@@ -11,16 +11,23 @@
 - **A list inside a command's source, on MySQL** — `compose_with_values` gives a list bound inside a `:union`, `:intersect`, `:except` or `:count` source a `?` for each value. It wrote one `?`, which took only the list's first value.
 - **A defined name, in the drivers** — `compose_with_values`, which every driver calls, says a name the template `:define`s everywhere underneath it, as `compose` does. It spliced the definition's body in again at each reference: the same rows, with each copy planned.
 - **A distinct count of several sources, on SQLite** — `:count(DISTINCT col OF a, b)` unions its sources with a bare `UNION`, which removes duplicate rows already. It wrote `UNION DISTINCT`, which SQLite refuses.
+- **`EXPECTING` and `NULL` are held** — `compose_with_values` refuses a binding given fewer values than its `EXPECTING` asks, or more (`Error::ValueCount`). `compose_with_values_and_nulls` takes a driver's test of which values are NULL, and refuses a NULL given to a `:bind` written without `NULL` (`Error::NullValue`). Both were only recorded on the `Binding`.
 - **winnow 1** — The template parser is built on winnow 1.
 
 ### sql-composer-mysql
 
 - **A bind name used twice** — Both drivers fill each use of a name with its values, where they stopped with `MissingBinding` at the second use.
+- **A NULL where `:bind` does not say `NULL`** — Both drivers refuse `Value::NULL` given to such a binding.
 - **mysql 28 and mysql_async 0.37** — The crate re-exports both, at these versions.
 
 ### sql-composer-rusqlite
 
+- **A NULL where `:bind` does not say `NULL`** — The driver refuses a value that writes NULL given to such a binding.
 - **rusqlite 0.40** — The crate re-exports it, at this version.
+
+### sql-composer-duckdb
+
+- **A NULL where `:bind` does not say `NULL`** — The driver refuses a value that writes NULL given to such a binding.
 
 ### sql-composer-sqlx
 

@@ -146,6 +146,7 @@ mod tests {
             ComposedSql {
                 sql: sql.into(),
                 bind_params: vec![],
+                ..Default::default()
             }
         }
 

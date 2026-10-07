@@ -215,7 +215,9 @@ SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id 
 For PostgreSQL and SQLite, each name is numbered by its alphabetical place among the statement's
 names, and a name used twice is one placeholder. For MySQL, each use is a `?` of its own, in the
 order the statement uses them. The composed statement's `bind_params` lists the names in
-placeholder order, and `query_file!()` takes its arguments in that same order.
+placeholder order, and `query_file!()` takes its arguments in that same order. In a template of
+several statements, each numbers its placeholders from the first, and `statement_starts` gives
+where each statement's names begin in `bind_params`.
 
 A name given a list of values gets one placeholder per value. Composed with three values for
 `color_ids` (`compose_with_values`),

@@ -163,6 +163,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE a = $1 AND b = $2".into(),
             bind_params: vec!["a".into(), "b".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         values.insert("a".into(), vec!["hello"]);
@@ -177,6 +178,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE a = $1".into(),
             bind_params: vec!["missing".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<&str>> = BTreeMap::new();
 
@@ -191,6 +193,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE id IN ($1, $2, $3)".into(),
             bind_params: vec!["ids".into(), "ids".into(), "ids".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<i32>> = BTreeMap::new();
         values.insert("ids".into(), vec![10, 20, 30]);
@@ -231,6 +234,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE a = ?".into(),
             bind_params: vec!["missing".into()],
+            ..Default::default()
         };
         let empty: BTreeMap<String, Vec<i32>> = BTreeMap::new();
         let err = resolve_values_by_use(&composed, &empty).unwrap_err();

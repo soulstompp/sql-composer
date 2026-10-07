@@ -221,7 +221,9 @@ SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id 
 No PostgreSQL e no SQLite, cada nome é numerado pelo lugar que ocupa, por ordem alfabética, entre os
 nomes da instrução, e um nome usado duas vezes fica um só marcador; no MySQL, cada uso é um `?` à
 parte, pela ordem em que a instrução os usa. O `bind_params` da instrução composta lista os nomes
-pela ordem dos marcadores, que é também a ordem em que o `query_file!()` recebe os argumentos.
+pela ordem dos marcadores, que é também a ordem em que o `query_file!()` recebe os argumentos. Num
+modelo com várias instruções, cada uma numera os seus marcadores a partir do primeiro, e o
+`statement_starts` diz onde começam, no `bind_params`, os nomes de cada uma.
 
 Um nome que recebe uma lista de valores dá um marcador por valor. Composta com três valores em
 `color_ids` (`compose_with_values`), a consulta

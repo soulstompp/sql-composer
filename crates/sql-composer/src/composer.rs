@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 /// The result of composing a template: final SQL and ordered bind parameter names.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComposedSql {
     /// The final SQL string with dialect-specific placeholders.
     pub sql: String,
@@ -24,6 +24,9 @@ pub struct ComposedSql {
     /// with duplicates removed. For positional dialects (MySQL), names are in
     /// document order.
     pub bind_params: Vec<String>,
+    /// Where each statement's names begin in `bind_params`, one entry per statement, the first
+    /// `0`. Each statement numbers its placeholders from the first.
+    pub statement_starts: Vec<usize>,
 }
 
 /// Composes parsed templates into final SQL.
@@ -182,9 +185,32 @@ impl Composer {
                 composer.compose_root(statement)
             })?
         } else {
-            self.scoped(template)?.compose_root(template)?
+            let scoped = self.scoped(template)?;
+            Self::compose_statements(template, |statement| scoped.compose_root(statement))?
         };
         Ok(self.with_mocks(composed))
+    }
+
+    /// `template` composed one statement at a time by `emit`, so each statement numbers its
+    /// placeholders from the first. A piece holding only whitespace or comments goes with the
+    /// statement before it.
+    fn compose_statements(
+        template: &Template,
+        emit: impl Fn(&Template) -> Result<ComposedSql>,
+    ) -> Result<ComposedSql> {
+        let mut composed = ComposedSql::default();
+        for elements in split_statements(&template.elements) {
+            if holds_code(&elements) || composed.statement_starts.is_empty() {
+                composed.statement_starts.push(composed.bind_params.len());
+            }
+            let statement = emit(&Template {
+                elements,
+                source: template.source.clone(),
+            })?;
+            composed.sql.push_str(&statement.sql);
+            composed.bind_params.extend(statement.bind_params);
+        }
+        Ok(composed)
     }
 
     /// This composer with the names `template` declares for itself standing for their relations.
@@ -225,6 +251,7 @@ impl Composer {
         ComposedSql {
             sql,
             bind_params: composed.bind_params,
+            statement_starts: composed.statement_starts,
         }
     }
 
@@ -305,7 +332,9 @@ impl Composer {
                 composer.compose_with_values_root(statement, values)
             })?
         } else {
-            scoped.compose_with_values_root(template, values)?
+            Self::compose_statements(template, |statement| {
+                scoped.compose_with_values_root(statement, values)
+            })?
         };
         Ok(self.with_mocks(composed))
     }
@@ -377,7 +406,11 @@ impl Composer {
         let mut closed = HashMap::new();
         let mut sql = String::new();
         let mut bind_params = Vec::new();
+        let mut statement_starts = Vec::new();
         for elements in split_statements(&template.elements) {
+            if holds_code(&elements) || statement_starts.is_empty() {
+                statement_starts.push(bind_params.len());
+            }
             let mut gathered = Gathered::default();
             if let TemplateSource::File(ref path) = template.source {
                 if let Ok(root) = std::fs::canonicalize(path) {
@@ -414,7 +447,11 @@ impl Composer {
             }
             sql.push_str(&head_with(&statement.sql, &relations));
         }
-        Ok(ComposedSql { sql, bind_params })
+        Ok(ComposedSql {
+            sql,
+            bind_params,
+            statement_starts,
+        })
     }
 
     /// Walk `elements` as emitting them walks them, and gather every relation they read that can
@@ -782,7 +819,11 @@ impl Composer {
         let mut sql = String::new();
         self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
 
-        Ok(ComposedSql { sql, bind_params })
+        Ok(ComposedSql {
+            sql,
+            bind_params,
+            ..Default::default()
+        })
     }
 
     /// Two-pass compose for numbered dialects (multi-value).
@@ -817,7 +858,11 @@ impl Composer {
         let mut sql = String::new();
         self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
 
-        Ok(ComposedSql { sql, bind_params })
+        Ok(ComposedSql {
+            sql,
+            bind_params,
+            ..Default::default()
+        })
     }
 
     /// Pass 2: Emit SQL for a template using the global index map.
@@ -1041,7 +1086,11 @@ impl Composer {
             }
         }
 
-        Ok(ComposedSql { sql, bind_params })
+        Ok(ComposedSql {
+            sql,
+            bind_params,
+            ..Default::default()
+        })
     }
 
     fn compose_with_values_positional<V>(
@@ -1107,7 +1156,11 @@ impl Composer {
             }
         }
 
-        Ok(ComposedSql { sql, bind_params })
+        Ok(ComposedSql {
+            sql,
+            bind_params,
+            ..Default::default()
+        })
     }
 
     /// Resolve a compose reference by finding and parsing the template file (positional).
@@ -1212,7 +1265,7 @@ impl Composer {
             match self.view_reference(source)? {
                 Some(view) => ComposedSql {
                     sql: format!("SELECT * FROM {view}"),
-                    bind_params: vec![],
+                    ..Default::default()
                 },
                 None => {
                     let resolved = self.find_template(source)?;
@@ -1233,6 +1286,7 @@ impl Composer {
         Ok(ComposedSql {
             sql,
             bind_params: inner.bind_params,
+            ..Default::default()
         })
     }
 
@@ -1276,6 +1330,7 @@ impl Composer {
         Ok(ComposedSql {
             sql,
             bind_params: all_params,
+            ..Default::default()
         })
     }
 
@@ -1490,6 +1545,20 @@ fn split_statements(elements: &[Element]) -> Vec<Vec<Element>> {
     }
     statements.retain(|statement| !statement.is_empty());
     statements
+}
+
+/// Whether a piece of a template holds SQL beyond whitespace and comments.
+fn holds_code(elements: &[Element]) -> bool {
+    let mut text = String::new();
+    for element in elements {
+        match element {
+            Element::Sql(sql) => text.push_str(sql),
+            _ => return true,
+        }
+    }
+    let mut code = false;
+    Scanner::default().walk(&text, |_, byte| code |= !byte.is_ascii_whitespace());
+    code
 }
 
 /// Where SQL text stands, carried from one piece of a template to the next.
@@ -1926,6 +1995,42 @@ mod tests {
         composer.add_search_path(dir.path().to_path_buf());
         let template = file_template(&dir, "outer.sqlc");
         (dir, composer, template)
+    }
+
+    #[test]
+    fn test_each_statement_is_numbered_from_the_first_placeholder() {
+        let script = "UPDATE t SET b = :bind(b) WHERE a = :bind(a);\n\
+                      DELETE FROM t WHERE b = :bind(b);\n-- done\n";
+        let template =
+            parser::parse_template(script, TemplateSource::Literal("script".into())).unwrap();
+        let values: BTreeMap<String, Vec<i32>> =
+            BTreeMap::from([("a".into(), vec![1]), ("b".into(), vec![7])]);
+        for (dialect, sql, bind_params) in [
+            (
+                Dialect::Postgres,
+                "UPDATE t SET b = $2 WHERE a = $1;\nDELETE FROM t WHERE b = $1;\n-- done\n",
+                vec!["a", "b", "b"],
+            ),
+            (
+                Dialect::Mysql,
+                "UPDATE t SET b = ? WHERE a = ?;\nDELETE FROM t WHERE b = ?;\n-- done\n",
+                vec!["b", "a", "b"],
+            ),
+        ] {
+            for name_relations in [false, true] {
+                let mut composer = Composer::new(dialect);
+                composer.name_relations = name_relations;
+                for composed in [
+                    composer.compose(&template).unwrap(),
+                    composer.compose_with_values(&template, &values).unwrap(),
+                ] {
+                    let mode = format!("{dialect:?}, name_relations {name_relations}");
+                    assert_eq!(composed.sql, sql, "{mode}");
+                    assert_eq!(composed.bind_params, bind_params, "{mode}");
+                    assert_eq!(composed.statement_starts, vec![0, 2], "{mode}");
+                }
+            }
+        }
     }
 
     #[test]

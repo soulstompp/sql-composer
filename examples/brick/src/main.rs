@@ -250,6 +250,7 @@ fn read_through(result: &ComposedSql, select: &str, from_rest: &str) -> Composed
     ComposedSql {
         sql: format!("SELECT {select} FROM ({}) d {from_rest}", result.sql),
         bind_params: result.bind_params.clone(),
+        statement_starts: result.statement_starts.clone(),
     }
 }
 

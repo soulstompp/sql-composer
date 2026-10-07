@@ -217,12 +217,12 @@ const FIRST_NAMES: [&str; 32] = [
 ];
 
 /// Stores, with the share of purchases each takes (per thousand) and its opening hours.
-const STORES: [(&str, u32, u32, u32, bool); 5] = [
-    ("LEGO Store", 300, 10, 19, false),
-    ("LEGO online shop", 400, 7, 23, true),
+pub(crate) const STORES: [(&str, u32, u32, u32, bool); 5] = [
+    ("brand store", 300, 10, 19, false),
+    ("online shop", 400, 7, 23, true),
     ("toy shop", 150, 9, 18, false),
     ("second-hand market", 100, 9, 13, false),
-    ("LEGO House", 50, 10, 17, false),
+    ("brand house", 50, 10, 17, false),
 ];
 
 pub struct World {

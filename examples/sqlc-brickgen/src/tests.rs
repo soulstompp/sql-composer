@@ -1810,3 +1810,10 @@ fn every_declared_key_holds_on_every_written_row() {
     }
     assert!(checked >= crate::load::UNIQUE_KEYS.len());
 }
+
+#[test]
+fn no_store_carries_the_brand_word() {
+    for (name, ..) in world::STORES {
+        assert!(!name.to_lowercase().contains("lego"), "{name}");
+    }
+}

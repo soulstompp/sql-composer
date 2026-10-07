@@ -187,6 +187,105 @@ mod tests {
                 }
             });
         }
+
+        /// The words of `keywords` the server refuses as a `WITH` name and the dialect does not
+        /// list, and the listed words it accepts.
+        fn listed_wrongly(
+            dialect: sql_composer::Dialect,
+            keywords: Vec<String>,
+            refuses: impl Fn(&str) -> bool,
+        ) -> Vec<String> {
+            let reserved = dialect.reserved_words();
+            assert!(
+                keywords.len() > 100,
+                "the server listed {} keywords",
+                keywords.len()
+            );
+            let mut wrong: Vec<String> = keywords
+                .into_iter()
+                .filter(|word| refuses(word) != reserved.contains(&word.as_str()))
+                .collect();
+            wrong.extend(
+                reserved
+                    .iter()
+                    .filter(|w| !refuses(w))
+                    .map(|w| w.to_string()),
+            );
+            wrong
+        }
+
+        #[cfg(feature = "postgres")]
+        #[test]
+        #[ignore = "needs a PostgreSQL server: set SQLC_TEST_POSTGRES_URL"]
+        fn test_the_reserved_words_are_the_keywords_postgres_refuses_as_a_name() {
+            use sqlx::{AssertSqlSafe, SqlSafeStr};
+            let url = std::env::var("SQLC_TEST_POSTGRES_URL").expect("SQLC_TEST_POSTGRES_URL");
+            run(async {
+                let pool = sqlx::PgPool::connect(&url).await.unwrap();
+                let keywords: Vec<String> =
+                    sqlx::query_scalar("SELECT word FROM pg_get_keywords()")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                let mut refused = std::collections::HashSet::new();
+                for word in keywords.iter().cloned().chain(
+                    sql_composer::Dialect::Postgres
+                        .reserved_words()
+                        .iter()
+                        .map(|w| w.to_string()),
+                ) {
+                    let sql = format!("WITH {word} AS (SELECT 1) SELECT * FROM {word}");
+                    if sqlx::query(AssertSqlSafe(sql).into_sql_str())
+                        .fetch_all(&pool)
+                        .await
+                        .is_err()
+                    {
+                        refused.insert(word);
+                    }
+                }
+                let wrong = listed_wrongly(sql_composer::Dialect::Postgres, keywords, |w| {
+                    refused.contains(w)
+                });
+                assert!(wrong.is_empty(), "listed wrongly for PostgreSQL: {wrong:?}");
+            });
+        }
+
+        #[cfg(feature = "mysql")]
+        #[test]
+        #[ignore = "needs a MySQL server: set SQLC_TEST_MYSQL_URL"]
+        fn test_the_reserved_words_are_the_keywords_mysql_refuses_as_a_name() {
+            use sqlx::{AssertSqlSafe, SqlSafeStr};
+            let url = std::env::var("SQLC_TEST_MYSQL_URL").expect("SQLC_TEST_MYSQL_URL");
+            run(async {
+                let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
+                let keywords: Vec<String> = sqlx::query_scalar(
+                    "SELECT CAST(LOWER(WORD) AS CHAR) FROM INFORMATION_SCHEMA.KEYWORDS",
+                )
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+                let mut refused = std::collections::HashSet::new();
+                for word in keywords.iter().cloned().chain(
+                    sql_composer::Dialect::Mysql
+                        .reserved_words()
+                        .iter()
+                        .map(|w| w.to_string()),
+                ) {
+                    let sql = format!("WITH {word} AS (SELECT 1) SELECT * FROM {word}");
+                    if sqlx::query(AssertSqlSafe(sql).into_sql_str())
+                        .fetch_all(&pool)
+                        .await
+                        .is_err()
+                    {
+                        refused.insert(word);
+                    }
+                }
+                let wrong = listed_wrongly(sql_composer::Dialect::Mysql, keywords, |w| {
+                    refused.contains(w)
+                });
+                assert!(wrong.is_empty(), "listed wrongly for MySQL: {wrong:?}");
+            });
+        }
     }
     #[cfg(feature = "validate")]
     mod validate_tests {

@@ -373,7 +373,8 @@ The moulds Technic and City share then hold the closure once. Nothing is created
 - A template that binds a parameter, itself or through a template it composes, is written where it
   is composed, as without `--with`. So is a template composed with its slots filled. What either
   reads is still named.
-- A name that is a reserved word is refused, and so are two files that would take one name.
+- A name the dialect reserves is refused (`key` on MySQL, `left` on PostgreSQL), and so are two
+  files that would take one name.
 
 A statement can also choose its own names. `:define(path)` writes the body where `:compose` would
 name it, and the name in front of its `AS` then stands for that template everywhere below, at any

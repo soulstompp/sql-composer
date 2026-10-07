@@ -386,8 +386,8 @@ partilham passa então a ter o fecho uma só vez, e na base de dados não se cri
 - Um modelo que receba um parâmetro, ele próprio ou através do que compõe, ou que seja composto com
   as vagas preenchidas, fica escrito onde é composto, tal como sem `--with`, e o que ele lê continua
   a ser nomeado.
-- Um nome que seja palavra reservada é recusado, e o mesmo acontece a dois ficheiros que ficariam
-  com o mesmo nome.
+- Um nome que o dialeto reserve é recusado (o `key` no MySQL, o `left` no PostgreSQL), e o mesmo
+  acontece a dois ficheiros que ficariam com o mesmo nome.
 
 Uma instrução pode também escolher os seus nomes. O `:define(path)` escreve o corpo onde o
 `:compose` poria o nome, e o nome que está à frente do seu `AS` passa a valer por esse modelo em

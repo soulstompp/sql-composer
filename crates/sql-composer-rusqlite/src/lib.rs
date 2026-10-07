@@ -307,4 +307,35 @@ mod tests {
             .unwrap();
         assert_eq!(a, None);
     }
+
+    #[test]
+    fn test_the_reserved_words_are_the_keywords_sqlite_refuses_as_a_name() {
+        let conn = SqliteConnection::open_in_memory().unwrap();
+        let refuses = |word: &str| {
+            conn.prepare(&format!("WITH {word} AS (SELECT 1) SELECT * FROM {word}"))
+                .is_err()
+        };
+        let reserved = Dialect::Sqlite.reserved_words();
+        let count = unsafe { rusqlite::ffi::sqlite3_keyword_count() };
+        assert!(count > 100, "SQLite listed {count} keywords");
+
+        let mut wrong = Vec::new();
+        for i in 0..count {
+            let mut name: *const std::os::raw::c_char = std::ptr::null();
+            let mut len: std::os::raw::c_int = 0;
+            unsafe { rusqlite::ffi::sqlite3_keyword_name(i, &mut name, &mut len) };
+            let bytes = unsafe { std::slice::from_raw_parts(name.cast::<u8>(), len as usize) };
+            let word = std::str::from_utf8(bytes).unwrap().to_ascii_lowercase();
+            if refuses(&word) != reserved.contains(&word.as_str()) {
+                wrong.push(word);
+            }
+        }
+        wrong.extend(
+            reserved
+                .iter()
+                .filter(|w| !refuses(w))
+                .map(|w| w.to_string()),
+        );
+        assert!(wrong.is_empty(), "listed wrongly for SQLite: {wrong:?}");
+    }
 }

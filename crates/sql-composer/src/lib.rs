@@ -36,6 +36,7 @@ pub mod driver;
 pub mod error;
 pub mod mock;
 pub mod parser;
+mod reserved;
 pub mod types;
 
 pub use composer::{ComposedSql, Composer};

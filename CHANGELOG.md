@@ -13,6 +13,7 @@
 - **A distinct count of several sources, on SQLite** — `:count(DISTINCT col OF a, b)` unions its sources with a bare `UNION`, which removes duplicate rows already. It wrote `UNION DISTINCT`, which SQLite refuses.
 - **`EXPECTING` and `NULL` are held** — `compose_with_values` refuses a binding given fewer values than its `EXPECTING` asks, or more (`Error::ValueCount`). `compose_with_values_and_nulls` takes a driver's test of which values are NULL, and refuses a NULL given to a `:bind` written without `NULL` (`Error::NullValue`). Both were only recorded on the `Binding`.
 - **Each statement numbered from its first placeholder** — In a template of several statements, `compose` and `compose_with_values` number each statement's placeholders from the first, as `--with` did; they shared one numbering across the script. `ComposedSql::statement_starts` gives where each statement's names begin in `bind_params`, in both modes.
+- **Each dialect's reserved words** — Naming relations refuses a file whose name its dialect reserves: PostgreSQL's reserved keywords and those it keeps for types and functions, MySQL's reserved keywords and `rollup`, and the keywords SQLite refuses as a name. Every dialect read PostgreSQL's reserved keywords alone, so `key.sqlc` composed on MySQL, and `left.sqlc` on PostgreSQL, to a statement the database refused. `Dialect::reserved_words` gives each list.
 - **winnow 1** — The template parser is built on winnow 1.
 
 ### sql-composer-mysql

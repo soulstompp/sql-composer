@@ -154,4 +154,14 @@ impl Dialect {
     pub fn supports_numbered_placeholders(&self) -> bool {
         matches!(self, Dialect::Postgres | Dialect::Sqlite)
     }
+
+    /// The words this dialect refuses as a relation's name, in lower case. `--with` refuses a
+    /// file whose name would be one of them.
+    pub fn reserved_words(&self) -> &'static [&'static str] {
+        match self {
+            Dialect::Postgres => crate::reserved::POSTGRES,
+            Dialect::Mysql => crate::reserved::MYSQL,
+            Dialect::Sqlite => crate::reserved::SQLITE,
+        }
+    }
 }

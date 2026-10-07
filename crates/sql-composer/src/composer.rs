@@ -602,7 +602,7 @@ impl Composer {
         if name.starts_with(|c: char| c.is_ascii_digit()) {
             name.insert(0, '_');
         }
-        if RESERVED.contains(&name.as_str()) {
+        if self.dialect.reserved_words().contains(&name.as_str()) {
             return Err(Error::ReservedName {
                 path: resolved.to_path_buf(),
                 name,
@@ -1431,88 +1431,6 @@ fn view_name_before(sql: &str) -> Option<String> {
         .eq_ignore_ascii_case("AS")
         .then(|| name.to_string())
 }
-
-/// The words PostgreSQL reserves, which no relation may be named.
-const RESERVED: &[&str] = &[
-    "all",
-    "analyse",
-    "analyze",
-    "and",
-    "any",
-    "array",
-    "as",
-    "asc",
-    "asymmetric",
-    "both",
-    "case",
-    "cast",
-    "check",
-    "collate",
-    "column",
-    "constraint",
-    "create",
-    "current_catalog",
-    "current_date",
-    "current_role",
-    "current_time",
-    "current_timestamp",
-    "current_user",
-    "default",
-    "deferrable",
-    "desc",
-    "distinct",
-    "do",
-    "else",
-    "end",
-    "except",
-    "false",
-    "fetch",
-    "for",
-    "foreign",
-    "from",
-    "grant",
-    "group",
-    "having",
-    "in",
-    "initially",
-    "intersect",
-    "into",
-    "lateral",
-    "leading",
-    "limit",
-    "localtime",
-    "localtimestamp",
-    "not",
-    "null",
-    "offset",
-    "on",
-    "only",
-    "or",
-    "order",
-    "placing",
-    "primary",
-    "references",
-    "returning",
-    "select",
-    "session_user",
-    "some",
-    "symmetric",
-    "system_user",
-    "table",
-    "then",
-    "to",
-    "trailing",
-    "true",
-    "union",
-    "unique",
-    "user",
-    "using",
-    "variadic",
-    "when",
-    "where",
-    "window",
-    "with",
-];
 
 /// The statements in a template's elements, split after each `;` that ends one: outside
 /// quotes, comments, dollar quoting and psql meta-commands. A template of one statement is one.
@@ -3406,6 +3324,31 @@ mod tests {
         match named(&dir, &composer, "reads.sqlc").unwrap_err() {
             Error::ReservedName { name, .. } => assert_eq!(name, "user"),
             other => panic!("expected ReservedName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_each_dialect_refuses_its_own_reserved_words() {
+        for (dialect, file, refused) in [
+            (Dialect::Mysql, "key.sqlc", true),
+            (Dialect::Postgres, "key.sqlc", false),
+            (Dialect::Postgres, "left.sqlc", true),
+            (Dialect::Sqlite, "returning.sqlc", true),
+            (Dialect::Sqlite, "user.sqlc", false),
+        ] {
+            let (dir, composer) = named_fixture(dialect);
+            write_temp_file(&dir, file, "SELECT 1 AS y");
+            write_temp_file(
+                &dir,
+                "reads.sqlc",
+                &format!("SELECT * FROM (\n:compose({file})\n) r"),
+            );
+            let result = named(&dir, &composer, "reads.sqlc");
+            assert_eq!(
+                matches!(result, Err(Error::ReservedName { .. })),
+                refused,
+                "{dialect:?} {file}: {result:?}"
+            );
         }
     }
 

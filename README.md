@@ -369,7 +369,8 @@ The moulds Technic and City share then hold the closure once. Nothing is created
   clause, and a `CREATE … AS` takes them at the head of its query. Any other statement takes them
   in front of it, and MySQL takes no `WITH` before an `INSERT`.
 - A template of several statements gets a `WITH` for each, naming only what that statement reads.
-  The statements end at each `;` outside quotes, comments, dollar quotes and psql meta-commands.
+  The statements end at each `;` outside quotes, comments, dollar quotes and psql meta-commands,
+  as the dialect's database reads them.
 - A template that binds a parameter, itself or through a template it composes, is written where it
   is composed, as without `--with`. So is a template composed with its slots filled. What either
   reads is still named.

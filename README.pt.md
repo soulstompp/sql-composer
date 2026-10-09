@@ -382,7 +382,7 @@ partilham passa então a ter o fecho uma só vez, e na base de dados não se cri
   recebe-os à sua frente, e o MySQL não aceita `WITH` antes de um `INSERT`.
 - Um modelo com várias instruções leva um `WITH` por instrução, cada um a nomear só o que essa
   instrução lê; uma instrução acaba em cada `;` que não esteja entre aspas, num comentário, entre
-  aspas de dólar ou num metacomando do psql.
+  aspas de dólar ou num metacomando do psql, tal como a base de dados do dialeto os lê.
 - Um modelo que receba um parâmetro, ele próprio ou através do que compõe, ou que seja composto com
   as vagas preenchidas, fica escrito onde é composto, tal como sem `--with`, e o que ele lê continua
   a ser nomeado.

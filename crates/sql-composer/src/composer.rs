@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::mock::MockTable;
 use crate::parser;
+use crate::scan::{Regime, Scanner};
 use crate::types::{
     Binding, Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Template,
     TemplateSource,
@@ -186,7 +187,9 @@ impl Composer {
             })?
         } else {
             let scoped = self.scoped(template)?;
-            Self::compose_statements(template, |statement| scoped.compose_root(statement))?
+            Self::compose_statements(self.dialect.regime(), template, |statement| {
+                scoped.compose_root(statement)
+            })?
         };
         Ok(self.with_mocks(composed))
     }
@@ -195,12 +198,13 @@ impl Composer {
     /// placeholders from the first. A piece holding only whitespace or comments goes with the
     /// statement before it.
     fn compose_statements(
+        regime: &'static Regime,
         template: &Template,
         emit: impl Fn(&Template) -> Result<ComposedSql>,
     ) -> Result<ComposedSql> {
         let mut composed = ComposedSql::default();
-        for elements in split_statements(&template.elements) {
-            if holds_code(&elements) || composed.statement_starts.is_empty() {
+        for elements in split_statements(&template.elements, regime) {
+            if holds_code(&elements, regime) || composed.statement_starts.is_empty() {
                 composed.statement_starts.push(composed.bind_params.len());
             }
             let statement = emit(&Template {
@@ -230,7 +234,7 @@ impl Composer {
             return composed;
         }
         let text = &composed.sql;
-        let mut ends = Scanner::default().ends(text);
+        let mut ends = Scanner::new(self.dialect.regime()).ends(text);
         if ends.last() != Some(&text.len()) {
             ends.push(text.len());
         }
@@ -238,7 +242,7 @@ impl Composer {
         let mut start = 0;
         for end in ends {
             let statement = &text[start..end];
-            let words = code_words(statement);
+            let words = code_words(statement, self.dialect.regime());
             let mocks: Vec<String> = self
                 .mock_tables
                 .values()
@@ -332,7 +336,7 @@ impl Composer {
                 composer.compose_with_values_root(statement, values)
             })?
         } else {
-            Self::compose_statements(template, |statement| {
+            Self::compose_statements(self.dialect.regime(), template, |statement| {
                 scoped.compose_with_values_root(statement, values)
             })?
         };
@@ -403,12 +407,13 @@ impl Composer {
         template: &Template,
         emit: impl Fn(&Composer, &Template) -> Result<ComposedSql>,
     ) -> Result<ComposedSql> {
+        let regime = self.dialect.regime();
         let mut closed = HashMap::new();
         let mut sql = String::new();
         let mut bind_params = Vec::new();
         let mut statement_starts = Vec::new();
-        for elements in split_statements(&template.elements) {
-            if holds_code(&elements) || statement_starts.is_empty() {
+        for elements in split_statements(&template.elements, regime) {
+            if holds_code(&elements, regime) || statement_starts.is_empty() {
                 statement_starts.push(bind_params.len());
             }
             let mut gathered = Gathered::default();
@@ -1434,9 +1439,9 @@ fn view_name_before(sql: &str) -> Option<String> {
 
 /// The statements in a template's elements, split after each `;` that ends one: outside
 /// quotes, comments, dollar quoting and psql meta-commands. A template of one statement is one.
-fn split_statements(elements: &[Element]) -> Vec<Vec<Element>> {
+fn split_statements(elements: &[Element], regime: &'static Regime) -> Vec<Vec<Element>> {
     let mut statements = vec![Vec::new()];
-    let mut scanner = Scanner::default();
+    let mut scanner = Scanner::new(regime);
     for element in elements {
         match element {
             Element::Sql(text) => {
@@ -1466,7 +1471,7 @@ fn split_statements(elements: &[Element]) -> Vec<Vec<Element>> {
 }
 
 /// Whether a piece of a template holds SQL beyond whitespace and comments.
-fn holds_code(elements: &[Element]) -> bool {
+fn holds_code(elements: &[Element], regime: &'static Regime) -> bool {
     let mut text = String::new();
     for element in elements {
         match element {
@@ -1475,107 +1480,18 @@ fn holds_code(elements: &[Element]) -> bool {
         }
     }
     let mut code = false;
-    Scanner::default().walk(&text, |_, byte| code |= !byte.is_ascii_whitespace());
+    Scanner::new(regime).walk(&text, |_, byte| code |= !byte.is_ascii_whitespace());
     code
-}
-
-/// Where SQL text stands, carried from one piece of a template to the next.
-#[derive(Default)]
-enum Scan {
-    #[default]
-    Code,
-    Quoted,
-    Identifier,
-    LineComment,
-    BlockComment(u32),
-    Dollar(Vec<u8>),
-    MetaCommand,
-}
-
-#[derive(Default)]
-struct Scanner {
-    scan: Scan,
-}
-
-impl Scanner {
-    /// The offsets just past each `;` in `text` that ends a statement.
-    fn ends(&mut self, text: &str) -> Vec<usize> {
-        let mut ends = Vec::new();
-        self.walk(text, |i, byte| {
-            if byte == b';' {
-                ends.push(i + 1);
-            }
-        });
-        ends
-    }
-
-    /// Walk `text`, calling `code` with the offset and value of each byte that is SQL itself:
-    /// outside quotes, quoted identifiers, comments, dollar quotes and psql meta-commands, and
-    /// opening none of them.
-    fn walk(&mut self, text: &str, mut code: impl FnMut(usize, u8)) {
-        let bytes = text.as_bytes();
-        let mut scan = std::mem::take(&mut self.scan);
-        let mut i = 0;
-        while i < bytes.len() {
-            let next = bytes.get(i + 1).copied();
-            let (at, byte) = (i, bytes[i]);
-            let was_code = matches!(scan, Scan::Code);
-            scan = match (scan, bytes[i]) {
-                (Scan::Code, b'\'') => Scan::Quoted,
-                (Scan::Code, b'"') => Scan::Identifier,
-                (Scan::Code, b'-') if next == Some(b'-') => {
-                    i += 1;
-                    Scan::LineComment
-                }
-                (Scan::Code, b'/') if next == Some(b'*') => {
-                    i += 1;
-                    Scan::BlockComment(1)
-                }
-                (Scan::Code, b'\\') => Scan::MetaCommand,
-                (Scan::Code, b'$') => match dollar_quote(&bytes[i..]) {
-                    Some(tag) => {
-                        i += tag.len() - 1;
-                        Scan::Dollar(tag.to_vec())
-                    }
-                    None => Scan::Code,
-                },
-                (Scan::Quoted, b'\'') | (Scan::Identifier, b'"') => Scan::Code,
-                (Scan::LineComment | Scan::MetaCommand, b'\n') => Scan::Code,
-                (Scan::BlockComment(depth), b'*') if next == Some(b'/') => {
-                    i += 1;
-                    if depth == 1 {
-                        Scan::Code
-                    } else {
-                        Scan::BlockComment(depth - 1)
-                    }
-                }
-                (Scan::BlockComment(depth), b'/') if next == Some(b'*') => {
-                    i += 1;
-                    Scan::BlockComment(depth + 1)
-                }
-                (Scan::Dollar(tag), _) if bytes[i..].starts_with(&tag) => {
-                    i += tag.len() - 1;
-                    Scan::Code
-                }
-                (scan, _) => scan,
-            };
-            if was_code && i == at && matches!(scan, Scan::Code) {
-                code(at, byte);
-            }
-            i += 1;
-        }
-        self.scan = scan;
-    }
 }
 
 /// The bare words of `text`, lowercased: the names its SQL spells outside strings, quoted
 /// identifiers and comments. A word is a run of ASCII letters, digits, `_` and `$`.
-fn code_words(text: &str) -> HashSet<String> {
+fn code_words(text: &str, regime: &'static Regime) -> HashSet<String> {
     let is_word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$';
     let mut words = HashSet::new();
     let mut word = String::new();
     let mut next_at = 0;
-    Scanner::default().walk(text, |at, byte| {
+    Scanner::new(regime).walk(text, |at, byte| {
         if (at != next_at || !is_word(byte)) && !word.is_empty() {
             words.insert(std::mem::take(&mut word));
         }
@@ -1588,16 +1504,6 @@ fn code_words(text: &str) -> HashSet<String> {
         words.insert(word);
     }
     words
-}
-
-/// The dollar quote that opens at the start of `bytes` (`$$` or `$tag$`), if one does.
-fn dollar_quote(bytes: &[u8]) -> Option<&[u8]> {
-    let tag = bytes[1..]
-        .iter()
-        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'_')
-        .count();
-    let opens = bytes.get(tag + 1) == Some(&b'$') && !bytes.get(1).is_some_and(u8::is_ascii_digit);
-    opens.then(|| &bytes[..tag + 2])
 }
 
 /// `statement` with `relations` named at the head of its query: after its leading comments and
@@ -3257,13 +3163,33 @@ mod tests {
     }
 
     #[test]
-    fn test_a_statement_ends_only_outside_quotes_comments_and_dollar_quotes() {
-        let text =
-            "SELECT ';', \";\" -- ;\n/* ; /* ; */ ; */ $$;$$, $q$;$q$, $1;\n\\echo ;\nSELECT 2;";
-        let ends = Scanner::default().ends(text);
-        assert_eq!(ends.len(), 2, "{ends:?}");
-        assert!(text[..ends[0]].ends_with("$q$;$q$, $1;"));
-        assert_eq!(ends[1], text.len());
+    fn test_each_dialect_ends_a_statement_where_its_database_does() {
+        let statements = |dialect: Dialect, sql: &str| {
+            let template = Template {
+                elements: vec![Element::Sql(sql.into())],
+                source: TemplateSource::Literal("statements".into()),
+            };
+            let composer = Composer::new(dialect);
+            composer.compose(&template).unwrap().statement_starts.len()
+        };
+        let escape_string = "SELECT E'it\\'s';\nSELECT 2;";
+        let escaped_double_quote = "SELECT \"a;b\\\"\";\nSELECT 2;";
+        let hash_comment = "SELECT 1 #> x;\nSELECT 2;";
+        let bracket = "SELECT [a;b];\nSELECT 2;";
+        for (dialect, sql, count) in [
+            (Dialect::Postgres, escape_string, 2),
+            (Dialect::Duckdb, escape_string, 2),
+            (Dialect::Sqlite, escape_string, 1),
+            (Dialect::Mysql, escaped_double_quote, 2),
+            (Dialect::Mariadb, escaped_double_quote, 2),
+            (Dialect::Postgres, escaped_double_quote, 1),
+            (Dialect::Mysql, hash_comment, 1),
+            (Dialect::Postgres, hash_comment, 2),
+            (Dialect::Sqlite, bracket, 2),
+            (Dialect::Postgres, bracket, 3),
+        ] {
+            assert_eq!(statements(dialect, sql), count, "{dialect:?}: {sql}");
+        }
     }
 
     #[test]

@@ -219,4 +219,14 @@ impl Dialect {
             Dialect::Duckdb => crate::reserved::DUCKDB,
         }
     }
+
+    /// Where this dialect's database begins and ends its quoted spans and comments.
+    pub(crate) fn regime(&self) -> &'static crate::scan::Regime {
+        match self {
+            Dialect::Postgres | Dialect::Duckdb => &crate::scan::POSTGRES,
+            Dialect::Mysql => &crate::scan::MYSQL,
+            Dialect::Mariadb => &crate::scan::MARIADB,
+            Dialect::Sqlite => &crate::scan::SQLITE,
+        }
+    }
 }

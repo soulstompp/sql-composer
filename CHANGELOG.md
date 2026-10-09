@@ -18,6 +18,7 @@
 - **Room for later variants** — `Error`, `Element`, `ComposeTarget`, `CommandKind`, `Dialect` and `TemplateSource` are `#[non_exhaustive]`: a `match` on one outside the crate takes a wildcard arm, so a variant added later breaks no caller.
 - **MariaDB and DuckDB** — `Dialect::Mariadb` writes `?` and `Dialect::Duckdb` writes `$1`, each refusing the keywords its database refuses as a name, read from MariaDB 12.3 and DuckDB 1.5. A mock table's values double their backslashes on MariaDB, as on MySQL, whose strings read backslash escapes.
 - **`Placeholders`** — `Dialect::placeholders` says how a dialect writes its placeholders: numbered after a sign, or positional. `Dialect::placeholder` and `Dialect::supports_numbered_placeholders` read it.
+- **Statements end where the database ends them** — A template of several statements is split, and the tables a statement names are found for its mock tables, as the dialect's database reads its quotes and comments at its default settings. On PostgreSQL and DuckDB, `E'it\'s'` is one string. On MySQL and MariaDB, `"…"` is a string that reads backslash escapes, `` `…` `` is a name, `#` and `-- ` begin a comment, `--` with no space after it does not, and a `/* */` comment does not nest. On SQLite, `` `…` `` and `[…]` are names. MariaDB and SQLite read no dollar quotes. Every dialect was read as PostgreSQL, and `E'…'` as a plain string, so a `;` inside one of these could end a statement.
 
 ### sql-composer-mysql
 

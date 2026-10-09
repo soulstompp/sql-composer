@@ -122,11 +122,11 @@ impl MockTable {
     }
 }
 
-/// `value` as a string literal of the dialect: quotes doubled, and on MySQL, whose strings take
-/// backslash escapes, backslashes doubled too.
+/// `value` as a string literal of the dialect: quotes doubled, and on MySQL and MariaDB, whose
+/// strings take backslash escapes, backslashes doubled too.
 fn literal(value: &str, dialect: Dialect) -> String {
     let mut escaped = value.replace('\'', "''");
-    if dialect == Dialect::Mysql {
+    if matches!(dialect, Dialect::Mysql | Dialect::Mariadb) {
         escaped = escaped.replace('\\', "\\\\");
     }
     format!("'{escaped}'")
@@ -180,10 +180,14 @@ mod tests {
     }
 
     #[test]
-    fn test_backslashes_are_doubled_on_mysql_only() {
+    fn test_backslashes_are_doubled_on_mysql_and_mariadb_only() {
         let mock = people().row(&[Some("1"), Some(r"C:\temp")]);
-        assert!(mock.to_sql(Dialect::Mysql).contains(r"'C:\\temp'"));
-        assert!(mock.to_sql(Dialect::Postgres).contains(r"'C:\temp'"));
+        for dialect in [Dialect::Mysql, Dialect::Mariadb] {
+            assert!(mock.to_sql(dialect).contains(r"'C:\\temp'"), "{dialect:?}");
+        }
+        for dialect in [Dialect::Postgres, Dialect::Sqlite, Dialect::Duckdb] {
+            assert!(mock.to_sql(dialect).contains(r"'C:\temp'"), "{dialect:?}");
+        }
     }
 
     #[test]

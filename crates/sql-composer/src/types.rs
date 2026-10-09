@@ -129,7 +129,8 @@ pub enum CommandKind {
     Except,
 }
 
-/// Target database dialect for placeholder syntax.
+/// The database a template is composed for: its placeholders and the words it reserves, each at
+/// the database's default settings.
 ///
 /// A `match` on it outside this crate needs a wildcard arm, so a dialect added later breaks no
 /// caller:
@@ -141,7 +142,9 @@ pub enum CommandKind {
 ///     match dialect {
 ///         Dialect::Postgres => "$",
 ///         Dialect::Mysql => "?",
+///         Dialect::Mariadb => "?",
 ///         Dialect::Sqlite => "?",
+///         Dialect::Duckdb => "$",
 ///     }
 /// }
 /// ```
@@ -155,24 +158,54 @@ pub enum Dialect {
     Mysql,
     /// SQLite: `?1`, `?2`, `?3`
     Sqlite,
+    /// MariaDB: `?`, `?`, `?`
+    Mariadb,
+    /// DuckDB: `$1`, `$2`, `$3`
+    Duckdb,
+}
+
+/// How a dialect writes a statement's placeholders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Placeholders {
+    /// Numbered from 1 after a sign: `$1` on PostgreSQL and DuckDB, `?1` on SQLite. A name used
+    /// twice takes one number, and the names are numbered in alphabetical order.
+    Numbered(char),
+    /// A bare `?` for each use, in the order the statement uses them: MySQL and MariaDB.
+    Positional,
+}
+
+impl Placeholders {
+    /// The placeholder for the given 1-based parameter index.
+    pub fn placeholder(&self, index: usize) -> String {
+        match self {
+            Placeholders::Numbered(sign) => format!("{sign}{index}"),
+            Placeholders::Positional => "?".to_string(),
+        }
+    }
 }
 
 impl Dialect {
+    /// How this dialect writes its placeholders.
+    pub fn placeholders(&self) -> Placeholders {
+        match self {
+            Dialect::Postgres | Dialect::Duckdb => Placeholders::Numbered('$'),
+            Dialect::Sqlite => Placeholders::Numbered('?'),
+            Dialect::Mysql | Dialect::Mariadb => Placeholders::Positional,
+        }
+    }
+
     /// Format a placeholder for the given 1-based parameter index.
     pub fn placeholder(&self, index: usize) -> String {
-        match self {
-            Dialect::Postgres => format!("${index}"),
-            Dialect::Mysql => "?".to_string(),
-            Dialect::Sqlite => format!("?{index}"),
-        }
+        self.placeholders().placeholder(index)
     }
 
     /// Whether this dialect uses numbered placeholders ($1, ?1) vs positional (?).
     ///
-    /// Numbered dialects (Postgres, SQLite) support alphabetical parameter ordering
-    /// and deduplication. Positional dialects (MySQL) use document-order placeholders.
+    /// Numbered dialects (PostgreSQL, SQLite, DuckDB) support alphabetical parameter ordering
+    /// and deduplication. Positional dialects (MySQL, MariaDB) use document-order placeholders.
     pub fn supports_numbered_placeholders(&self) -> bool {
-        matches!(self, Dialect::Postgres | Dialect::Sqlite)
+        matches!(self.placeholders(), Placeholders::Numbered(_))
     }
 
     /// The words this dialect refuses as a relation's name, in lower case. `--with` refuses a
@@ -182,6 +215,8 @@ impl Dialect {
             Dialect::Postgres => crate::reserved::POSTGRES,
             Dialect::Mysql => crate::reserved::MYSQL,
             Dialect::Sqlite => crate::reserved::SQLITE,
+            Dialect::Mariadb => crate::reserved::MARIADB,
+            Dialect::Duckdb => crate::reserved::DUCKDB,
         }
     }
 }

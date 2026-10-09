@@ -20,8 +20,8 @@ pub struct ComposedSql {
     pub sql: String,
     /// Ordered list of bind parameter names corresponding to placeholders.
     ///
-    /// For numbered dialects (Postgres, SQLite), names are in alphabetical order
-    /// with duplicates removed. For positional dialects (MySQL), names are in
+    /// For numbered dialects (PostgreSQL, SQLite, DuckDB), names are in alphabetical order
+    /// with duplicates removed. For positional dialects (MySQL, MariaDB), names are in
     /// document order.
     pub bind_params: Vec<String>,
     /// Where each statement's names begin in `bind_params`, one entry per statement, the first
@@ -1800,6 +1800,10 @@ mod tests {
         assert_eq!(Dialect::Mysql.placeholder(10), "?");
         assert_eq!(Dialect::Sqlite.placeholder(1), "?1");
         assert_eq!(Dialect::Sqlite.placeholder(10), "?10");
+        assert_eq!(Dialect::Mariadb.placeholder(1), "?");
+        assert_eq!(Dialect::Mariadb.placeholder(10), "?");
+        assert_eq!(Dialect::Duckdb.placeholder(1), "$1");
+        assert_eq!(Dialect::Duckdb.placeholder(10), "$10");
     }
 
     #[test]
@@ -1953,7 +1957,13 @@ mod tests {
 
     #[test]
     fn test_a_count_outside_expecting_is_refused() {
-        for dialect in [Dialect::Postgres, Dialect::Mysql, Dialect::Sqlite] {
+        for dialect in [
+            Dialect::Postgres,
+            Dialect::Mysql,
+            Dialect::Sqlite,
+            Dialect::Mariadb,
+            Dialect::Duckdb,
+        ] {
             let (_dir, composer, template) = nested_bind_fixture(
                 dialect,
                 "SELECT id FROM t WHERE id IN (:bind(ids EXPECTING 2..3)) AND k >= :bind(k EXPECTING 2)",
@@ -1998,7 +2008,13 @@ mod tests {
     #[test]
     fn test_a_null_is_refused_where_the_bind_does_not_take_it() {
         let is_null = |v: &Option<i32>| v.is_none();
-        for dialect in [Dialect::Postgres, Dialect::Mysql, Dialect::Sqlite] {
+        for dialect in [
+            Dialect::Postgres,
+            Dialect::Mysql,
+            Dialect::Sqlite,
+            Dialect::Mariadb,
+            Dialect::Duckdb,
+        ] {
             let (_refusing_dir, composer, refusing) =
                 nested_bind_fixture(dialect, "SELECT id FROM t WHERE a = :bind(a)");
             let (_taking_dir, composer_taking, taking) = nested_bind_fixture(
@@ -2219,6 +2235,8 @@ mod tests {
         assert!(Dialect::Postgres.supports_numbered_placeholders());
         assert!(Dialect::Sqlite.supports_numbered_placeholders());
         assert!(!Dialect::Mysql.supports_numbered_placeholders());
+        assert!(!Dialect::Mariadb.supports_numbered_placeholders());
+        assert!(Dialect::Duckdb.supports_numbered_placeholders());
     }
 
     // ── Slot tests ────────────────────────────────────────────────────
@@ -3335,6 +3353,11 @@ mod tests {
             (Dialect::Postgres, "left.sqlc", true),
             (Dialect::Sqlite, "returning.sqlc", true),
             (Dialect::Sqlite, "user.sqlc", false),
+            (Dialect::Mariadb, "returning.sqlc", true),
+            (Dialect::Mariadb, "window.sqlc", false),
+            (Dialect::Mysql, "window.sqlc", true),
+            (Dialect::Duckdb, "pivot.sqlc", true),
+            (Dialect::Duckdb, "user.sqlc", false),
         ] {
             let (dir, composer) = named_fixture(dialect);
             write_temp_file(&dir, file, "SELECT 1 AS y");

@@ -19,7 +19,7 @@
 //!
 //! let input = "SELECT * FROM users WHERE id = :bind(user_id)";
 //! let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
-//! let composer = Composer::new(Dialect::Postgres);
+//! let composer = Composer::new(Dialect::Duckdb);
 //!
 //! let values = bind_values!("user_id" => [Box::new(1i32) as Box<dyn duckdb::ToSql>]);
 //! let (sql, params) = conn.compose(&composer, &template, values).unwrap();
@@ -138,10 +138,10 @@ mod tests {
         conn.execute("INSERT INTO users (id, name) VALUES (2, 'Bob')", [])
             .unwrap();
 
-        // DuckDB uses Postgres-style $N placeholders
+        // DuckDB numbers its placeholders: $1, $2
         let input = "SELECT id, name FROM users WHERE id = :bind(user_id)";
         let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
-        let composer = Composer::new(Dialect::Postgres);
+        let composer = Composer::new(Dialect::Duckdb);
 
         let values = bind_values!("user_id" => [boxed(1i32)]);
         let (sql, params) = conn.compose(&composer, &template, values).unwrap();
@@ -176,7 +176,7 @@ mod tests {
 
         let input = "SELECT id, label FROM items WHERE id IN (:bind(ids)) ORDER BY id";
         let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
-        let composer = Composer::new(Dialect::Postgres);
+        let composer = Composer::new(Dialect::Duckdb);
 
         let values = bind_values!("ids" => [boxed(1i32), boxed(3i32)]);
         let (sql, params) = conn.compose(&composer, &template, values).unwrap();
@@ -203,7 +203,7 @@ mod tests {
 
         let input = "SELECT :bind(a) AS col_1, :bind(b) AS col_2";
         let template = parse_template(input, TemplateSource::Literal("test".into())).unwrap();
-        let composer = Composer::new(Dialect::Postgres);
+        let composer = Composer::new(Dialect::Duckdb);
 
         let values = bind_values!(
             "a" => [boxed("hello")],
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_a_null_is_refused_where_the_bind_does_not_take_it() {
         let conn = DuckDbConnection::open_in_memory().unwrap();
-        let composer = Composer::new(Dialect::Postgres);
+        let composer = Composer::new(Dialect::Duckdb);
         let refusing = parse_template(
             "SELECT CAST(:bind(a) AS INTEGER) AS a",
             TemplateSource::Literal("test".into()),
@@ -253,5 +253,61 @@ mod tests {
             .query_row(&sql, refs.as_slice(), |row| row.get(0))
             .unwrap();
         assert_eq!(a, None);
+    }
+
+    #[test]
+    fn test_the_reserved_words_are_the_keywords_duckdb_refuses_as_a_name() {
+        let conn = DuckDbConnection::open_in_memory().unwrap();
+        let refuses = |word: &str| {
+            conn.prepare(&format!("WITH {word} AS (SELECT 1) SELECT * FROM {word}"))
+                .is_err()
+        };
+        let reserved = Dialect::Duckdb.reserved_words();
+        let keywords: Vec<String> = conn
+            .prepare("SELECT keyword_name FROM duckdb_keywords()")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            keywords.len() > 100,
+            "DuckDB listed {} keywords",
+            keywords.len()
+        );
+
+        let mut wrong: Vec<String> = keywords
+            .into_iter()
+            .filter(|word| refuses(word) != reserved.contains(&word.as_str()))
+            .collect();
+        wrong.extend(
+            reserved
+                .iter()
+                .filter(|w| !refuses(w))
+                .map(|w| w.to_string()),
+        );
+        assert!(wrong.is_empty(), "listed wrongly for DuckDB: {wrong:?}");
+    }
+
+    #[test]
+    fn test_a_mock_reads_back_as_written() {
+        let conn = DuckDbConnection::open_in_memory().unwrap();
+        let written = [r"C:\temp", "O'Brien", r"a\'b"];
+        let mock = written.iter().fold(
+            sql_composer::MockTable::new("names").column("name", "varchar"),
+            |mock, name| mock.row(&[Some(name)]),
+        );
+        let sql = format!(
+            "SELECT name FROM ({}) m ORDER BY name",
+            mock.to_sql(Dialect::Duckdb)
+        );
+        let read: Vec<String> = conn
+            .prepare(&sql)
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(read, written);
     }
 }

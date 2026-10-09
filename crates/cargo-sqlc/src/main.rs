@@ -18,7 +18,9 @@ use walkdir::WalkDir;
 enum DialectArg {
     Postgres,
     Mysql,
+    Mariadb,
     Sqlite,
+    Duckdb,
 }
 
 impl From<DialectArg> for Dialect {
@@ -26,7 +28,9 @@ impl From<DialectArg> for Dialect {
         match d {
             DialectArg::Postgres => Dialect::Postgres,
             DialectArg::Mysql => Dialect::Mysql,
+            DialectArg::Mariadb => Dialect::Mariadb,
             DialectArg::Sqlite => Dialect::Sqlite,
+            DialectArg::Duckdb => Dialect::Duckdb,
         }
     }
 }
@@ -66,7 +70,7 @@ struct ComposeArgs {
     #[arg(long, env = "SQLC_TARGET_DIR", default_value = ".sql")]
     target: PathBuf,
 
-    /// Target database dialect for placeholder syntax.
+    /// The database to compose for: its placeholders, and the words it refuses as a name.
     #[arg(long, default_value = "postgres")]
     dialect: DialectArg,
 
@@ -331,6 +335,22 @@ mod tests {
             composed.keys().collect::<Vec<_>>(),
             vec![Path::new("parts.sql")]
         );
+    }
+
+    #[test]
+    fn test_each_dialect_is_a_value_of_the_flag() {
+        for (value, dialect) in [
+            ("postgres", Dialect::Postgres),
+            ("mysql", Dialect::Mysql),
+            ("mariadb", Dialect::Mariadb),
+            ("sqlite", Dialect::Sqlite),
+            ("duckdb", Dialect::Duckdb),
+        ] {
+            let Cli::Sqlc(args) =
+                Cli::try_parse_from(["cargo", "sqlc", "compose", "--dialect", value]).unwrap();
+            let SqlcCommand::Compose(compose) = args.command;
+            assert_eq!(Dialect::from(compose.dialect), dialect, "{value}");
+        }
     }
 
     #[test]

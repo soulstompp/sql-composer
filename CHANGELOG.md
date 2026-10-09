@@ -16,6 +16,8 @@
 - **Each dialect's reserved words** — Naming relations refuses a file whose name its dialect reserves: PostgreSQL's reserved keywords and those it keeps for types and functions, MySQL's reserved keywords and `rollup`, and the keywords SQLite refuses as a name. Every dialect read PostgreSQL's reserved keywords alone, so `key.sqlc` composed on MySQL, and `left.sqlc` on PostgreSQL, to a statement the database refused. `Dialect::reserved_words` gives each list.
 - **winnow 1** — The template parser is built on winnow 1.
 - **Room for later variants** — `Error`, `Element`, `ComposeTarget`, `CommandKind`, `Dialect` and `TemplateSource` are `#[non_exhaustive]`: a `match` on one outside the crate takes a wildcard arm, so a variant added later breaks no caller.
+- **MariaDB and DuckDB** — `Dialect::Mariadb` writes `?` and `Dialect::Duckdb` writes `$1`, each refusing the keywords its database refuses as a name, read from MariaDB 12.3 and DuckDB 1.5. A mock table's values double their backslashes on MariaDB, as on MySQL, whose strings read backslash escapes.
+- **`Placeholders`** — `Dialect::placeholders` says how a dialect writes its placeholders: numbered after a sign, or positional. `Dialect::placeholder` and `Dialect::supports_numbered_placeholders` read it.
 
 ### sql-composer-mysql
 
@@ -31,16 +33,19 @@
 ### sql-composer-duckdb
 
 - **A NULL where `:bind` does not say `NULL`** — The driver refuses a value that writes NULL given to such a binding.
+- **`Dialect::Duckdb`** — Compose for DuckDB with `Dialect::Duckdb`, as the driver's examples now do: it refuses DuckDB's reserved words as a relation's name, where `Dialect::Postgres` refused PostgreSQL's. The placeholders are the same, `$1`, `$2`.
 
 ### sql-composer-sqlx
 
 - **`verify_mysql`** — Under the feature `mysql`, prepares each composed statement on a live MySQL, which checks its syntax and that its tables and columns exist, as `verify_postgres` does on PostgreSQL. The feature built sqlx with MySQL and added no function.
 - **sqlx 0.9 and sqlparser 0.63** — `verify_postgres` connects with sqlx 0.9. Its PostgreSQL driver, 0.9.0, does not read the operating system's user: a URL that names no user connects as `anonymous` unless `PGUSER` is set, or the application builds `whoami` 2 with its default features.
+- **MariaDB and DuckDB in `validate_syntax`** — MariaDB is read with sqlparser's MySQL dialect, and DuckDB with its DuckDB dialect.
 
 ### cargo-sqlc
 
 - **`--with`** — `cargo sqlc compose` names every relation a statement reads once, at the head of the statement. It cannot be combined with `--views`.
 - **Only `.sqlc` files are composed** — `cargo sqlc compose` skips a file with no extension, as it skips one with another, and `--verify` reads only the target's `.sql` files. A stray `notes` was composed to `notes.sql`, and a target's `README` was reported stale.
+- **`--dialect mariadb` and `--dialect duckdb`** — `cargo sqlc compose` composes for MariaDB and DuckDB, each with its own placeholders and reserved words.
 
 ### examples
 

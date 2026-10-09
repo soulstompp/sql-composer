@@ -43,6 +43,6 @@ pub use composer::{ComposedSql, Composer};
 pub use error::Error;
 pub use mock::{MockColumn, MockTable};
 pub use types::{
-    Binding, Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, SlotAssignment,
-    Template, TemplateSource,
+    Binding, Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Placeholders,
+    SlotAssignment, Template, TemplateSource,
 };

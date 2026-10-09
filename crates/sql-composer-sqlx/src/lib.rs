@@ -87,13 +87,15 @@ pub async fn verify_mysql(database_url: &str, statements: &[&ComposedSql]) -> Re
 /// This does not check table/column existence.
 #[cfg(feature = "validate")]
 pub fn validate_syntax(sql: &str, dialect: sql_composer::Dialect) -> Result<()> {
-    use sqlparser::dialect::{MySqlDialect, PostgreSqlDialect, SQLiteDialect};
+    use sqlparser::dialect::{DuckDbDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
     use sqlparser::parser::Parser;
 
     let dialect: Box<dyn sqlparser::dialect::Dialect> = match dialect {
         sql_composer::Dialect::Postgres => Box::new(PostgreSqlDialect {}),
         sql_composer::Dialect::Mysql => Box::new(MySqlDialect {}),
         sql_composer::Dialect::Sqlite => Box::new(SQLiteDialect {}),
+        sql_composer::Dialect::Mariadb => Box::new(MySqlDialect {}),
+        sql_composer::Dialect::Duckdb => Box::new(DuckDbDialect {}),
         other => return Err(Error::Syntax(format!("no syntax check for {other:?}"))),
     };
 
@@ -251,27 +253,29 @@ mod tests {
             });
         }
 
+        /// The words a MySQL or MariaDB server at `url` lists as keywords and `dialect` lists
+        /// wrongly. MariaDB lists its operators among its keywords; only words can name a file.
         #[cfg(feature = "mysql")]
-        #[test]
-        #[ignore = "needs a MySQL server: set SQLC_TEST_MYSQL_URL"]
-        fn test_the_reserved_words_are_the_keywords_mysql_refuses_as_a_name() {
+        fn listed_wrongly_by_mysql_server(
+            url: &str,
+            dialect: sql_composer::Dialect,
+        ) -> Vec<String> {
             use sqlx::{AssertSqlSafe, SqlSafeStr};
-            let url = std::env::var("SQLC_TEST_MYSQL_URL").expect("SQLC_TEST_MYSQL_URL");
             run(async {
-                let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
+                let pool = sqlx::MySqlPool::connect(url).await.unwrap();
                 let keywords: Vec<String> = sqlx::query_scalar(
-                    "SELECT CAST(LOWER(WORD) AS CHAR) FROM INFORMATION_SCHEMA.KEYWORDS",
+                    "SELECT CAST(LOWER(WORD) AS CHAR) FROM INFORMATION_SCHEMA.KEYWORDS \
+                     WHERE WORD REGEXP '^[A-Za-z_][A-Za-z0-9_]*$'",
                 )
                 .fetch_all(&pool)
                 .await
                 .unwrap();
                 let mut refused = std::collections::HashSet::new();
-                for word in keywords.iter().cloned().chain(
-                    sql_composer::Dialect::Mysql
-                        .reserved_words()
-                        .iter()
-                        .map(|w| w.to_string()),
-                ) {
+                for word in keywords
+                    .iter()
+                    .cloned()
+                    .chain(dialect.reserved_words().iter().map(|w| w.to_string()))
+                {
                     let sql = format!("WITH {word} AS (SELECT 1) SELECT * FROM {word}");
                     if sqlx::query(AssertSqlSafe(sql).into_sql_str())
                         .fetch_all(&pool)
@@ -281,11 +285,26 @@ mod tests {
                         refused.insert(word);
                     }
                 }
-                let wrong = listed_wrongly(sql_composer::Dialect::Mysql, keywords, |w| {
-                    refused.contains(w)
-                });
-                assert!(wrong.is_empty(), "listed wrongly for MySQL: {wrong:?}");
-            });
+                listed_wrongly(dialect, keywords, |w| refused.contains(w))
+            })
+        }
+
+        #[cfg(feature = "mysql")]
+        #[test]
+        #[ignore = "needs a MySQL server: set SQLC_TEST_MYSQL_URL"]
+        fn test_the_reserved_words_are_the_keywords_mysql_refuses_as_a_name() {
+            let url = std::env::var("SQLC_TEST_MYSQL_URL").expect("SQLC_TEST_MYSQL_URL");
+            let wrong = listed_wrongly_by_mysql_server(&url, sql_composer::Dialect::Mysql);
+            assert!(wrong.is_empty(), "listed wrongly for MySQL: {wrong:?}");
+        }
+
+        #[cfg(feature = "mysql")]
+        #[test]
+        #[ignore = "needs a MariaDB server: set SQLC_TEST_MARIADB_URL"]
+        fn test_the_reserved_words_are_the_keywords_mariadb_refuses_as_a_name() {
+            let url = std::env::var("SQLC_TEST_MARIADB_URL").expect("SQLC_TEST_MARIADB_URL");
+            let wrong = listed_wrongly_by_mysql_server(&url, sql_composer::Dialect::Mariadb);
+            assert!(wrong.is_empty(), "listed wrongly for MariaDB: {wrong:?}");
         }
     }
     #[cfg(feature = "validate")]
@@ -306,6 +325,14 @@ mod tests {
         #[test]
         fn test_validate_syntax_sqlite() {
             validate_syntax("SELECT 1", Dialect::Sqlite).unwrap();
+        }
+
+        #[test]
+        fn test_validate_syntax_mariadb_and_duckdb() {
+            validate_syntax("SELECT * FROM t WHERE a = ? AND b = ?", Dialect::Mariadb).unwrap();
+            validate_syntax("SELECT * FROM t WHERE a = $1", Dialect::Duckdb).unwrap();
+            assert!(validate_syntax("SELECTT 1", Dialect::Mariadb).is_err());
+            assert!(validate_syntax("SELECTT 1", Dialect::Duckdb).is_err());
         }
 
         #[test]

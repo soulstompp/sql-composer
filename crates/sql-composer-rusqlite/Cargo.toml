@@ -1,17 +1,20 @@
 [package]
 name = "sql-composer-rusqlite"
-version = "0.0.5"
+version.workspace = true
 description = "rusqlite driver for sql-composer SQL template engine"
 keywords = ["sql", "template", "composer", "rusqlite", "sqlite"]
-repository = "https://github.com/soulstompp/sql-composer"
-license = "MIT"
-edition = "2021"
+categories = ["database"]
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-sql-composer = { version = "0.0.5", path = "../sql-composer" }
-rusqlite = "0.40"
-thiserror = "2"
+sql-composer.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-rusqlite = { version = "0.40", features = ["bundled"] }
-tempfile = "3"
+rusqlite = { workspace = true, features = ["bundled"] }
+tempfile.workspace = true

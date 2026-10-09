@@ -1,21 +1,22 @@
 [package]
 name = "sql-composer"
-version = "0.0.5"
+version.workspace = true
 description = "SQL template engine that composes reusable SQL fragments with parameterized bindings"
 keywords = ["sql", "template", "composer", "parser", "winnow"]
 categories = ["parser-implementations", "database"]
-repository = "https://github.com/soulstompp/sql-composer"
-license = "MIT"
-readme = "../../README.md"
-edition = "2021"
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 winnow = "1"
-thiserror = "2"
+thiserror.workspace = true
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
-tempfile = "3.26.0"
+tempfile.workspace = true
 
 [features]
 default = ["std"]

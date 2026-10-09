@@ -15,6 +15,7 @@
 - **Each statement numbered from its first placeholder** — In a template of several statements, `compose` and `compose_with_values` number each statement's placeholders from the first, as `--with` did; they shared one numbering across the script. `ComposedSql::statement_starts` gives where each statement's names begin in `bind_params`, in both modes.
 - **Each dialect's reserved words** — Naming relations refuses a file whose name its dialect reserves: PostgreSQL's reserved keywords and those it keeps for types and functions, MySQL's reserved keywords and `rollup`, and the keywords SQLite refuses as a name. Every dialect read PostgreSQL's reserved keywords alone, so `key.sqlc` composed on MySQL, and `left.sqlc` on PostgreSQL, to a statement the database refused. `Dialect::reserved_words` gives each list.
 - **winnow 1** — The template parser is built on winnow 1.
+- **Room for later variants** — `Error`, `Element`, `ComposeTarget`, `CommandKind`, `Dialect` and `TemplateSource` are `#[non_exhaustive]`: a `match` on one outside the crate takes a wildcard arm, so a variant added later breaks no caller.
 
 ### sql-composer-mysql
 

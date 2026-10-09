@@ -94,6 +94,7 @@ pub fn validate_syntax(sql: &str, dialect: sql_composer::Dialect) -> Result<()> 
         sql_composer::Dialect::Postgres => Box::new(PostgreSqlDialect {}),
         sql_composer::Dialect::Mysql => Box::new(MySqlDialect {}),
         sql_composer::Dialect::Sqlite => Box::new(SQLiteDialect {}),
+        other => return Err(Error::Syntax(format!("no syntax check for {other:?}"))),
     };
 
     // Replace placeholders with literal values for parsing

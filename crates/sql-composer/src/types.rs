@@ -18,6 +18,7 @@ pub struct Template {
 /// The origin of a template.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum TemplateSource {
     /// Loaded from a file at the given path.
     File(PathBuf),
@@ -28,6 +29,7 @@ pub enum TemplateSource {
 /// A single element in a template.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Element {
     /// Raw SQL text passed through unchanged.
     Sql(String),
@@ -56,6 +58,7 @@ pub struct Binding {
 /// What a `:compose(...)` target refers to.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ComposeTarget {
     /// A direct file path.
     Path(PathBuf),
@@ -106,6 +109,7 @@ pub struct Command {
 /// The kind of aggregate command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CommandKind {
     /// COUNT command - wraps in `SELECT COUNT(*) FROM (...)`.
     Count,
@@ -126,8 +130,24 @@ pub enum CommandKind {
 }
 
 /// Target database dialect for placeholder syntax.
+///
+/// A `match` on it outside this crate needs a wildcard arm, so a dialect added later breaks no
+/// caller:
+///
+/// ```compile_fail,E0004
+/// use sql_composer::Dialect;
+///
+/// fn sign(dialect: Dialect) -> &'static str {
+///     match dialect {
+///         Dialect::Postgres => "$",
+///         Dialect::Mysql => "?",
+///         Dialect::Sqlite => "?",
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Dialect {
     /// PostgreSQL: `$1`, `$2`, `$3`
     Postgres,

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 /// The error type for sql-composer operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A referenced template file was not found on any search path.
     #[error("template not found: {path}")]

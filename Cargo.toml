@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "examples/brick", "examples/sqlc-brickgen"]
 
 [workspace.package]
-version = "0.0.5"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/soulstompp/sql-composer"
@@ -11,7 +11,7 @@ readme = "README.md"
 rust-version = "1.85"
 
 [workspace.dependencies]
-sql-composer = { version = "0.0.5", path = "crates/sql-composer" }
+sql-composer = { version = "0.1.0", path = "crates/sql-composer" }
 clap = { version = "4", features = ["derive", "env"] }
 duckdb = "1.4"
 rusqlite = "0.40"

@@ -35,7 +35,7 @@ To compose from Rust instead, add the library:
 
 ```toml
 [dependencies]
-sql-composer = "0.0.5"
+sql-composer = "0.1.0"
 ```
 
 ## A first composition
@@ -562,7 +562,7 @@ The feature `serde` derives `Serialize` and `Deserialize` for the core types, an
 default) builds with the standard library.
 
 ```toml
-sql-composer = { version = "0.0.5", features = ["serde"] }
+sql-composer = { version = "0.1.0", features = ["serde"] }
 ```
 
 ### Driver crates
@@ -577,8 +577,8 @@ dialect; only the placeholders change.
 
 ```toml
 [dependencies]
-sql-composer = "0.0.5"
-sql-composer-rusqlite = "0.0.5"
+sql-composer = "0.1.0"
+sql-composer-rusqlite = "0.1.0"
 ```
 
 ```rust,ignore
@@ -608,8 +608,8 @@ let _rows = stmt.query(refs.as_slice()).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.5"
-sql-composer-duckdb = "0.0.5"
+sql-composer = "0.1.0"
+sql-composer-duckdb = "0.1.0"
 ```
 
 ```rust,ignore
@@ -634,9 +634,9 @@ let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.0.5"
-sql-composer-postgres = "0.0.5"  # sync and async, both on by default
-# sql-composer-postgres = { version = "0.0.5", default-features = false, features = ["async"] }
+sql-composer = "0.1.0"
+sql-composer-postgres = "0.1.0"  # sync and async, both on by default
+# sql-composer-postgres = { version = "0.1.0", default-features = false, features = ["async"] }
 ```
 
 The feature `sync` brings in the `postgres` crate and the sync type. `async` turns on the async
@@ -673,9 +673,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer = "0.0.5"
-sql-composer-mysql = "0.0.5"  # sync and async, both on by default
-# sql-composer-mysql = { version = "0.0.5", default-features = false, features = ["async"] }
+sql-composer = "0.1.0"
+sql-composer-mysql = "0.1.0"  # sync and async, both on by default
+# sql-composer-mysql = { version = "0.1.0", default-features = false, features = ["async"] }
 ```
 
 The feature `sync` brings in the `mysql` crate and the sync type. `async` turns on the async type,
@@ -713,8 +713,8 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.0.5"                                        # checks against PostgreSQL (the default)
-# sql-composer-sqlx = { version = "0.0.5", features = ["validate"] } # adds an offline syntax check
+sql-composer-sqlx = "0.1.0"                                        # checks against PostgreSQL (the default)
+# sql-composer-sqlx = { version = "0.1.0", features = ["validate"] } # adds an offline syntax check
 ```
 
 `verify_postgres`, under the feature `postgres` (on by default), prepares each statement on a live
@@ -755,7 +755,7 @@ examples/
   sqlc-brickgen/          # sqlc-brickgen: a large catalogue built from a real one, for PostgreSQL
 ```
 
-The crates are at 0.0.5, and an 0.0 release may change the API.
+The crates are at 0.1.0: a later 0.1 release keeps the API, and only 0.2 may change it.
 
 ## Licence
 

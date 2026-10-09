@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.0.5
+## 0.1.0
 
 ### sql-composer
 
@@ -61,7 +61,7 @@
 
 ### All crates
 
-- Version bump to 0.0.5.
+- Version bump to 0.1.0.
 - **The Rust each crate needs** — Every crate states its `rust-version`, the oldest Rust its dependencies build on: 1.85 for sql-composer, cargo-sqlc and sql-composer-rusqlite, 1.85.1 for sql-composer-duckdb, 1.87 for sql-composer-postgres, 1.89 for sql-composer-mysql and 1.94 for sql-composer-sqlx. Each crate's page shows the README, and every crate is listed under its categories.
 - **One version for the workspace** — The crates take their version, and the version each asks of sql-composer, from the workspace, so a release moves them in one place.
 

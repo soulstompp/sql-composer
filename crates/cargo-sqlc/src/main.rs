@@ -98,6 +98,12 @@ struct ComposeArgs {
     /// it is composed.
     #[arg(long)]
     with: bool,
+
+    /// Another directory to look for templates in, after the source directory. A template under
+    /// the source can compose one that lives only here, named after its path here, and nothing is
+    /// composed for the templates here themselves. Repeat it to search more than one.
+    #[arg(long = "search-path", value_name = "DIR")]
+    search_path: Vec<PathBuf>,
 }
 
 fn main() {
@@ -117,12 +123,16 @@ fn main() {
 /// as a sorted map of relative path (with `.sql` extension) → composed SQL.
 fn compose_all(
     source_dir: &Path,
+    search_paths: &[PathBuf],
     dialect: Dialect,
     views: Option<&Path>,
     with: bool,
 ) -> Result<BTreeMap<PathBuf, String>, Box<dyn std::error::Error>> {
     let mut composer = Composer::new(dialect);
     composer.add_search_path(source_dir.to_path_buf());
+    for path in search_paths {
+        composer.add_search_path(path.clone());
+    }
     composer.name_relations = with;
     if let Some(registry) = views {
         composer.load_view_registry(registry)?;
@@ -171,7 +181,13 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
     }
 
-    let composed = compose_all(source_dir, dialect, args.views.as_deref(), args.with)?;
+    let composed = compose_all(
+        source_dir,
+        &args.search_path,
+        dialect,
+        args.views.as_deref(),
+        args.with,
+    )?;
 
     if composed.is_empty() {
         println!("No .sqlc files found in {}", source_dir.display());
@@ -329,7 +345,7 @@ mod tests {
         std::fs::write(source.path().join("notes"), "SELECT 2").unwrap();
         std::fs::write(source.path().join("notes.txt"), "SELECT 3").unwrap();
 
-        let composed = compose_all(source.path(), Dialect::Postgres, None, false).unwrap();
+        let composed = compose_all(source.path(), &[], Dialect::Postgres, None, false).unwrap();
 
         assert_eq!(
             composed.keys().collect::<Vec<_>>(),
@@ -368,5 +384,43 @@ mod tests {
 
         std::fs::write(target.path().join("old.sql"), "SELECT 2").unwrap();
         assert!(run_verify(&composed, target.path()).is_err());
+    }
+
+    /// A source whose one template composes a relation that lives only in another directory.
+    fn trees() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(source.join("walk")).unwrap();
+        std::fs::create_dir_all(shared.join("layers")).unwrap();
+        std::fs::write(
+            source.join("walk/step.sqlc"),
+            "SELECT layer AS camada FROM (\n    :compose(layers/figures.sqlc)\n) f;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            shared.join("layers/figures.sqlc"),
+            "SELECT layer FROM layer\n",
+        )
+        .unwrap();
+        (dir, source, shared)
+    }
+
+    #[test]
+    fn test_a_template_composes_a_relation_found_on_another_search_path() {
+        let (_dir, source, shared) = trees();
+        let composed = compose_all(&source, &[shared], Dialect::Postgres, None, true).unwrap();
+        let keys: Vec<_> = composed.keys().cloned().collect();
+        assert_eq!(keys, vec![PathBuf::from("walk/step.sql")]);
+        let sql = &composed[&PathBuf::from("walk/step.sql")];
+        assert!(sql.contains("WITH layers_figures AS ("), "{sql}");
+        assert!(sql.contains("SELECT * FROM layers_figures"), "{sql}");
+    }
+
+    #[test]
+    fn test_without_that_search_path_the_relation_is_not_found() {
+        let (_dir, source, _shared) = trees();
+        let err = compose_all(&source, &[], Dialect::Postgres, None, true).unwrap_err();
+        assert!(err.to_string().contains("layers/figures.sqlc"), "{err}");
     }
 }

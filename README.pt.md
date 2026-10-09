@@ -509,6 +509,7 @@ escrita da mesma resposta em SQL direto, e duas delas sobre tabelas simuladas; s
 ```sh
 cargo sqlc compose                                  # sqlc/ para .sql/, e depois cargo sqlx prepare
 cargo sqlc compose --source assets/sqlc --target assets/.sql
+cargo sqlc compose --search-path ../shared/sqlc     # mais modelos, lidos depois do --source
 cargo sqlc compose --dialect mysql                  # postgres (por omissão), mysql ou sqlite
 cargo sqlc compose --skip-prepare                   # sem o cargo sqlx prepare
 cargo sqlc compose --verify                         # compara, sem escrever nada
@@ -526,6 +527,10 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   inteiro, pelo que um modelo apagado ou mudado de sítio não deixa ficheiro para trás, e um ficheiro
   escrito à mão no destino desaparece na composição seguinte. O `--target` deve, portanto, apontar
   para uma pasta que não tenha mais nada.
+- **`--search-path`** é mais uma pasta a partir da qual se leem os caminhos do `:compose`, depois do
+  `--source`, pelo que um modelo pode compor uma relação que está noutra árvore. Os modelos que lá
+  estão não dão ficheiro nenhum, e, com `--with`, uma relação encontrada lá toma o nome do seu
+  caminho dentro dessa pasta. Para procurar em mais do que uma, repete-se a opção.
 - **`--dialect`** escolhe os marcadores: `postgres`, `mysql` ou `sqlite`.
 - **`--skip-prepare`** deixa de fora o `cargo sqlx prepare`, que de outro modo corre assim que os
   ficheiros estão escritos. Se este falhar, o comando sai com 1, e os ficheiros ficam escritos na

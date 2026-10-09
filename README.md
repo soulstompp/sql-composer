@@ -490,6 +490,7 @@ same answer in direct SQL, and two run on mock tables. `laws` exits 1 if any of 
 ```sh
 cargo sqlc compose                                  # sqlc/ into .sql/, then cargo sqlx prepare
 cargo sqlc compose --source assets/sqlc --target assets/.sql
+cargo sqlc compose --search-path ../shared/sqlc     # more templates, read after --source
 cargo sqlc compose --dialect mysql                  # postgres (the default), mysql or sqlite
 cargo sqlc compose --skip-prepare                   # leave out cargo sqlx prepare
 cargo sqlc compose --verify                         # compare, write nothing
@@ -506,6 +507,10 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
   the target's place only once every template has composed. The target is replaced whole, so a
   template removed or moved leaves no file behind, and a file written into the target by hand is
   gone after the next compose. Point `--target` at a directory that holds nothing else.
+- **`--search-path`** is one more directory `:compose` paths are read under, after `--source`, so a
+  template can compose a relation another tree holds. Nothing is composed for the templates there
+  themselves, and under `--with` a relation found there is named after its path there. Repeat it to
+  search more than one.
 - **`--dialect`** chooses the placeholders: `postgres`, `mysql` or `sqlite`.
 - **`--skip-prepare`** leaves out `cargo sqlx prepare`, which otherwise runs once the files are
   written. If it fails, the command exits 1, and the files are written all the same.

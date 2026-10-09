@@ -51,6 +51,7 @@
 ### cargo-sqlc
 
 - **`--with`** — `cargo sqlc compose` names every relation a statement reads once, at the head of the statement. It cannot be combined with `--views`.
+- **`--search-path <dir>`** — `cargo sqlc compose` also looks for templates in this directory, after `--source`, so a template can compose a relation that lives in another tree. The relation is named after its path there, and nothing is composed for the templates there themselves. Repeat it to search more than one.
 - **Only `.sqlc` files are composed** — `cargo sqlc compose` skips a file with no extension, as it skips one with another, and `--verify` reads only the target's `.sql` files. A stray `notes` was composed to `notes.sql`, and a target's `README` was reported stale.
 - **`--dialect mariadb` and `--dialect duckdb`** — `cargo sqlc compose` composes for MariaDB and DuckDB, each with its own placeholders and reserved words.
 

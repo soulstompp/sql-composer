@@ -8,9 +8,10 @@
 //! - `:union(sources...)` — union combinator
 //! - `:intersect(sources...)` — the rows every source holds
 //! - `:except(first, rest...)` — the rows of the first source that no other source holds
+//! - `:dialect(names...)` — the dialects the template is written for, at its head
 //!
-//! SQL text is treated as opaque literals and passed through unchanged.
-//! Only the macro syntax is parsed.
+//! SQL text is passed through unchanged. The composer reads where its quotes and comments begin
+//! and end, as each dialect's database does, so a `#` or a directive inside one is SQL.
 //!
 //! # Example
 //!

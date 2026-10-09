@@ -424,6 +424,13 @@ template that two databases would read differently at a `#`, a directive, a `;` 
 both readings. `E'it\'s' # note` is a string and a comment on PostgreSQL. On SQLite, whose strings
 read no backslash escapes, the `#` stands inside a string still open.
 
+A template written for some dialects only says so at its head, `:dialect(postgres)` or
+`:dialect(postgres, duckdb)`, and is then read by their databases alone and composed for no other.
+One that says nothing is written for every dialect. In a template written for PostgreSQL, a dollar
+quote (a function's body, a `DO` block) holds SQL as a string does, `#variable_conflict` and all,
+except that a directive composes there. A `:bind` written there or composed into it is refused,
+since no value reaches it.
+
 ## Mock tables: a template on rows of your own
 
 A mock gives a table rows of your own. Every statement composed after it that names the table reads
@@ -523,6 +530,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
 | `:intersect(a, b, …)` | the sources joined by `INTERSECT`, each wrapped, the whole wrapped |
 | `:except(a, b, …)` | `a` less every later source, each wrapped, the whole wrapped |
 | `:count(a)`, `:count(DISTINCT col OF a)` | `SELECT COUNT(…) FROM (…) AS _count_sub` |
+| `:dialect(postgres, duckdb)` | nothing: the dialects the template is written for, at its head; it is composed for no other |
 | `# …` | nothing: a template comment, to the end of the line |
 
 A slot name is letters, digits, `-` and `_`.

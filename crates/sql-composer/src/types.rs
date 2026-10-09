@@ -13,6 +13,9 @@ pub struct Template {
     pub elements: Vec<Element>,
     /// Where this template originated from.
     pub source: TemplateSource,
+    /// The dialects the template declares it is written for, by `:dialect(…)` at its head, in
+    /// the order it names them. Empty when it declares none, which is every dialect.
+    pub dialects: Vec<Dialect>,
 }
 
 /// The origin of a template.
@@ -247,6 +250,19 @@ impl Dialect {
             Dialect::Mysql => &crate::scan::MYSQL,
             Dialect::Mariadb => &crate::scan::MARIADB,
             Dialect::Sqlite => &crate::scan::SQLITE,
+        }
+    }
+}
+
+/// `a`, `a and b`, `a, b and c`.
+pub(crate) fn listed<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> String {
+    let items: Vec<S> = items.into_iter().collect();
+    match &items[..] {
+        [] => String::new(),
+        [one] => one.as_ref().to_string(),
+        [rest @ .., last] => {
+            let rest: Vec<&str> = rest.iter().map(AsRef::as_ref).collect();
+            format!("{} and {}", rest.join(", "), last.as_ref())
         }
     }
 }

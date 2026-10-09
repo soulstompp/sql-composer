@@ -161,6 +161,11 @@ impl Scanner {
         }
     }
 
+    /// Whether this scanner reads as `regime` does.
+    pub(crate) fn reads(&self, regime: &Regime) -> bool {
+        self.regime == regime
+    }
+
     /// The offsets just past each `;` in `text` that ends a statement.
     pub(crate) fn ends(&mut self, text: &str) -> Vec<usize> {
         let mut ends = Vec::new();
@@ -180,6 +185,62 @@ impl Scanner {
             self.step(at, byte, &mut code);
         }
         self.settle(&mut code);
+    }
+
+    /// Read `plain`, bytes none of which opens anything (see [`plain`]), where the scanner stands
+    /// in SQL itself, and say so; read nothing, and say so, where it does not.
+    pub(crate) fn pass(&mut self, plain: &[u8]) -> bool {
+        if !matches!(self.scan, Scan::Code) || plain.is_empty() {
+            return false;
+        }
+        let name = plain.iter().rev().take_while(|b| is_name_byte(**b)).count();
+        self.word = if name == plain.len() {
+            self.word + name
+        } else {
+            name
+        };
+        self.prev = plain[plain.len() - 1];
+        true
+    }
+
+    /// Read `bytes`, which start at offset `at`, as [`Scanner::step`] does one at a time, without
+    /// a word of which are SQL: each run that leaves the scanner where it stands is passed over
+    /// whole.
+    pub(crate) fn skim(&mut self, at: usize, bytes: &[u8]) {
+        let mut i = 0;
+        while i < bytes.len() {
+            let rest = &bytes[i..];
+            let run = match self.scan {
+                Scan::Code => rest.iter().position(|&b| OPENS[usize::from(b)]),
+                Scan::Quoted(quote) => rest
+                    .iter()
+                    .position(|&b| b == quote.close || (quote.backslash && b == b'\\')),
+                Scan::LineComment | Scan::MetaCommand => rest.iter().position(|&b| b == b'\n'),
+                Scan::BlockComment { .. } => rest.iter().position(|&b| b == b'*' || b == b'/'),
+                _ => Some(0),
+            }
+            .unwrap_or(rest.len());
+            if run == 0 {
+                self.step(at + i, bytes[i], &mut |_, _| {});
+                i += 1;
+                continue;
+            }
+            let passed = &rest[..run];
+            match &mut self.scan {
+                Scan::Code => {
+                    let name = passed
+                        .iter()
+                        .rev()
+                        .take_while(|b| is_name_byte(**b))
+                        .count();
+                    self.word = if name == run { self.word + name } else { name };
+                    self.prev = passed[run - 1];
+                }
+                Scan::BlockComment { last, .. } => *last = passed[run - 1],
+                _ => {}
+            }
+            i += run;
+        }
     }
 
     /// Where the bytes read so far leave the next one.
@@ -226,6 +287,19 @@ impl Scanner {
 
     /// Read the byte at offset `at`, calling `code` for each byte that is now known to be SQL.
     pub(crate) fn step(&mut self, at: usize, byte: u8, code: &mut impl FnMut(usize, u8)) {
+        // Most bytes leave the scanner where it stands.
+        match self.scan {
+            Scan::Code if !OPENS[usize::from(byte)] => {
+                return self.code_byte(at, byte, code);
+            }
+            Scan::Quoted(quote) if byte != quote.close && byte != b'\\' => return,
+            Scan::LineComment | Scan::MetaCommand if byte != b'\n' => return,
+            Scan::BlockComment { ref mut last, .. } if !matches!(byte, b'*' | b'/') => {
+                *last = byte;
+                return;
+            }
+            _ => {}
+        }
         let regime = self.regime;
         self.scan = match std::mem::replace(&mut self.scan, Scan::Code) {
             Scan::Code => return self.open(at, byte, code),
@@ -355,6 +429,27 @@ impl Scanner {
         code(at, byte);
     }
 }
+
+/// How many bytes at the start of `bytes` open nothing in SQL itself, in any regime.
+pub(crate) fn plain(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .position(|&b| OPENS[usize::from(b)])
+        .unwrap_or(bytes.len())
+}
+
+/// The bytes that can open something in SQL itself, in some regime: a quote, a comment, a dollar
+/// quote or a psql meta-command.
+const OPENS: [bool; 256] = {
+    let mut opens = [false; 256];
+    let bytes = b"-/$#\\'\"`[";
+    let mut i = 0;
+    while i < bytes.len() {
+        opens[bytes[i] as usize] = true;
+        i += 1;
+    }
+    opens
+};
 
 /// A byte that can stand inside an unquoted name, in every regime here.
 fn is_name_byte(byte: u8) -> bool {
@@ -494,5 +589,27 @@ mod tests {
             code.push(byte)
         });
         assert_eq!(String::from_utf8(code).unwrap(), "SELECT , -1 /c$x");
+    }
+
+    #[test]
+    fn test_skimming_lands_where_stepping_does() {
+        let text = "SELECT E'it\\'s', xE'a''b', \"a\\\"b\", `c#d`, [e;f], $1, a$b$, $$g;$$, \
+                    $t$h$$i$t$ -- j\n--k\n/* l /* m */ n */ # o\n\\echo p\nSELECT 2 -/ 3;";
+        for regime in [&POSTGRES, &MYSQL, &MARIADB, &SQLITE] {
+            for cut in 0..=text.len() {
+                let mut stepped = Scanner::new(regime);
+                for (at, &byte) in text.as_bytes()[..cut].iter().enumerate() {
+                    stepped.step(at, byte, &mut |_, _| {});
+                }
+                let mut skimmed = Scanner::new(regime);
+                skimmed.skim(0, &text.as_bytes()[..cut]);
+                assert_eq!(
+                    (&skimmed.scan, skimmed.prev, skimmed.word),
+                    (&stepped.scan, stepped.prev, stepped.word),
+                    "{regime:?} at {cut}: {:?}",
+                    &text[..cut]
+                );
+            }
+        }
     }
 }

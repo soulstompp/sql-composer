@@ -439,6 +439,14 @@ fim, dizendo as duas leituras. `E'it\'s' # note` é, no PostgreSQL, um literal d
 um comentário, ao passo que no SQLite, cujos literais não leem sequências de escape, o `#` fica
 dentro de um literal que ainda não fechou.
 
+Um modelo escrito só para alguns dialetos di-lo à cabeça, `:dialect(postgres)` ou
+`:dialect(postgres, duckdb)`, e passa então a ser lido apenas pelas bases de dados desses dialetos,
+não sendo composto para nenhum outro; o que nada diz fica escrito para todos. Num modelo escrito
+para o PostgreSQL, umas aspas de dólar (o corpo de uma função, um bloco `DO`) guardam SQL como um
+literal de texto o guarda, `#variable_conflict` incluído, com uma diferença: lá dentro, uma
+diretiva compõe-se, e um `:bind`, quer esteja escrito ali, quer venha de um modelo composto ali, é
+recusado, porque nenhum valor lá chega.
+
 ## Tabelas simuladas: um modelo sobre linhas à escolha
 
 Uma tabela simulada dá a uma tabela linhas à escolha de quem testa, e todas as instruções compostas
@@ -546,6 +554,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
 | `:intersect(a, b, …)` | as fontes unidas por `INTERSECT`, cada uma embrulhada, e o todo também |
 | `:except(a, b, …)` | `a` menos cada uma das fontes seguintes, cada uma embrulhada, e o todo também |
 | `:count(a)`, `:count(DISTINCT col OF a)` | `SELECT COUNT(…) FROM (…) AS _count_sub` |
+| `:dialect(postgres, duckdb)` | nada: os dialetos para que o modelo está escrito, à cabeça; não é composto para nenhum outro |
 | `# …` | nada: um comentário do modelo, até ao fim da linha |
 
 Um nome de vaga leva letras, algarismos, `-` e `_`.

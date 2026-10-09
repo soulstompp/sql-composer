@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::types::Dialect;
+
 /// The error type for sql-composer operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -122,6 +124,24 @@ pub enum Error {
     DefinitionWhileNaming {
         /// The template the `:define` puts in place.
         path: PathBuf,
+    },
+
+    /// A template composed for a dialect its `:dialect(…)` does not name.
+    #[error("{template} is written for {written}, and is composed for {composed}", written = crate::types::listed(.declared.iter().map(Dialect::name)), composed = .dialect.name())]
+    NotWrittenFor {
+        /// The template: its path, or the name a literal template was given.
+        template: String,
+        /// The dialects it declares.
+        declared: Vec<Dialect>,
+        /// The dialect it was composed for.
+        dialect: Dialect,
+    },
+
+    /// A `:bind` composed into a dollar quote, where no value reaches it.
+    #[error("binding '{name}' would stand inside a dollar quote, where no value reaches it")]
+    BindInDollarQuote {
+        /// The name of the binding.
+        name: String,
     },
 }
 

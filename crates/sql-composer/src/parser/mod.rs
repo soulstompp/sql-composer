@@ -12,10 +12,24 @@ use crate::types::{Template, TemplateSource};
 
 /// Parse a template string into a [`Template`].
 ///
-/// This is the main entry point for parsing template content from a string.
+/// This is the main entry point for parsing template content from a string. A template refused
+/// is placed by line and column, after its file's path when it has one.
 pub fn parse_template(input: &str, source: TemplateSource) -> error::Result<Template> {
-    let elements = template::template(input)?;
-    Ok(Template { elements, source })
+    let (dialects, elements) =
+        template::template(input).map_err(|error| match (error, &source) {
+            (error::Error::Parse { location, message }, TemplateSource::File(path)) => {
+                error::Error::Parse {
+                    location: format!("{}, {location}", path.display()),
+                    message,
+                }
+            }
+            (error, _) => error,
+        })?;
+    Ok(Template {
+        elements,
+        source,
+        dialects,
+    })
 }
 
 /// Parse a template from a file path.
@@ -148,27 +162,31 @@ mod tests {
         assert_eq!(
             message,
             "postgres, mysql, mariadb and duckdb read this # as a template comment, and sqlite \
-             inside a string; write it so every database reads it alike"
+             inside a string; write it so they read it alike, or declare the dialects the template is written for with \
+             :dialect(…)"
         );
         let (location, message) = refusal("SELECT 1 --x;\nSELECT 2");
         assert_eq!(location, "line 1, column 13");
         assert_eq!(
             message,
             "postgres, sqlite and duckdb read this ; inside a comment, and mysql and mariadb as \
-             the end of a statement; write it so every database reads it alike"
+             the end of a statement; write it so they read it alike, or declare the dialects the template is written for with \
+             :dialect(…)"
         );
         let (_, message) = refusal("DO $$ BEGIN PERFORM :bind(a); END $$");
         assert_eq!(
             message,
             "postgres, mysql and duckdb read this :bind inside a dollar quote, and mariadb and \
-             sqlite as a directive; write it so every database reads it alike"
+             sqlite as a directive; write it so they read it alike, or declare the dialects the template is written for with \
+             :dialect(…)"
         );
         let (location, message) = refusal("SELECT 1 --x");
         assert_eq!(location, "line 1, column 13");
         assert_eq!(
             message,
             "postgres, sqlite and duckdb read the template's end inside a comment, and mysql and \
-             mariadb in SQL; write it so every database reads it alike"
+             mariadb in SQL; write it so they read it alike, or declare the dialects the template is written for with \
+             :dialect(…)"
         );
     }
 
@@ -176,6 +194,96 @@ mod tests {
     fn test_a_directive_that_does_not_parse_is_refused() {
         let (location, message) = refusal("SELECT 1\nWHERE a = :bind(a b) AND b = 2;\nSELECT 3;");
         assert_eq!(location, "line 2, column 11");
-        assert!(message.starts_with(":bind does not parse"), "{message}");
+        assert_eq!(message, ":bind does not parse");
+        match parse_template(
+            "SELECT :bind(a b)",
+            TemplateSource::File("sqlc/t.sqlc".into()),
+        ) {
+            Err(error::Error::Parse { location, .. }) => {
+                assert_eq!(location, "sqlc/t.sqlc, line 1, column 8")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_a_declared_template_is_read_by_its_own_dialects() {
+        let script = "DO $$ BEGIN PERFORM 1; END $$;\n";
+        refusal(script);
+        assert_eq!(
+            elements(&format!(":dialect(postgres)\n{script}")),
+            sql(script)
+        );
+        assert_eq!(
+            elements(&format!(
+                "# PostgreSQL's own\n:dialect(postgres, duckdb) \n{script}"
+            )),
+            sql(script)
+        );
+        assert_eq!(
+            elements(":dialect(mysql)\nSELECT `a#b` FROM t\n"),
+            sql("SELECT `a#b` FROM t\n")
+        );
+        assert_eq!(
+            elements(":dialect(postgres)\nSELECT E'it\\'s'; SELECT 2; # note\n"),
+            sql("SELECT E'it\\'s'; SELECT 2; ")
+        );
+    }
+
+    #[test]
+    fn test_inside_a_dollar_quote_a_compose_composes_and_a_bind_is_refused() {
+        let function =
+            ":dialect(postgres)\nCREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $$\n\
+                        #variable_conflict use_column\n\
+                        BEGIN RETURN (SELECT n FROM (:compose(n.sqlc)) c); END $$;\n";
+        match &elements(function)[..] {
+            [Element::Sql(head), Element::Compose(_), Element::Sql(_)] => {
+                assert!(
+                    head.ends_with("#variable_conflict use_column\nBEGIN RETURN (SELECT n FROM (")
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+        let (location, message) =
+            refusal(":dialect(postgres)\nDO $$ BEGIN PERFORM :bind(a); END $$;\n");
+        assert_eq!(location, "line 2, column 21");
+        assert_eq!(
+            message,
+            ":bind inside a dollar quote: no value reaches it there"
+        );
+    }
+
+    #[test]
+    fn test_a_declaration_names_dialects_once_at_the_head() {
+        let elsewhere =
+            ":dialect declares the template's dialects once, at its head, before any SQL";
+        for (input, location, message) in [
+            (
+                ":dialect(oracle)\nSELECT 1",
+                "line 1, column 1",
+                "oracle is not a dialect: postgres, mysql, mariadb, sqlite or duckdb",
+            ),
+            (
+                ":dialect()\nSELECT 1",
+                "line 1, column 1",
+                ":dialect names no dialect",
+            ),
+            (
+                "SELECT 1;\n:dialect(postgres)\n",
+                "line 2, column 1",
+                elsewhere,
+            ),
+            (
+                ":dialect(postgres)\n:dialect(mysql)\n",
+                "line 2, column 1",
+                elsewhere,
+            ),
+        ] {
+            assert_eq!(
+                refusal(input),
+                (location.into(), message.into()),
+                "{input:?}"
+            );
+        }
     }
 }

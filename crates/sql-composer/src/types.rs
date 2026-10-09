@@ -186,6 +186,26 @@ impl Placeholders {
 }
 
 impl Dialect {
+    /// Every dialect, in the order `--dialect` lists them.
+    pub(crate) const ALL: [Dialect; 5] = [
+        Dialect::Postgres,
+        Dialect::Mysql,
+        Dialect::Mariadb,
+        Dialect::Sqlite,
+        Dialect::Duckdb,
+    ];
+
+    /// The name `--dialect` takes for this dialect.
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Dialect::Postgres => "postgres",
+            Dialect::Mysql => "mysql",
+            Dialect::Mariadb => "mariadb",
+            Dialect::Sqlite => "sqlite",
+            Dialect::Duckdb => "duckdb",
+        }
+    }
+
     /// How this dialect writes its placeholders.
     pub fn placeholders(&self) -> Placeholders {
         match self {

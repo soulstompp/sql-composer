@@ -426,11 +426,18 @@ instruções que compõem o modelo, enquanto um `#` fica no modelo.
 Os comentários saem na composição e nunca chegam à base de dados, e levam consigo a mudança de
 linha, de maneira que a linha seguinte se cola àquela em que estava o comentário.
 
-O compositor procura o `#` sem ler o SQL à volta, e por isso um `#` dentro de um literal de texto,
-de um identificador entre aspas, de um comentário `--` ou de um operador (`#>>`, `#-`) também abre
-comentário, e a instrução composta sai alterada e, as mais das vezes, continua a correr. Um operador
-destes escreve-se pela sua função (`jsonb_extract_path_text` em vez de `#>>`), e o `#` fica longe
-dos literais de texto e das linhas `--`.
+Dentro de um literal de texto, de um identificador entre aspas, de um comentário `--` ou `/* */` ou
+de um metacomando do psql, um `#` é SQL, e uma diretiva também: `'#1'` fica `'#1'`, e
+`-- :bind(id)` chega à base de dados como o comentário que é. Os operadores de jsonb `#>`, `#>>` e
+`#-` são SQL onde quer que estejam, e `#--` abre comentário; já os operadores `#` e `##` do
+PostgreSQL continuam a abri-lo, pelo que se escreve a função que está por trás deles, tal como o
+`pg_operator.oprcode` a nomeia: `int4xor(a, b)` em vez de `a # b` entre inteiros.
+
+O compositor lê essas aspas e esses comentários como a base de dados de cada dialeto os lê, e recusa
+um modelo que duas bases de dados leriam de maneira diferente num `#`, numa diretiva, num `;` ou no
+fim, dizendo as duas leituras. `E'it\'s' # note` é, no PostgreSQL, um literal de texto seguido de
+um comentário, ao passo que no SQLite, cujos literais não leem sequências de escape, o `#` fica
+dentro de um literal que ainda não fechou.
 
 ## Tabelas simuladas: um modelo sobre linhas à escolha
 

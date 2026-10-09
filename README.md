@@ -413,10 +413,16 @@ that composes the template. A `#` comment stays in the template.
 They are stripped at composition and never reach the database. The newline goes with them, so the
 next line joins the one the comment was on.
 
-The composer looks for `#` without reading the SQL around it. So a `#` inside a string literal, a
-quoted identifier, a `--` comment or an operator (`#>>`, `#-`) starts a comment too. The composed
-statement comes out changed, and usually still runs. Spell an operator by its function
-(`jsonb_extract_path_text` for `#>>`), and keep `#` out of strings and `--` lines.
+Inside a string, a quoted identifier, a `--` or `/* */` comment or a psql meta-command, a `#` is
+SQL, and so is a directive: `'#1'` stays `'#1'`, and `-- :bind(id)` reaches the database as the
+comment it is. The jsonb operators `#>`, `#>>` and `#-` are SQL wherever they stand, and `#--`
+begins a comment. PostgreSQL's operators `#` and `##` still begin one, so write the function behind
+them, as `pg_operator.oprcode` names it: `int4xor(a, b)` for `a # b` between integers.
+
+The composer reads those quotes and comments as each dialect's database reads them, and refuses a
+template that two databases would read differently at a `#`, a directive, a `;` or its end, naming
+both readings. `E'it\'s' # note` is a string and a comment on PostgreSQL. On SQLite, whose strings
+read no backslash escapes, the `#` stands inside a string still open.
 
 ## Mock tables: a template on rows of your own
 

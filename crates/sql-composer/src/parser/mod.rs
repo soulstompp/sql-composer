@@ -1,32 +1,20 @@
-//! winnow 0.7 parsers for sql-composer template macros.
-//!
-//! The parser treats SQL text as opaque literals and only recognizes the
-//! template macro syntax: `:bind(...)`, `:compose(...)`, `:define(...)`, `:count(...)`,
-//! `:union(...)`, `:intersect(...)` and `:except(...)`.
+//! Reading templates: the SQL passed through as written, and the directives `:bind(...)`,
+//! `:compose(...)`, `:define(...)`, `:count(...)`, `:union(...)`, `:intersect(...)` and
+//! `:except(...)` parsed, each by its winnow 1 parser, where they stand in SQL itself.
 
 pub mod bind;
 pub mod command;
 pub mod compose;
-pub mod template;
-
-use winnow::error::ContextError;
-use winnow::Parser;
+mod template;
 
 use crate::error;
-use crate::types::{Element, Template, TemplateSource};
+use crate::types::{Template, TemplateSource};
 
 /// Parse a template string into a [`Template`].
 ///
 /// This is the main entry point for parsing template content from a string.
 pub fn parse_template(input: &str, source: TemplateSource) -> error::Result<Template> {
-    let mut remaining = input;
-    let elements: Vec<Element> = template::template::<_, ContextError>
-        .parse_next(&mut remaining)
-        .map_err(|e| error::Error::Parse {
-            location: format!("offset {}", input.len() - remaining.len()),
-            message: e.to_string(),
-        })?;
-
+    let elements = template::template(input)?;
     Ok(Template { elements, source })
 }
 
@@ -80,5 +68,114 @@ mod tests {
             .filter(|e| matches!(e, Element::Bind(_)))
             .count();
         assert_eq!(bind_count, 2);
+    }
+
+    fn elements(input: &str) -> Vec<Element> {
+        parse_template(input, TemplateSource::Literal("test".into()))
+            .unwrap()
+            .elements
+    }
+
+    fn refusal(input: &str) -> (String, String) {
+        match parse_template(input, TemplateSource::Literal("test".into())) {
+            Err(error::Error::Parse { location, message }) => (location, message),
+            other => panic!("{input:?} was not refused: {other:?}"),
+        }
+    }
+
+    fn sql(text: &str) -> Vec<Element> {
+        vec![Element::Sql(text.into())]
+    }
+
+    #[test]
+    fn test_a_hash_inside_quotes_and_comments_is_sql() {
+        for input in [
+            "SELECT '#1' AS a\n",
+            "SELECT \"a#b\" FROM t\n",
+            "SELECT 1 -- note # here\nFROM t\n",
+            "SELECT 1 /* # */ FROM t\n",
+            "\\echo #\nSELECT 1\n",
+        ] {
+            assert_eq!(elements(input), sql(input), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn test_a_hash_in_sql_itself_begins_a_comment() {
+        assert_eq!(elements("SELECT 1 # note\nFROM t"), sql("SELECT 1 FROM t"));
+        assert_eq!(elements("SELECT 1 #---- x\nFROM t"), sql("SELECT 1 FROM t"));
+    }
+
+    #[test]
+    fn test_the_jsonb_operators_are_sql() {
+        let input = "SELECT d #> '{a}', d #>> '{a}', d #- '{a}' FROM t\n";
+        assert_eq!(elements(input), sql(input));
+        assert_eq!(elements("#>> 'x'\n"), sql("#>> 'x'\n"));
+    }
+
+    #[test]
+    fn test_an_apostrophe_in_a_comment_opens_nothing() {
+        assert_eq!(
+            elements("# it's a note\nSELECT 1 # don't\n FROM t # stripped\n"),
+            sql("SELECT 1  FROM t ")
+        );
+        assert_eq!(
+            elements("SELECT 1 -- it's\nFROM t # stripped\n"),
+            sql("SELECT 1 -- it's\nFROM t ")
+        );
+    }
+
+    #[test]
+    fn test_a_directive_inside_quotes_and_comments_is_sql() {
+        for input in [
+            "SELECT ':bind(a)' AS a",
+            "SELECT 1 -- :bind(a)\nFROM t",
+            "SELECT 1 /* :compose(x.sqlc) */ FROM t",
+            "\\set x :bind(a)\nSELECT 1",
+        ] {
+            assert_eq!(elements(input), sql(input), "{input:?}");
+        }
+        assert!(matches!(
+            elements("SELECT ':' || :bind(a)")[..],
+            [Element::Sql(_), Element::Bind(_)]
+        ));
+    }
+
+    #[test]
+    fn test_a_template_two_databases_read_differently_is_refused() {
+        let (location, message) = refusal("SELECT 1;\nSELECT E'it\\'s' # note\n");
+        assert_eq!(location, "line 2, column 17");
+        assert_eq!(
+            message,
+            "postgres, mysql, mariadb and duckdb read this # as a template comment, and sqlite \
+             inside a string; write it so every database reads it alike"
+        );
+        let (location, message) = refusal("SELECT 1 --x;\nSELECT 2");
+        assert_eq!(location, "line 1, column 13");
+        assert_eq!(
+            message,
+            "postgres, sqlite and duckdb read this ; inside a comment, and mysql and mariadb as \
+             the end of a statement; write it so every database reads it alike"
+        );
+        let (_, message) = refusal("DO $$ BEGIN PERFORM :bind(a); END $$");
+        assert_eq!(
+            message,
+            "postgres, mysql and duckdb read this :bind inside a dollar quote, and mariadb and \
+             sqlite as a directive; write it so every database reads it alike"
+        );
+        let (location, message) = refusal("SELECT 1 --x");
+        assert_eq!(location, "line 1, column 13");
+        assert_eq!(
+            message,
+            "postgres, sqlite and duckdb read the template's end inside a comment, and mysql and \
+             mariadb in SQL; write it so every database reads it alike"
+        );
+    }
+
+    #[test]
+    fn test_a_directive_that_does_not_parse_is_refused() {
+        let (location, message) = refusal("SELECT 1\nWHERE a = :bind(a b) AND b = 2;\nSELECT 3;");
+        assert_eq!(location, "line 2, column 11");
+        assert!(message.starts_with(":bind does not parse"), "{message}");
     }
 }

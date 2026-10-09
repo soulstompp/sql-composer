@@ -196,6 +196,21 @@ impl Scanner {
         }
     }
 
+    /// Where the bytes read so far leave the next one, in words.
+    pub(crate) fn reading(&self) -> &'static str {
+        match self.scan {
+            Scan::Quoted(quote) | Scan::Escaped(quote) => match quote.open {
+                b'\'' => "inside a string",
+                b'"' if quote.backslash => "inside a string",
+                _ => "inside a quoted name",
+            },
+            Scan::LineComment | Scan::BlockComment { .. } => "inside a comment",
+            Scan::Dollar { .. } => "inside a dollar quote",
+            Scan::MetaCommand => "on a psql meta-command's line",
+            _ => "in SQL",
+        }
+    }
+
     /// A break, at the end of a text or at a directive: the bytes that waited on the next one are
     /// SQL itself.
     pub(crate) fn settle(&mut self, code: &mut impl FnMut(usize, u8)) {
@@ -448,6 +463,28 @@ mod tests {
         assert_eq!(stands(&MYSQL, "DO $$ "), Stand::Dollar);
         assert_eq!(stands(&MARIADB, "DO $$ "), Stand::Code);
         assert_eq!(stands(&SQLITE, "DO $$ "), Stand::Code);
+    }
+
+    #[test]
+    fn test_where_the_next_byte_stands_in_words() {
+        let reading = |regime: &'static Regime, text: &str| {
+            let mut scanner = Scanner::new(regime);
+            for (at, &byte) in text.as_bytes().iter().enumerate() {
+                scanner.step(at, byte, &mut |_, _| {});
+            }
+            scanner.reading()
+        };
+        assert_eq!(reading(&POSTGRES, "SELECT -"), "in SQL");
+        assert_eq!(reading(&POSTGRES, "SELECT '"), "inside a string");
+        assert_eq!(reading(&POSTGRES, "SELECT \""), "inside a quoted name");
+        assert_eq!(reading(&MYSQL, "SELECT \""), "inside a string");
+        assert_eq!(reading(&SQLITE, "SELECT ["), "inside a quoted name");
+        assert_eq!(reading(&POSTGRES, "DO $$ "), "inside a dollar quote");
+        assert_eq!(reading(&MYSQL, "SELECT 1 # "), "inside a comment");
+        assert_eq!(
+            reading(&POSTGRES, "\\set x "),
+            "on a psql meta-command's line"
+        );
     }
 
     #[test]

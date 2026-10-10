@@ -20,6 +20,7 @@ sqlparser = { workspace = true, optional = true, features = ["visitor"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+postgres = "0.19"
 
 [features]
 default = ["std"]

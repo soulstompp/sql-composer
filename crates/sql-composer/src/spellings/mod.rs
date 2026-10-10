@@ -10,15 +10,82 @@
 //! from the template's own text. A template, or a statement of it, that the parser cannot read is
 //! left as written, and so is every template when no spelling is picked.
 
-// The census reads join lists ahead of the identities that will move them.
-#[allow(dead_code)]
+// The identities are read by their tests until the picks write templates in them.
+#![allow(dead_code)]
+
 mod columns;
-#[allow(dead_code)]
+mod conditions;
+mod extent;
 mod join_order;
-#[allow(dead_code)]
+#[cfg(test)]
+mod laws;
+mod place;
 mod read;
 
+use place::{made, Place};
 use read::Read;
+
+/// How many places a template is written in one axis's pick at, at most, before it is left as
+/// far as it got.
+const MOVES: usize = 10_000;
+
+/// An axis a template's spellings vary along: each holds the spellings that return the same
+/// rows at each place it applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Axis {
+    /// Where a condition sits: in an inner join's `ON`, or in the `WHERE`.
+    Conditions,
+}
+
+impl Axis {
+    /// Each axis, in the order a template is written in their picks.
+    pub const ALL: &'static [Axis] = &[Axis::Conditions];
+
+    /// The axis's key in `spellings.toml`.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Axis::Conditions => "conditions",
+        }
+    }
+
+    /// The axis in words.
+    pub fn words(&self) -> &'static str {
+        match self {
+            Axis::Conditions => "where a condition sits",
+        }
+    }
+
+    /// The places in `read` this axis applies at, each spelling unchecked.
+    fn places(&self, read: &Read) -> Vec<Place> {
+        match self {
+            Axis::Conditions => conditions::places(read),
+        }
+    }
+}
+
+/// `text` written in `pick` on `axis` wherever the axis applies and a spelling of the pick reads
+/// back as it must; everywhere else as written.
+fn written_in(text: &str, axis: Axis, pick: &str) -> String {
+    let mut text = text.to_string();
+    for _ in 0..MOVES {
+        let Ok(read) = Read::new(&text) else {
+            break;
+        };
+        let next = axis.places(&read).into_iter().find_map(|place| {
+            if place.choices[0].picks.contains(&pick) {
+                return None;
+            }
+            let choice = place.choices.iter().find(|c| c.picks.contains(&pick))?;
+            made(&read, place.statement, choice)
+        });
+        match next {
+            Some(spelled) => text = spelled,
+            None => break,
+        }
+    }
+    text
+}
 
 /// What reading a template for its spellings finds, before any spelling of it is laid out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

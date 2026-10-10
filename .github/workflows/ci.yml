@@ -102,6 +102,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p sql-composer-ffi
 
+  test-py:
+    name: Test sql-composer-py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      # The tests embed Python, so they link libpython and load it from where setup-python put it.
+      - run: cargo test -p sql-composer-py
+        env:
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
+
   test-sqlc-brickgen:
     name: Test sqlc-brickgen
     runs-on: ubuntu-latest

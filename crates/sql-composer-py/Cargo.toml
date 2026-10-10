@@ -1,0 +1,31 @@
+[package]
+name = "sql-composer-py"
+version.workspace = true
+description = "Python bindings for sql-composer: compose SQL templates, and get the SQL and its bind names back"
+keywords = ["sql", "template", "composer", "python", "pyo3"]
+categories = ["database", "api-bindings"]
+repository.workspace = true
+license.workspace = true
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+# The Python module is `sql_composer`, which is also the name of the core's library, so this one
+# is named apart. The module takes its name from `#[pymodule(name = "sql_composer")]`, which
+# exports `PyInit_sql_composer`, and maturin's `module-name` names the file for it.
+name = "sql_composer_py"
+# `cdylib` for the extension module, `rlib` so the crate's own tests link against it.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# `serde` for the manifest, which `compose_all` gives as the text cargo sqlc writes, and
+# `respell` for its `respell`.
+sql-composer = { workspace = true, features = ["serde", "respell"] }
+# No `extension-module` feature: it drops the link to libpython for every target, and the tests
+# embed an interpreter. maturin sets `PYO3_BUILD_EXTENSION_MODULE` for the wheel instead.
+pyo3 = "0.29"
+
+[dev-dependencies]
+tempfile.workspace = true
+walkdir.workspace = true

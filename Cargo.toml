@@ -15,6 +15,7 @@ sql-composer = { version = "0.1.0", path = "crates/sql-composer" }
 clap = { version = "4", features = ["derive", "env"] }
 duckdb = "1.4"
 rusqlite = "0.40"
+sqlparser = "0.63"
 sqlx = { version = "0.9", default-features = false }
 tempfile = "3.26.0"
 thiserror = "2"

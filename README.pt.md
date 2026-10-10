@@ -553,6 +553,8 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   combina com `--views`.
 - **`--views`** carrega um registo de vistas, e cada modelo que o registo nomeia passa a ler-se como
   a sua vista.
+- **`--respell`** reescreve, para o PostgreSQL, cada instrução composta cujo próprio texto prova que
+  devolve as mesmas linhas (mais abaixo), e recusa-se para qualquer outro dialeto.
 
 Cada modelo que esteja no `--source` tem uma linha sua: `Composed`; `Shape`, com as vagas que deixa
 abertas; ou `Skipped`, na saída de erro, com a vaga por preencher e o modelo onde ela está. A última
@@ -607,6 +609,19 @@ depois a base de dados lê uma cópia uma vez ou duas, quem o diz é o plano del
 `--invert` (`-i`) mostra, para um só modelo, cada ficheiro composto que o guarda, com as suas
 cópias, ou seja, cada instrução a que chega uma alteração nesse modelo. O `cargo sqlc tree` aceita o
 `--source`, o `--dialect`, o `--with`, o `--views` e o `--search-path`, como o `compose`.
+
+### `--respell`
+
+Uma união cujos braços leem todos um mesmo rol, cada braço cortado às linhas que são suas e juntado
+`ON true` ao que lê, lê o rol uma vez por braço. O `--respell` escreve-a como uma só junção: o rol
+lido uma única vez, cada linha dele emparelhada com os braços cujo corte passa, e as linhas próprias
+de todos os braços lidas numa só união, cada uma marcada com o número do seu braço.
+Só esta reescrita é do sql-composer, porque só ela se prova a partir do texto composto, sem catálogo,
+chave nem colação; as que assentam no catálogo faz o warren-pg-speller, dentro do planeador do
+PostgreSQL. Tudo o resto do ficheiro fica tal como foi composto. As instruções leem-se com o
+sqlparser, e a que ele não consiga ler fica como foi composta, com uma linha na saída de erro:
+`Unparsed <file>: statement(s) 4 of 52, written as composed`. Cada ficheiro reescrito tem também a
+sua linha, `Respelled <file>: 1 union(s), of 32 arms`, e o manifesto regista a opção.
 
 ### Diretivas
 
@@ -672,6 +687,7 @@ O `Composer::tree` dá o que a composição de um modelo escreve, tal como o `ca
 | `source::Flags` | o dialeto, o `--with`, o `--views` e o `--search-path` com que uma pasta se compõe |
 | `source::Standing` | o que a composição fez de um modelo: escrito, forma ou saltado |
 | `source::Manifest` | o que o `manifest.json` guarda, com a funcionalidade `serde` |
+| `respell::Respelled` | um ficheiro reescrito: o texto, as instruções, as que ficaram por ler e as uniões reescritas, com a funcionalidade `respell` |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` ou `Duckdb` |
 | `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
 | `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |

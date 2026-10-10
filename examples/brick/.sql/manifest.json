@@ -3,6 +3,7 @@
   "with": false,
   "views": null,
   "search_path": [],
+  "respell": false,
   "files": {
     "areas/near_city.sql": {
       "bind_params": [

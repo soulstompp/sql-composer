@@ -533,6 +533,8 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
 - **`--with`** names each relation a statement reads once, at the head of the statement. It cannot
   be combined with `--views`.
 - **`--views`** loads a view registry, and every template the registry names is read as its view.
+- **`--respell`** respells each composed statement for PostgreSQL where its own text proves the same
+  rows (below). It is refused for every other dialect.
 
 Every template under `--source` gets a line: `Composed`; `Shape`, with the slots it leaves open; or
 `Skipped`, on standard error, with the slot left open and the template it stands in. The last line
@@ -587,6 +589,19 @@ name. Whether the database then reads a copy once or twice is its plan's to say,
 `--invert` (`-i`) prints, for one template, each composed file that holds it with its copies: every
 statement a change to it reaches. `cargo sqlc tree` takes `--source`, `--dialect`, `--with`,
 `--views` and `--search-path` as `compose` does.
+
+### `--respell`
+
+A union whose arms each read one roster, cut to their own rows of it and left joined `ON true` to
+what each reads, reads the roster once for every arm. `--respell` writes it as one join: the roster
+read once, each of its rows paired with the arms whose cut it passes, and every arm's own rows read
+in one union, each tagged with its arm's number. That spelling alone is sql-composer's, because it
+is proved from the composed text with no catalog, key or collation. The ones that rest on the
+catalog are warren-pg-speller's, in PostgreSQL's planner. Every other byte of the file is written as
+composed. The statements are read with sqlparser, and one it cannot read is written as composed,
+with a line on standard error: `Unparsed <file>: statement(s) 4 of 52, written as
+composed`. Each file respelled gets a line of its own, `Respelled <file>: 1 union(s),
+of 32 arms`, and the manifest records the flag.
 
 ### Directives
 
@@ -651,6 +666,7 @@ the flags a `source::Flags` holds, and says what it made of each: `Standing::Wri
 | `source::Flags` | the dialect, `--with`, `--views` and `--search-path` a directory is composed with |
 | `source::Standing` | what composing made of one template: written, a shape, or skipped |
 | `source::Manifest` | what `manifest.json` holds, under the feature `serde` |
+| `respell::Respelled` | a file as respelled: its text, its statements, those not read and the unions respelled, under the feature `respell` |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` or `Duckdb` |
 | `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
 | `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |

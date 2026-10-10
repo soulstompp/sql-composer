@@ -144,6 +144,14 @@ pub enum Error {
     #[error("manifest: {0}")]
     Manifest(#[from] serde_json::Error),
 
+    /// A respelling asked for a dialect it does not write.
+    #[cfg(feature = "respell")]
+    #[error("--respell writes PostgreSQL alone, and this is composed for {}", .dialect.name())]
+    RespellFor {
+        /// The dialect composed for.
+        dialect: Dialect,
+    },
+
     /// A name that is no dialect's.
     #[error("{name} is not a dialect: postgres, mysql, mariadb, sqlite or duckdb")]
     UnknownDialect {

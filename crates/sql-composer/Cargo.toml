@@ -16,6 +16,7 @@ thiserror.workspace = true
 walkdir.workspace = true
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+sqlparser = { workspace = true, optional = true, features = ["visitor"] }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -24,3 +25,4 @@ tempfile.workspace = true
 default = ["std"]
 std = ["winnow/std"]
 serde = ["dep:serde", "dep:serde_json"]
+respell = ["dep:sqlparser"]

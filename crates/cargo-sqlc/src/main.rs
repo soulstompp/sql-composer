@@ -116,6 +116,13 @@ struct ComposeArgs {
     /// target's manifest.json, and a flag given that it records otherwise is refused.
     #[arg(long)]
     verify: bool,
+
+    /// Respell each composed statement for PostgreSQL where its own text proves the same rows: a
+    /// union of arms that each read one roster, cut to their own rows of it and left joined ON
+    /// true to what they read, is read as one join, the roster read once. Every other byte is
+    /// written as composed, and so is a statement that does not parse. PostgreSQL only.
+    #[arg(long)]
+    respell: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -162,9 +169,16 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let flags = if args.verify {
         recorded_flags(args)?
     } else {
-        given_flags(&args.composition)
+        given_flags(&args.composition, args.respell)
     };
-    let standings = source::compose_all(source_dir, &flags)?;
+    let mut composed = flags.clone();
+    composed.respell = false;
+    let mut standings = source::compose_all(source_dir, &composed)?;
+    let respelled = if flags.respell {
+        source::respell_all(&mut standings, flags.dialect)?
+    } else {
+        BTreeMap::new()
+    };
 
     if standings.is_empty() {
         println!("No .sqlc files found in {}", source_dir.display());
@@ -177,6 +191,11 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
         for (rel_path, standing) in &standings {
             if let Standing::Skipped { .. } = standing {
                 eprintln!("{}", line(source_dir, rel_path, standing));
+            }
+            for (error, line) in respelled_lines(source_dir, rel_path, respelled.get(rel_path)) {
+                if error {
+                    eprintln!("{line}");
+                }
             }
         }
         let mut expected = files(&standings);
@@ -201,6 +220,13 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
             Standing::Skipped { .. } => eprintln!("{}", line(source_dir, rel_path, standing)),
             _ => println!("{}", line(source_dir, rel_path, standing)),
         }
+        for (error, line) in respelled_lines(source_dir, rel_path, respelled.get(rel_path)) {
+            if error {
+                eprintln!("{line}");
+            } else {
+                println!("{line}");
+            }
+        }
     }
     std::fs::write(tmp_dir.path().join(MANIFEST), manifest)?;
 
@@ -213,7 +239,12 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_path = tmp_dir.keep();
     std::fs::rename(&tmp_path, target_dir)?;
 
-    println!("{}", summary(&standings, target_dir));
+    let mut last = summary(&standings, target_dir);
+    if flags.respell {
+        let unions: usize = respelled.values().map(|r| r.unions.len()).sum();
+        last.push_str(&format!(", {unions} union(s) respelled"));
+    }
+    println!("{last}");
 
     if !args.skip_prepare {
         run_sqlx_prepare()?;
@@ -228,7 +259,7 @@ fn run_tree(args: &TreeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
     }
 
-    let flags = given_flags(&args.composition);
+    let flags = given_flags(&args.composition, false);
     let standings = source::compose_all(source_dir, &flags)?;
     for template in &args.templates {
         match standings.get(template) {
@@ -349,7 +380,7 @@ fn invert_lines(template: &Path, trees: &[Held]) -> Vec<String> {
 }
 
 /// The flags as given, each left out at its default.
-fn given_flags(args: &Composition) -> Flags {
+fn given_flags(args: &Composition, respell: bool) -> Flags {
     let mut flags = Flags::new(
         args.dialect
             .clone()
@@ -358,6 +389,7 @@ fn given_flags(args: &Composition) -> Flags {
     flags.with = args.with;
     flags.views = args.views.clone();
     flags.search_paths = args.search_path.clone();
+    flags.respell = respell;
     flags
 }
 
@@ -369,7 +401,7 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
     let manifest: Manifest = match std::fs::read_to_string(&path) {
         Ok(text) => Manifest::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(given_flags(&args.composition))
+            return Ok(given_flags(&args.composition, args.respell))
         }
         Err(e) => return Err(e.into()),
     };
@@ -424,11 +456,59 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
         .into());
     }
 
+    if args.respell && !manifest.respell {
+        return Err(
+            format!("--respell is given, and {at} records the files composed without it").into(),
+        );
+    }
+
     let mut flags = Flags::new(dialect);
     flags.with = manifest.with;
     flags.views = manifest.views;
     flags.search_paths = manifest.search_path;
+    flags.respell = manifest.respell;
     Ok(flags)
+}
+
+/// The lines a template's respelling is reported with, each saying whether it goes to standard
+/// error: the unions respelled, and the statements written as composed because they do not parse.
+fn respelled_lines(
+    source_dir: &Path,
+    rel_path: &Path,
+    respelled: Option<&sql_composer::respell::Respelled>,
+) -> Vec<(bool, String)> {
+    let Some(respelled) = respelled else {
+        return vec![];
+    };
+    let path = format!("{}/{}", source_dir.display(), rel_path.display());
+    let mut lines = Vec::new();
+    if !respelled.unions.is_empty() {
+        let arms: Vec<String> = respelled.unions.iter().map(|n| n.to_string()).collect();
+        lines.push((
+            false,
+            format!(
+                "Respelled {path}: {} union(s), of {} arms",
+                respelled.unions.len(),
+                arms.join(", ")
+            ),
+        ));
+    }
+    if !respelled.unparsed.is_empty() {
+        let unparsed: Vec<String> = respelled
+            .unparsed
+            .iter()
+            .map(|n| (n + 1).to_string())
+            .collect();
+        lines.push((
+            true,
+            format!(
+                "Unparsed {path}: statement(s) {} of {}, written as composed",
+                unparsed.join(", "),
+                respelled.statements
+            ),
+        ));
+    }
+    lines
 }
 
 /// The composed files, by their path under the target: one for each template written.
@@ -867,6 +947,7 @@ mod tests {
                 "with": false,
                 "views": null,
                 "search_path": [],
+                "respell": false,
                 "files": {
                     "sets/by_year.sql": {
                         "bind_params": ["theme_id", "year", "theme_id"],
@@ -954,6 +1035,43 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("elsewhere"), "{err}");
+    }
+
+    #[test]
+    fn test_respell_is_refused_for_a_dialect_other_than_postgres() {
+        let (_dir, source, target) = binding();
+        let args = ["--source", &source, "--target", &target, "--respell"];
+        for dialect in ["mysql", "mariadb", "sqlite", "duckdb"] {
+            let err = run_compose(&compose_args(
+                &[&args[..], &["--dialect", dialect]].concat(),
+            ))
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("--respell") && err.contains(dialect), "{err}");
+        }
+    }
+
+    #[test]
+    fn test_the_manifest_records_respell_and_verify_reads_it() {
+        let (_dir, source, target) = binding();
+        run_compose(&compose_args(&["--source", &source, "--target", &target])).unwrap();
+        let verify = ["--source", &source, "--target", &target, "--verify"];
+        let err = run_compose(&compose_args(&[&verify[..], &["--respell"]].concat()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--respell"), "{err}");
+
+        run_compose(&compose_args(&[
+            "--source",
+            &source,
+            "--target",
+            &target,
+            "--respell",
+        ]))
+        .unwrap();
+        let text = std::fs::read_to_string(Path::new(&target).join(MANIFEST)).unwrap();
+        assert!(Manifest::from_json(&text).unwrap().respell, "{text}");
+        run_compose(&compose_args(&verify)).unwrap();
     }
 
     #[test]

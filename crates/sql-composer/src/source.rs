@@ -21,6 +21,9 @@ pub struct Flags {
     pub views: Option<PathBuf>,
     /// The directories looked in after the source, in order, as `--search-path` gives them.
     pub search_paths: Vec<PathBuf>,
+    /// Each composed file respelled for PostgreSQL, as `--respell` does.
+    #[cfg(feature = "respell")]
+    pub respell: bool,
 }
 
 impl Flags {
@@ -31,6 +34,8 @@ impl Flags {
             with: false,
             views: None,
             search_paths: vec![],
+            #[cfg(feature = "respell")]
+            respell: false,
         }
     }
 }
@@ -114,7 +119,33 @@ pub fn compose_all(source_dir: &Path, flags: &Flags) -> Result<BTreeMap<PathBuf,
         results.insert(rel_path.to_path_buf(), standing);
     }
 
+    #[cfg(feature = "respell")]
+    if flags.respell {
+        respell_all(&mut results, flags.dialect)?;
+    }
+
     Ok(results)
+}
+
+/// Each composed file of `standings`, composed for `dialect`, respelled in place, with what
+/// respelling it did by its template's path. Only PostgreSQL's files are respelled.
+#[cfg(feature = "respell")]
+pub fn respell_all(
+    standings: &mut BTreeMap<PathBuf, Standing>,
+    dialect: Dialect,
+) -> Result<BTreeMap<PathBuf, crate::respell::Respelled>> {
+    if dialect != Dialect::Postgres {
+        return Err(Error::RespellFor { dialect });
+    }
+    let mut respelled = BTreeMap::new();
+    for (rel_path, standing) in standings.iter_mut() {
+        if let Standing::Written(composed) = standing {
+            let mut done = crate::respell::respell(&composed.sql);
+            composed.sql = std::mem::take(&mut done.sql);
+            respelled.insert(rel_path.clone(), done);
+        }
+    }
+    Ok(respelled)
 }
 
 /// The file at the root of a target that records how its files were composed.
@@ -135,6 +166,9 @@ pub struct Manifest {
     pub views: Option<PathBuf>,
     /// Each `--search-path`, as it was given, in order.
     pub search_path: Vec<PathBuf>,
+    /// `--respell`.
+    #[serde(default)]
+    pub respell: bool,
     /// Each composed file, by its path under the target, its parts joined by `/`.
     pub files: BTreeMap<String, Names>,
 }
@@ -160,6 +194,10 @@ impl Manifest {
             with: flags.with,
             views: flags.views.clone(),
             search_path: flags.search_paths.clone(),
+            #[cfg(feature = "respell")]
+            respell: flags.respell,
+            #[cfg(not(feature = "respell"))]
+            respell: false,
             files: standings
                 .iter()
                 .filter_map(|(rel_path, standing)| match standing {

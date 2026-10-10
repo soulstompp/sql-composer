@@ -1,0 +1,1325 @@
+//! The respelling `cargo sqlc compose --respell` writes for PostgreSQL. A union whose arms each read
+//! one roster, cut to their own rows of it and left joined `ON true` to what each reads, is written
+//! as one join: the roster read once, each of its rows paired with the arms whose cut it passes,
+//! and every arm's own rows read in one union, each tagged with its arm's number. Every other byte
+//! of the file is written as composed, and a statement the parser cannot read is too.
+
+use std::collections::HashMap;
+use std::ops::ControlFlow;
+
+use sqlparser::ast::comments::CommentWithSpan;
+use sqlparser::ast::{
+    Cte, Expr, GroupByExpr, Ident, JoinConstraint, JoinOperator, ObjectNamePart, Query, Select,
+    SelectItem, SetExpr, SetOperator, SetQuantifier, Spanned, TableFactor, Value, Visit, Visitor,
+};
+use sqlparser::dialect::{Dialect, PostgreSqlDialect, Precedence};
+use sqlparser::keywords::Keyword;
+use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::{Location, Span};
+use std::any::TypeId;
+
+use crate::scan::{Scanner, POSTGRES};
+
+/// PostgreSQL as sqlparser reads it, with one thing more PostgreSQL reads: two string literals
+/// with a newline between them are one.
+#[derive(Debug, Default)]
+struct Postgres(PostgreSqlDialect);
+
+impl Dialect for Postgres {
+    fn dialect(&self) -> TypeId {
+        TypeId::of::<PostgreSqlDialect>()
+    }
+
+    fn supports_string_literal_concatenation_with_newline(&self) -> bool {
+        true
+    }
+
+    fn identifier_quote_style(&self, identifier: &str) -> Option<char> {
+        self.0.identifier_quote_style(identifier)
+    }
+
+    fn is_delimited_identifier_start(&self, ch: char) -> bool {
+        self.0.is_delimited_identifier_start(ch)
+    }
+
+    fn is_identifier_start(&self, ch: char) -> bool {
+        self.0.is_identifier_start(ch)
+    }
+
+    fn is_identifier_part(&self, ch: char) -> bool {
+        self.0.is_identifier_part(ch)
+    }
+
+    fn supports_unicode_string_literal(&self) -> bool {
+        self.0.supports_unicode_string_literal()
+    }
+
+    fn is_reserved_for_identifier(&self, kw: Keyword) -> bool {
+        self.0.is_reserved_for_identifier(kw)
+    }
+
+    fn is_table_alias(&self, kw: &Keyword, parser: &mut Parser) -> bool {
+        self.0.is_table_alias(kw, parser)
+    }
+
+    fn is_custom_operator_part(&self, ch: char) -> bool {
+        self.0.is_custom_operator_part(ch)
+    }
+
+    fn get_next_precedence(&self, parser: &Parser) -> Option<Result<u8, ParserError>> {
+        self.0.get_next_precedence(parser)
+    }
+
+    fn supports_filter_during_aggregation(&self) -> bool {
+        self.0.supports_filter_during_aggregation()
+    }
+
+    fn supports_group_by_expr(&self) -> bool {
+        self.0.supports_group_by_expr()
+    }
+
+    fn supports_alter_user_as_alter_role(&self) -> bool {
+        self.0.supports_alter_user_as_alter_role()
+    }
+
+    fn prec_value(&self, prec: Precedence) -> u8 {
+        self.0.prec_value(prec)
+    }
+
+    fn allow_extract_custom(&self) -> bool {
+        self.0.allow_extract_custom()
+    }
+
+    fn allow_extract_single_quotes(&self) -> bool {
+        self.0.allow_extract_single_quotes()
+    }
+
+    fn supports_create_index_with_clause(&self) -> bool {
+        self.0.supports_create_index_with_clause()
+    }
+
+    fn supports_explain_with_utility_options(&self) -> bool {
+        self.0.supports_explain_with_utility_options()
+    }
+
+    fn supports_listen_notify(&self) -> bool {
+        self.0.supports_listen_notify()
+    }
+
+    fn supports_exclude_constraint(&self) -> bool {
+        self.0.supports_exclude_constraint()
+    }
+
+    fn supports_factorial_operator(&self) -> bool {
+        self.0.supports_factorial_operator()
+    }
+
+    fn supports_bitwise_shift_operators(&self) -> bool {
+        self.0.supports_bitwise_shift_operators()
+    }
+
+    fn supports_comment_on(&self) -> bool {
+        self.0.supports_comment_on()
+    }
+
+    fn supports_load_extension(&self) -> bool {
+        self.0.supports_load_extension()
+    }
+
+    fn supports_named_fn_args_with_colon_operator(&self) -> bool {
+        self.0.supports_named_fn_args_with_colon_operator()
+    }
+
+    fn supports_named_fn_args_with_expr_name(&self) -> bool {
+        self.0.supports_named_fn_args_with_expr_name()
+    }
+
+    fn supports_empty_projections(&self) -> bool {
+        self.0.supports_empty_projections()
+    }
+
+    fn supports_nested_comments(&self) -> bool {
+        self.0.supports_nested_comments()
+    }
+
+    fn supports_string_escape_constant(&self) -> bool {
+        self.0.supports_string_escape_constant()
+    }
+
+    fn supports_numeric_literal_underscores(&self) -> bool {
+        self.0.supports_numeric_literal_underscores()
+    }
+
+    fn supports_array_typedef_with_brackets(&self) -> bool {
+        self.0.supports_array_typedef_with_brackets()
+    }
+
+    fn supports_geometric_types(&self) -> bool {
+        self.0.supports_geometric_types()
+    }
+
+    fn supports_order_by_using_operator(&self) -> bool {
+        self.0.supports_order_by_using_operator()
+    }
+
+    fn supports_set_names(&self) -> bool {
+        self.0.supports_set_names()
+    }
+
+    fn supports_alter_column_type_using(&self) -> bool {
+        self.0.supports_alter_column_type_using()
+    }
+
+    fn supports_left_associative_joins_without_parens(&self) -> bool {
+        self.0.supports_left_associative_joins_without_parens()
+    }
+
+    fn supports_notnull_operator(&self) -> bool {
+        self.0.supports_notnull_operator()
+    }
+
+    fn supports_interval_options(&self) -> bool {
+        self.0.supports_interval_options()
+    }
+
+    fn supports_insert_table_alias(&self) -> bool {
+        self.0.supports_insert_table_alias()
+    }
+
+    fn supports_create_table_like_parenthesized(&self) -> bool {
+        self.0.supports_create_table_like_parenthesized()
+    }
+
+    fn supports_select_wildcard_with_alias(&self) -> bool {
+        self.0.supports_select_wildcard_with_alias()
+    }
+
+    fn supports_comma_separated_trim(&self) -> bool {
+        self.0.supports_comma_separated_trim()
+    }
+
+    fn supports_xml_expressions(&self) -> bool {
+        self.0.supports_xml_expressions()
+    }
+
+    fn supports_aliased_function_args(&self) -> bool {
+        self.0.supports_aliased_function_args()
+    }
+
+    fn supports_comment_optimizer_hint(&self) -> bool {
+        self.0.supports_comment_optimizer_hint()
+    }
+}
+
+/// A composed file as respelled.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Respelled {
+    /// The file: each statement that changed respelled, every other byte as composed.
+    pub sql: String,
+    /// How many statements the file holds.
+    pub statements: usize,
+    /// The statements the parser cannot read, by their place in the file from 0. Each is written
+    /// as composed.
+    pub unparsed: Vec<usize>,
+    /// Each union respelled, by how many arms it joins, in the order the file holds them.
+    pub unions: Vec<usize>,
+}
+
+/// `sql`, a file composed for PostgreSQL, respelled.
+pub fn respell(sql: &str) -> Respelled {
+    let mut respelled = Respelled::default();
+    let mut ends = Scanner::new(&POSTGRES).ends(sql);
+    if ends.last() != Some(&sql.len()) {
+        ends.push(sql.len());
+    }
+    let mut start = 0;
+    for end in ends {
+        let piece = &sql[start..end];
+        start = end;
+        let Some(code) = first_code(piece) else {
+            respelled.sql.push_str(piece);
+            continue;
+        };
+        respelled.sql.push_str(&piece[..code]);
+        let statement = &piece[code..];
+        match respell_statement(statement) {
+            Some((text, unions)) => {
+                respelled.sql.push_str(&text);
+                respelled.unions.extend(unions);
+            }
+            None => {
+                respelled.unparsed.push(respelled.statements);
+                respelled.sql.push_str(statement);
+            }
+        }
+        respelled.statements += 1;
+    }
+    respelled
+}
+
+/// Where the first byte of SQL itself in `piece` stands: past whitespace, comments and psql
+/// meta-commands.
+fn first_code(piece: &str) -> Option<usize> {
+    let mut first = None;
+    Scanner::new(&POSTGRES).walk(piece, |at, byte| {
+        if first.is_none() && !byte.is_ascii_whitespace() {
+            first = Some(at);
+        }
+    });
+    first
+}
+
+/// One statement respelled, with the arms of each union it respells; none where it does not parse.
+fn respell_statement(text: &str) -> Option<(String, Vec<usize>)> {
+    let parsed = masked(text);
+    let (statements, comments) =
+        Parser::parse_sql_with_comments(&Postgres::default(), &parsed).ok()?;
+    let [statement] = &statements[..] else {
+        return None;
+    };
+    let comments: Vec<CommentWithSpan> = comments.into();
+    let source = Source::new(text, &parsed);
+
+    let mut found = Found::default();
+    let _ = statement.visit(&mut found);
+    let mut unions: Vec<&Query> = found.unions.iter().collect();
+    unions.sort_by_key(|q| {
+        let span = source.range(q.body.span());
+        span.map_or(usize::MAX, |(start, end)| end - start)
+    });
+
+    let mut edits = Edits::default();
+    let mut arms = Vec::new();
+    for union in unions {
+        let mut tried = edits.clone();
+        if let Some(count) = respell_union(union, &found, &source, &comments, &mut tried) {
+            edits = tried;
+            arms.push((source.range(union.body.span())?.0, count));
+        }
+    }
+    if arms.is_empty() {
+        return Some((text.to_string(), vec![]));
+    }
+    let respelled = edits.render(text, 0, text.len())?;
+    match Parser::parse_sql(&Postgres::default(), &masked(&respelled)) {
+        Ok(parsed) if parsed.len() == 1 => {
+            arms.sort();
+            Some((
+                respelled,
+                arms.into_iter().map(|(_, count)| count).collect(),
+            ))
+        }
+        _ => Some((text.to_string(), vec![])),
+    }
+}
+
+/// What a statement holds that a respelling reads: each union of all its rows, the WITH queries
+/// it defines, and how often each single name is read as a relation.
+#[derive(Default)]
+struct Found {
+    unions: Vec<Query>,
+    ctes: HashMap<String, Vec<(Cte, bool)>>,
+    reads: HashMap<String, usize>,
+}
+
+impl Visitor for Found {
+    type Break = ();
+
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
+        if arms(&query.body).len() > 1 {
+            self.unions.push(query.clone());
+        }
+        if let Some(with) = &query.with {
+            for cte in &with.cte_tables {
+                self.ctes
+                    .entry(normal(&cte.alias.name))
+                    .or_default()
+                    .push((cte.clone(), with.recursive));
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn pre_visit_table_factor(&mut self, table_factor: &TableFactor) -> ControlFlow<()> {
+        if let TableFactor::Table { name, .. } = table_factor {
+            if let [ObjectNamePart::Identifier(ident)] = &name.0[..] {
+                *self.reads.entry(normal(ident)).or_default() += 1;
+            }
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+/// The arms of `body` where it is a `UNION ALL`, left to right; none where it is not one.
+fn arms(body: &SetExpr) -> Vec<&SetExpr> {
+    match body {
+        SetExpr::SetOperation {
+            op: SetOperator::Union,
+            set_quantifier: SetQuantifier::All,
+            left,
+            right,
+        } => {
+            let mut arms = arms(left);
+            if arms.is_empty() {
+                arms.push(left);
+            }
+            arms.push(right);
+            arms
+        }
+        _ => vec![],
+    }
+}
+
+/// An arm of a union, as the respelling reads it.
+struct Arm<'q> {
+    select: &'q Select,
+    roster: &'q TableFactor,
+    roster_alias: &'q Ident,
+    rows: &'q TableFactor,
+    rows_alias: &'q Ident,
+    /// Whether it is a WITH query something else reads too, so the union writes its rows in place
+    /// of reading it, and the WITH query stays as written.
+    shared: bool,
+}
+
+/// Respell `union` into `edits`, giving how many arms it joins; none where it is not respelled.
+fn respell_union(
+    union: &Query,
+    found: &Found,
+    source: &Source,
+    comments: &[CommentWithSpan],
+    edits: &mut Edits,
+) -> Option<usize> {
+    if union.with.is_some() || union.order_by.is_some() || union.limit_clause.is_some() {
+        return None;
+    }
+    let written = arms(&union.body);
+    let arms: Vec<Arm> = written
+        .iter()
+        .map(|arm| roster_arm(arm, found))
+        .collect::<Option<_>>()?;
+    let first = &arms[0];
+    let (roster_alias, rows_alias) = (normal(first.roster_alias), normal(first.rows_alias));
+    let roster = first.roster.to_string();
+    for arm in &arms {
+        if arm.roster.to_string() != roster
+            || normal(arm.roster_alias) != roster_alias
+            || normal(arm.rows_alias) != rows_alias
+            || arm.select.projection.len() != first.select.projection.len()
+        {
+            return None;
+        }
+        if let Some(cut) = &arm.select.selection {
+            if !reads_alone(cut, &roster_alias) {
+                return None;
+            }
+        }
+    }
+
+    // Each column: the roster's, the same in every arm, or a column of each arm's own rows.
+    let mut columns = Vec::new();
+    for (k, item) in first.select.projection.iter().enumerate() {
+        let (expr, _) = item_expr(item)?;
+        if reads_alone(expr, &roster_alias) {
+            if arms
+                .iter()
+                .any(|arm| arm.select.projection[k].to_string() != item.to_string())
+            {
+                return None;
+            }
+            columns.push(Column::Roster(source.text(item.span())?));
+        } else {
+            let mut picked = Vec::new();
+            for arm in &arms {
+                let (expr, _) = item_expr(&arm.select.projection[k])?;
+                picked.push(column_of(expr, &rows_alias)?.to_string());
+            }
+            let (expr, alias) = item_expr(item)?;
+            let name = match alias {
+                Some(alias) => alias.clone(),
+                None => column_of(expr, &rows_alias)?.clone(),
+            };
+            columns.push(Column::Rows { name, picked });
+        }
+    }
+    let names: Vec<String> = columns
+        .iter()
+        .filter_map(|c| match c {
+            Column::Rows { name, .. } => Some(normal(name)),
+            Column::Roster(_) => None,
+        })
+        .collect();
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    if unique.len() != names.len() || names.iter().any(|n| n == "arm") {
+        return None;
+    }
+    let pairs = ["a", "arms", "_arms"]
+        .into_iter()
+        .find(|name| *name != roster_alias && *name != rows_alias)?;
+
+    // What the arms cut and read of the roster, before each arm is written as its own rows.
+    let cuts: Vec<String> = arms
+        .iter()
+        .enumerate()
+        .map(|(j, arm)| {
+            let cut = match &arm.select.selection {
+                Some(cut) => checked_expr(source, edits, cut)?,
+                None => "true".to_string(),
+            };
+            Some(format!("({pairs}.arm = {} AND ({cut}))", j + 1))
+        })
+        .collect::<Option<_>>()?;
+    let roster_text = checked_roster(source, edits, first.roster)?;
+
+    // Each arm becomes its own rows, tagged with its number.
+    for (j, arm) in arms.iter().enumerate() {
+        let mut span = source.range(arm.select.span())?;
+        if let Some(cut) = &arm.select.selection {
+            span.1 = span.1.max(source.range(cut.span())?.1);
+        }
+        if arm.shared {
+            span = source.range(written[j].span())?;
+        }
+        let rows = format!(
+            "({}) {}",
+            checked_query(source, edits, arm.rows)?,
+            alias_text(arm.rows)?
+        );
+        let mut kept = vec![source.inner(arm.rows)?];
+        if let Some(cut) = &arm.select.selection {
+            kept.push(source.range(cut.span())?);
+        }
+        if j == 0 {
+            kept.push(
+                source
+                    .inner(arm.roster)
+                    .or_else(|| source.range(arm.roster.span()))?,
+            );
+            for item in &arm.select.projection {
+                kept.push(source.range(item.span())?);
+            }
+        }
+        let mut text = String::new();
+        for comment in comments {
+            let at = source.range(comment.span)?;
+            if span.0 <= at.0 && at.1 <= span.1 && !kept.iter().any(|k| k.0 <= at.0 && at.1 <= k.1)
+            {
+                text.push_str(&source.text[at.0..at.1]);
+                text.push('\n');
+            }
+        }
+        let picked: Vec<String> = columns
+            .iter()
+            .filter_map(|column| match column {
+                Column::Rows { name, picked } => {
+                    Some(format!("{}.{} AS {name}", arm.rows_alias, picked[j]))
+                }
+                Column::Roster(_) => None,
+            })
+            .collect();
+        text.push_str(&format!("SELECT {} AS arm", j + 1));
+        for column in picked {
+            text.push_str(", ");
+            text.push_str(&column);
+        }
+        text.push_str(&format!("\nFROM {rows}"));
+        if !edits.add(span.0, span.1, text) {
+            return None;
+        }
+    }
+
+    // The union reads the roster once, each of its rows paired with the arms whose cut it passes.
+    let chain = source.range(union.body.span())?;
+    let numbers: Vec<String> = (1..=arms.len()).map(|n| format!("({n})")).collect();
+    let outputs: Vec<String> = columns
+        .iter()
+        .map(|column| match column {
+            Column::Roster(text) => text.clone(),
+            Column::Rows { name, .. } => format!("{}.{name}", first.rows_alias),
+        })
+        .collect();
+    let text = format!(
+        "SELECT {}\nFROM {}\nJOIN (VALUES {}) AS {pairs}(arm)\n  ON {}\nLEFT JOIN (\n{}\n) {} ON {}.arm = {pairs}.arm",
+        outputs.join(", "),
+        roster_text,
+        numbers.join(", "),
+        cuts.join("\n  OR "),
+        edits.render(source.text, chain.0, chain.1)?,
+        first.rows_alias,
+        first.rows_alias,
+    );
+    if !edits.add(chain.0, chain.1, text) {
+        return None;
+    }
+    Some(arms.len())
+}
+
+/// A column of the respelled union.
+enum Column {
+    /// The roster's, as the first arm writes it.
+    Roster(String),
+    /// A column of each arm's own rows: the name the union gives it, and each arm's column.
+    Rows { name: Ident, picked: Vec<String> },
+}
+
+/// The arm `arm` reads, past the derived tables and WITH queries that only pass its rows on,
+/// where it is one roster left joined `ON true` to rows of its own; none where it is not.
+fn roster_arm<'q>(mut arm: &'q SetExpr, found: &'q Found) -> Option<Arm<'q>> {
+    let mut shared = false;
+    loop {
+        let select = match arm {
+            SetExpr::Query(query) => {
+                arm = plain_body(query)?;
+                continue;
+            }
+            SetExpr::Select(select) => select,
+            _ => return None,
+        };
+        if let Some(through) = passes_on(select) {
+            match through {
+                TableFactor::Derived {
+                    lateral: false,
+                    subquery,
+                    ..
+                } => arm = plain_body(subquery)?,
+                TableFactor::Table { name, .. } => {
+                    let [ObjectNamePart::Identifier(ident)] = &name.0[..] else {
+                        return None;
+                    };
+                    let name = normal(ident);
+                    let [(cte, _)] = &found.ctes.get(&name)?[..] else {
+                        return None;
+                    };
+                    shared |= found.reads.get(&name) != Some(&1);
+                    arm = plain_body(&cte.query)?;
+                }
+                _ => return None,
+            }
+            continue;
+        }
+        let mut arm = roster_select(select)?;
+        arm.shared = shared;
+        return Some(arm);
+    }
+}
+
+/// The body of `query`, where it adds nothing to it.
+fn plain_body(query: &Query) -> Option<&SetExpr> {
+    if query.with.is_some()
+        || query.order_by.is_some()
+        || query.limit_clause.is_some()
+        || query.fetch.is_some()
+        || !query.locks.is_empty()
+    {
+        return None;
+    }
+    Some(&query.body)
+}
+
+/// Whether `select` holds nothing but its clauses' defaults past its select list and FROM.
+fn bare(select: &Select) -> bool {
+    select.distinct.is_none()
+        && select.select_modifiers.is_none()
+        && select.top.is_none()
+        && select.exclude.is_none()
+        && select.into.is_none()
+        && select.lateral_views.is_empty()
+        && select.prewhere.is_none()
+        && select.connect_by.is_empty()
+        && matches!(&select.group_by, GroupByExpr::Expressions(exprs, mods) if exprs.is_empty() && mods.is_empty())
+        && select.cluster_by.is_empty()
+        && select.distribute_by.is_empty()
+        && select.sort_by.is_empty()
+        && select.having.is_none()
+        && select.named_window.is_empty()
+        && select.qualify.is_none()
+        && select.value_table_mode.is_none()
+}
+
+/// What `select` passes on whole, where it is `SELECT * FROM` one relation and nothing more.
+fn passes_on(select: &Select) -> Option<&TableFactor> {
+    if !bare(select)
+        || select.selection.is_some()
+        || !matches!(&select.projection[..], [SelectItem::Wildcard(w)] if w.to_string().is_empty())
+    {
+        return None;
+    }
+    let [from] = &select.from[..] else {
+        return None;
+    };
+    from.joins.is_empty().then_some(&from.relation)
+}
+
+/// `select` as an arm: one roster with an alias, left joined `ON true` to a derived table of
+/// rows with an alias.
+fn roster_select(select: &Select) -> Option<Arm<'_>> {
+    if !bare(select) {
+        return None;
+    }
+    let [from] = &select.from[..] else {
+        return None;
+    };
+    let [join] = &from.joins[..] else {
+        return None;
+    };
+    let on = match &join.join_operator {
+        JoinOperator::Left(JoinConstraint::On(on))
+        | JoinOperator::LeftOuter(JoinConstraint::On(on)) => on,
+        _ => return None,
+    };
+    if !matches!(on, Expr::Value(v) if v.value == Value::Boolean(true)) || join.global {
+        return None;
+    }
+    let roster_alias = match &from.relation {
+        TableFactor::Table {
+            alias: Some(alias),
+            args: None,
+            ..
+        } => &alias.name,
+        TableFactor::Derived {
+            lateral: false,
+            alias: Some(alias),
+            ..
+        } => &alias.name,
+        _ => return None,
+    };
+    let TableFactor::Derived {
+        lateral: false,
+        subquery: _,
+        alias: Some(alias),
+        sample: None,
+    } = &join.relation
+    else {
+        return None;
+    };
+    Some(Arm {
+        select,
+        roster: &from.relation,
+        roster_alias,
+        rows: &join.relation,
+        rows_alias: &alias.name,
+        shared: false,
+    })
+}
+
+/// The expression of a select list's item, with its alias.
+fn item_expr(item: &SelectItem) -> Option<(&Expr, Option<&Ident>)> {
+    match item {
+        SelectItem::UnnamedExpr(expr) => Some((expr, None)),
+        SelectItem::ExprWithAlias { expr, alias } => Some((expr, Some(alias))),
+        _ => None,
+    }
+}
+
+/// The column `expr` reads of `alias`, where it is that and nothing more.
+fn column_of<'e>(expr: &'e Expr, alias: &str) -> Option<&'e Ident> {
+    match expr {
+        Expr::CompoundIdentifier(parts) => match &parts[..] {
+            [table, column] if normal(table) == alias => Some(column),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether `expr` reads the relation `alias` alone: its columns, constants and the operators
+/// between them, and no function or query.
+fn reads_alone(expr: &Expr, alias: &str) -> bool {
+    let alone = |e: &Expr| reads_alone(e, alias);
+    match expr {
+        Expr::CompoundIdentifier(_) => column_of(expr, alias).is_some(),
+        Expr::Value(_) | Expr::TypedString(_) => true,
+        Expr::Nested(e)
+        | Expr::UnaryOp { expr: e, .. }
+        | Expr::IsNull(e)
+        | Expr::IsNotNull(e)
+        | Expr::IsTrue(e)
+        | Expr::IsNotTrue(e)
+        | Expr::IsFalse(e)
+        | Expr::IsNotFalse(e)
+        | Expr::IsUnknown(e)
+        | Expr::IsNotUnknown(e) => alone(e),
+        Expr::Cast { expr, .. } => alone(expr),
+        Expr::BinaryOp { left, right, .. }
+        | Expr::IsDistinctFrom(left, right)
+        | Expr::IsNotDistinctFrom(left, right) => alone(left) && alone(right),
+        Expr::InList { expr, list, .. } => alone(expr) && list.iter().all(alone),
+        Expr::Between {
+            expr, low, high, ..
+        } => alone(expr) && alone(low) && alone(high),
+        Expr::Like {
+            expr,
+            pattern,
+            escape_char: None,
+            ..
+        }
+        | Expr::ILike {
+            expr,
+            pattern,
+            escape_char: None,
+            ..
+        } => alone(expr) && alone(pattern),
+        _ => false,
+    }
+}
+
+/// The text of the derived table `factor`'s query as the file holds it, the respellings inside it
+/// applied, once it reads back as that query.
+fn checked_query(source: &Source, edits: &Edits, factor: &TableFactor) -> Option<String> {
+    let TableFactor::Derived {
+        subquery: query, ..
+    } = factor
+    else {
+        return None;
+    };
+    let (start, end) = source.inner(factor)?;
+    let text = &source.parsed[start..end];
+    let reread = Parser::new(&Postgres::default())
+        .try_with_sql(text)
+        .ok()?
+        .parse_query()
+        .ok()?;
+    (reread.to_string() == query.to_string()).then_some(())?;
+    edits.render(source.text, start, end)
+}
+
+/// The text of `expr` as the file holds it, once it reads back as `expr`.
+fn checked_expr(source: &Source, edits: &Edits, expr: &Expr) -> Option<String> {
+    let (start, end) = source.range(expr.span())?;
+    let text = &source.parsed[start..end];
+    let reread = Parser::new(&Postgres::default())
+        .try_with_sql(text)
+        .ok()?
+        .parse_expr()
+        .ok()?;
+    (reread.to_string() == expr.to_string()).then_some(())?;
+    edits.render(source.text, start, end)
+}
+
+/// The roster as the first arm reads it, with its alias.
+fn checked_roster(source: &Source, edits: &Edits, roster: &TableFactor) -> Option<String> {
+    match roster {
+        TableFactor::Derived { .. } => Some(format!(
+            "({}) {}",
+            checked_query(source, edits, roster)?,
+            alias_text(roster)?
+        )),
+        TableFactor::Table { .. } => {
+            let (start, end) = source.range(roster.span())?;
+            let text = &source.parsed[start..end];
+            let reread = Parser::new(&Postgres::default())
+                .try_with_sql(&format!("SELECT * FROM {text}"))
+                .ok()?
+                .parse_query()
+                .ok()?;
+            let SetExpr::Select(select) = reread.body.as_ref() else {
+                return None;
+            };
+            (select.from.first()?.relation.to_string() == roster.to_string()).then_some(())?;
+            Some(source.text[start..end].to_string())
+        }
+        _ => None,
+    }
+}
+
+/// A derived table's alias, as written after it.
+fn alias_text(factor: &TableFactor) -> Option<String> {
+    match factor {
+        TableFactor::Derived {
+            alias: Some(alias), ..
+        } => Some(alias.to_string()),
+        _ => None,
+    }
+}
+
+/// A name as PostgreSQL reads it: folded to lower case unless quoted.
+fn normal(ident: &Ident) -> String {
+    match ident.quote_style {
+        Some(_) => ident.value.clone(),
+        None => ident.value.to_lowercase(),
+    }
+}
+
+/// Whether `b` is a byte of a word.
+fn word(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Each word and each mark of SQL itself in `text`, outside quotes and comments, by where it starts
+/// and ends.
+fn code_tokens(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut tokens: Vec<(usize, usize)> = Vec::new();
+    Scanner::new(&POSTGRES).walk(text, |at, byte| {
+        if byte.is_ascii_whitespace() {
+            return;
+        }
+        match tokens.last_mut() {
+            Some((start, end)) if *end == at && word(byte) && word(bytes[*start]) => *end = at + 1,
+            _ => tokens.push((at, at + 1)),
+        }
+    });
+    tokens
+}
+
+/// `text` with each `SEARCH` and `CYCLE` clause of a recursive WITH query blanked byte for byte,
+/// newlines kept, for a parser that does not read them; every other byte as it is.
+fn masked(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let tokens = code_tokens(text);
+    let is = |i: usize, w: &str| {
+        tokens
+            .get(i)
+            .is_some_and(|(s, e)| text[*s..*e].eq_ignore_ascii_case(w))
+    };
+    let name = |i: usize| tokens.get(i).is_some_and(|(s, _)| word(bytes[*s]));
+    // the last token of the clause that opens at token `i`
+    let clause_end = |i: usize| -> Option<usize> {
+        let mut j = i + 1;
+        if is(i, "search") {
+            if !(is(j, "breadth") || is(j, "depth")) || !is(j + 1, "first") || !is(j + 2, "by") {
+                return None;
+            }
+            j += 3;
+        }
+        name(j).then_some(())?;
+        while is(j + 1, ",") && name(j + 2) {
+            j += 2;
+        }
+        (is(j + 1, "set") && name(j + 2)).then_some(())?;
+        if is(i, "search") {
+            return Some(j + 2);
+        }
+        (j + 3..j + 12)
+            .find(|&k| is(k, "using") && name(k + 1))
+            .map(|k| k + 1)
+    };
+    let mut out = bytes.to_vec();
+    let mut i = 1;
+    while i < tokens.len() {
+        if (is(i, "cycle") || is(i, "search")) && is(i - 1, ")") {
+            if let Some(end) = clause_end(i) {
+                for b in &mut out[tokens[i].0..tokens[end].1] {
+                    if *b != b'\n' {
+                        *b = b' ';
+                    }
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    String::from_utf8(out).expect("only whole tokens are blanked")
+}
+
+/// A statement's text, read by line and column.
+struct Source<'t> {
+    /// The text as written.
+    text: &'t str,
+    /// The text as the parser reads it, each byte where it is in `text`.
+    parsed: &'t str,
+    lines: Vec<usize>,
+    /// Each word and mark of SQL itself.
+    tokens: Vec<(usize, usize)>,
+}
+
+impl<'t> Source<'t> {
+    fn new(text: &'t str, parsed: &'t str) -> Self {
+        let mut lines = vec![0];
+        lines.extend(parsed.match_indices('\n').map(|(at, _)| at + 1));
+        Source {
+            text,
+            parsed,
+            lines,
+            tokens: code_tokens(parsed),
+        }
+    }
+
+    /// The byte offset of `location`.
+    fn offset(&self, location: Location) -> Option<usize> {
+        let start = *self
+            .lines
+            .get(usize::try_from(location.line).ok()?.checked_sub(1)?)?;
+        let column = usize::try_from(location.column).ok()?.checked_sub(1)?;
+        let line = &self.parsed[start..];
+        if column == 0 {
+            return Some(start);
+        }
+        line.char_indices()
+            .nth(column)
+            .map(|(at, _)| start + at)
+            .or_else(|| (line.chars().count() == column).then_some(self.parsed.len()))
+    }
+
+    /// The byte range `span` covers.
+    fn range(&self, span: Span) -> Option<(usize, usize)> {
+        if span == Span::empty() {
+            return None;
+        }
+        let (start, end) = (self.offset(span.start)?, self.offset(span.end)?);
+        (start <= end).then_some((start, end))
+    }
+
+    /// The byte range of a derived table's query, between its own parentheses.
+    fn inner(&self, factor: &TableFactor) -> Option<(usize, usize)> {
+        let TableFactor::Derived {
+            subquery,
+            alias: Some(alias),
+            ..
+        } = factor
+        else {
+            return None;
+        };
+        let start = self.range(subquery.span())?.0;
+        let named = self.offset(alias.name.span.start)?;
+        let open = self.tokens.iter().rev().find(|(_, e)| *e <= start)?;
+        let close = self.tokens.iter().rev().find(|(_, e)| *e <= named)?;
+        (&self.parsed[open.0..open.1] == "(" && &self.parsed[close.0..close.1] == ")")
+            .then_some((start, close.0))
+    }
+
+    /// The text `span` covers.
+    fn text(&self, span: Span) -> Option<String> {
+        let (start, end) = self.range(span)?;
+        Some(self.text[start..end].to_string())
+    }
+}
+
+/// Replacements in a statement's text, none overlapping another.
+#[derive(Clone, Default)]
+struct Edits(Vec<(usize, usize, String)>);
+
+impl Edits {
+    /// The text from `start` to `end` with the replacements inside it made; none where one
+    /// crosses either end.
+    fn render(&self, text: &str, start: usize, end: usize) -> Option<String> {
+        let mut out = String::new();
+        let mut at = start;
+        for (s, e, replacement) in &self.0 {
+            if *e <= start || *s >= end {
+                continue;
+            }
+            if *s < start || *e > end {
+                return None;
+            }
+            out.push_str(&text[at..*s]);
+            out.push_str(replacement);
+            at = *e;
+        }
+        out.push_str(&text[at..end]);
+        Some(out)
+    }
+
+    /// Replace `start` to `end` with `replacement`, which takes the place of every replacement
+    /// inside it; false where one crosses either end.
+    fn add(&mut self, start: usize, end: usize, replacement: String) -> bool {
+        if self
+            .0
+            .iter()
+            .any(|(s, e, _)| (*s < start && *e > start) || (*s < end && *e > end))
+        {
+            return false;
+        }
+        self.0.retain(|(s, e, _)| !(start <= *s && *e <= end));
+        let at = self.0.partition_point(|(s, _, _)| *s < start);
+        self.0.insert(at, (start, end, replacement));
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How a test writes arm `n` of a union.
+    type Spelled = Box<dyn Fn(usize) -> String>;
+
+    /// A union of `arms` roster arms, each a derived table of its own, as `:union(ALL …)` composes
+    /// them: arm `n` reads `law_n` and is cut to the slug `rule_n`.
+    fn roster_union(arms: usize, arm: impl Fn(usize) -> String) -> String {
+        let arms: Vec<String> = (1..=arms)
+            .map(|n| format!("SELECT * FROM (\n{}\n) AS _union_{n}", arm(n)))
+            .collect();
+        format!(
+            "SELECT * FROM (\n{}\n) AS _union",
+            arms.join("\nUNION ALL\n")
+        )
+    }
+
+    fn arm(n: usize) -> String {
+        format!(
+            "-- the law {n}\nSELECT r.rule, p.filing, p.violates\nFROM      (\n    SELECT * FROM roster\n) r\nLEFT JOIN (\n    SELECT l.filing, l.bad AS violates FROM law_{n} l\n) p ON true\nWHERE r.slug = 'rule_{n}'"
+        )
+    }
+
+    #[test]
+    fn a_union_of_roster_arms_reads_the_roster_once() {
+        let sql = roster_union(3, arm);
+        let respelled = respell(&sql);
+        assert_eq!(respelled.unions, vec![3]);
+        assert_eq!(respelled.statements, 1);
+        assert!(respelled.unparsed.is_empty());
+        assert_eq!(
+            respelled.sql.matches("SELECT * FROM roster").count(),
+            1,
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled.sql.contains(
+                "JOIN (VALUES (1), (2), (3)) AS a(arm)\n  ON (a.arm = 1 AND (r.slug = 'rule_1'))\n  OR (a.arm = 2 AND (r.slug = 'rule_2'))"
+            ),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled.sql.contains(") p ON p.arm = a.arm"),
+            "{}",
+            respelled.sql
+        );
+        for n in 1..=3 {
+            assert!(
+                respelled.sql.contains(&format!("-- the law {n}\n")),
+                "{}",
+                respelled.sql
+            );
+            assert!(
+                respelled.sql.contains(&format!(
+                    "SELECT {n} AS arm, p.filing AS filing, p.violates AS violates"
+                )),
+                "{}",
+                respelled.sql
+            );
+            assert!(
+                respelled.sql.contains(&format!("FROM law_{n} l")),
+                "{}",
+                respelled.sql
+            );
+        }
+        Parser::parse_sql(&Postgres::default(), &respelled.sql).unwrap();
+    }
+
+    #[test]
+    fn arms_named_once_at_the_head_are_read_through_their_names() {
+        let ctes: Vec<String> = (1..=2)
+            .map(|n| format!("checks_{n} AS (\n{}\n)", arm(n)))
+            .collect();
+        let union = roster_union(2, |n| format!("SELECT * FROM checks_{n}"));
+        let sql = format!("WITH {}\n{union};\n", ctes.join(",\n"));
+        let respelled = respell(&sql);
+        assert_eq!(respelled.unions, vec![2], "{}", respelled.sql);
+        assert!(
+            respelled
+                .sql
+                .contains("checks_1 AS (\n-- the law 1\nSELECT 1 AS arm, p.filing AS filing"),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled
+                .sql
+                .contains("SELECT * FROM checks_2\n) AS _union_2"),
+            "{}",
+            respelled.sql
+        );
+        assert!(respelled.sql.ends_with(";\n"), "{}", respelled.sql);
+        Parser::parse_sql(&Postgres::default(), &respelled.sql).unwrap();
+    }
+
+    #[test]
+    fn a_union_any_arm_of_which_breaks_a_condition_is_written_as_composed() {
+        let broken: [(&str, Spelled); 9] = [
+            (
+                "another roster",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("FROM roster", "FROM other")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "joined on a condition",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("p ON true", "p ON p.filing = r.rule")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "an inner join",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("LEFT JOIN", "JOIN")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "a cut on the arm's rows",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("WHERE r.slug", "WHERE p.violates AND r.slug")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "a column over the arm's rows",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("p.violates\n", "coalesce(p.violates, false)\n")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "a roster column that differs",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("SELECT r.rule,", "SELECT r.slug,")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "another alias",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace(") r\n", ") q\n").replace("r.", "q.")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "rows read laterally",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("LEFT JOIN (", "LEFT JOIN LATERAL (")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+            (
+                "a cut that calls a function",
+                Box::new(|n| {
+                    if n == 2 {
+                        arm(n).replace("r.slug = ", "lower(r.slug) = ")
+                    } else {
+                        arm(n)
+                    }
+                }),
+            ),
+        ];
+        for (condition, arm) in broken {
+            let sql = roster_union(3, arm);
+            let respelled = respell(&sql);
+            assert_eq!(respelled.sql, sql, "{condition}");
+            assert!(respelled.unions.is_empty(), "{condition}");
+        }
+    }
+
+    #[test]
+    fn an_arm_something_else_reads_too_is_written_in_the_union_and_kept_as_it_is() {
+        let ctes: Vec<String> = (1..=2)
+            .map(|n| format!("checks_{n} AS (\n{}\n)", arm(n)))
+            .collect();
+        let union = roster_union(2, |n| format!("SELECT * FROM checks_{n}"));
+        let sql = format!(
+            "WITH {}\nSELECT * FROM checks_1 UNION ALL {union};\n",
+            ctes.join(",\n")
+        );
+        let respelled = respell(&sql);
+        assert_eq!(respelled.unions, vec![2], "{}", respelled.sql);
+        assert!(
+            respelled.sql.starts_with(&format!("WITH {},\n", ctes[0])),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled.sql.contains("SELECT * FROM checks_1 UNION ALL"),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled
+                .sql
+                .contains("LEFT JOIN (\nSELECT 1 AS arm, p.filing AS filing"),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled
+                .sql
+                .contains("checks_2 AS (\n-- the law 2\nSELECT 2 AS arm"),
+            "{}",
+            respelled.sql
+        );
+        Parser::parse_sql(&Postgres::default(), &respelled.sql).unwrap();
+    }
+
+    #[test]
+    fn psql_lines_and_statements_that_do_not_parse_are_written_as_composed() {
+        let union = roster_union(2, arm);
+        let sql = format!(
+            "\\pset null '·'\n\\echo === the laws ===\n{union};\n\\echo\nSELEC 1;\n-- the end\n"
+        );
+        let respelled = respell(&sql);
+        assert_eq!(respelled.statements, 2);
+        assert_eq!(respelled.unparsed, vec![1]);
+        assert_eq!(respelled.unions, vec![2]);
+        assert!(
+            respelled
+                .sql
+                .starts_with("\\pset null '·'\n\\echo === the laws ===\nSELECT * FROM (\n"),
+            "{}",
+            respelled.sql
+        );
+        assert!(
+            respelled.sql.ends_with(";\n\\echo\nSELEC 1;\n-- the end\n"),
+            "{}",
+            respelled.sql
+        );
+    }
+
+    #[test]
+    fn a_cycle_clause_and_literals_joined_across_a_newline_are_kept_as_written() {
+        let walk = "WITH RECURSIVE walk(n) AS (\n    SELECT 1 UNION ALL SELECT n + 1 FROM walk WHERE n < 3\n) CYCLE n SET is_cycle USING route\n";
+        let union = roster_union(2, |n| {
+            arm(n).replace("l.bad AS violates", "l.bad AS violates, 'a '\n'b' AS said")
+        });
+        let sql = format!("{walk}{}", union);
+        let respelled = respell(&sql);
+        assert_eq!(respelled.unions, vec![2], "{}", respelled.sql);
+        assert!(respelled.sql.starts_with(walk), "{}", respelled.sql);
+        assert_eq!(
+            respelled.sql.matches("'a '\n'b' AS said").count(),
+            2,
+            "{}",
+            respelled.sql
+        );
+    }
+
+    #[test]
+    fn a_file_with_nothing_to_respell_is_written_byte_for_byte() {
+        let sql =
+            "-- a note\nSELECT a FROM t UNION ALL SELECT b FROM u;\n\nSELECT 'é' AS x; -- after\n";
+        let respelled = respell(sql);
+        assert_eq!(respelled.sql, sql);
+        assert_eq!(respelled.statements, 2);
+        assert!(respelled.unions.is_empty() && respelled.unparsed.is_empty());
+    }
+}

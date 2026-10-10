@@ -38,6 +38,8 @@ pub mod error;
 pub mod mock;
 pub mod parser;
 mod reserved;
+#[cfg(feature = "respell")]
+pub mod respell;
 mod scan;
 pub mod source;
 pub mod types;

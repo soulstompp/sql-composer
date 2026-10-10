@@ -1,0 +1,10 @@
+language = "C"
+include_guard = "SQL_COMPOSER_H"
+autogen_warning = "/* Written by cbindgen from the source of the sql-composer-ffi crate. Edits here are overwritten. */"
+cpp_compat = true
+usize_is_size_t = true
+documentation_style = "c"
+
+[enum]
+prefix_with_name = true
+rename_variants = "ScreamingSnakeCase"

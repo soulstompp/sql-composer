@@ -94,6 +94,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p cargo-sqlc
 
+  test-ffi:
+    name: Test sql-composer-ffi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p sql-composer-ffi
+
   test-sqlc-brickgen:
     name: Test sqlc-brickgen
     runs-on: ubuntu-latest

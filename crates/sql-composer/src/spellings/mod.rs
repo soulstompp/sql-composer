@@ -3,8 +3,8 @@
 //!
 //! A template is read for PostgreSQL as sqlparser reads it, each directive standing in as SQL of
 //! its own kind: a `:compose`, a slot, a `:define` or a command as a query reading a relation
-//! named after the directive, a `:bind` as a parameter. Each `#` comment and the `:dialect(…)`
-//! declaration are blanks to the parser. A spelling is written by moving the template's own text,
+//! named after the directive, a `:bind` as a parameter. Each `#` comment reaches the parser as a
+//! `--` comment, and the `:dialect(…)` declaration as blanks. A spelling is written by moving the template's own text,
 //! every byte outside what moves left as written, and each spelling is read back and compared with
 //! the statement it must be before it is offered. Nothing reads a catalog: each condition is read
 //! from the template's own text. A template, or a statement of it, that the parser cannot read is
@@ -172,7 +172,7 @@ mod tests {
         let stood = read::Stood::new(text).unwrap();
         assert_eq!(
             stood.parsed,
-            "          \nSELECT s.set_num\nFROM (\n    SELECT * FROM \":compose(shared/x.sqlc, @scope = s.sqlc)\"\n) s\nWHERE s.year >= $min_year;\nSELECT * FROM \":union(a.sqlc, b.sqlc)\";\n"
+            "-- the sets\nSELECT s.set_num\nFROM (\n    SELECT * FROM \":compose(shared/x.sqlc, @scope = s.sqlc)\"\n) s\nWHERE s.year >= $min_year;\nSELECT * FROM \":union(a.sqlc, b.sqlc)\";\n"
         );
     }
 

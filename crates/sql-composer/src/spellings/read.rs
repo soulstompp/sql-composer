@@ -1,6 +1,6 @@
 //! A template read for its spellings: each directive stood in as SQL of its own kind, each `#`
-//! comment and the `:dialect(…)` declaration blanked, and each statement parsed, with where every
-//! token of it stands in the template as written.
+//! comment as a `--` comment, the `:dialect(…)` declaration blanked, and each statement parsed,
+//! with where every token of it stands in the template as written.
 
 use sqlparser::ast::{BinaryOperator, Expr, Spanned, Statement, TableFactor, VisitMut, VisitorMut};
 use sqlparser::dialect::{Dialect as _, Precedence};
@@ -22,7 +22,9 @@ pub(crate) enum Kind {
     Relation(Element),
     /// A `:bind`: a parameter named after it, `$name`.
     Parameter(String),
-    /// A comment or the declaration: blanks.
+    /// A `#` comment: a `--` comment of the same words.
+    Comment,
+    /// The declaration: blanks.
     Blank,
 }
 
@@ -56,7 +58,8 @@ pub(crate) enum Unread {
 }
 
 impl Stood {
-    /// `text` with each directive stood in, each `#` comment and the declaration blanked.
+    /// `text` with each directive stood in, each `#` comment written as a `--` comment, and the
+    /// declaration blanked.
     pub(crate) fn new(text: &str) -> Result<Stood, Unread> {
         let (dialects, marks) = marked(text).map_err(|error| Unread::Refused(error.to_string()))?;
         if !dialects.is_empty() && !dialects.contains(&Dialect::Postgres) {
@@ -76,7 +79,8 @@ impl Stood {
                     format!("SELECT * FROM \"{}\"", written.replace('"', "\"\"")),
                     Kind::Relation(element),
                 ),
-                Mark::Comment | Mark::Declaration => (
+                Mark::Comment => (format!("--{}", &written[1..]), Kind::Comment),
+                Mark::Declaration => (
                     written
                         .chars()
                         .map(|c| if c == '\n' { '\n' } else { ' ' })

@@ -581,6 +581,15 @@ mod tests {
     }
 
     #[test]
+    fn a_template_comment_between_conjuncts_stays_where_it_stands() {
+        let text = "SELECT s.set_num\nFROM lego_sets s\nJOIN lego_themes t ON t.id = s.theme_id\nWHERE t.name = 'City'\n# the year\n  AND s.year > 2000";
+        assert_eq!(
+            written(text, ON),
+            "SELECT s.set_num\nFROM lego_sets s\nJOIN lego_themes t ON t.id = s.theme_id AND t.name = 'City' AND s.year > 2000 \n# the year\n"
+        );
+    }
+
+    #[test]
     fn comments_and_directives_stay_where_they_stand() {
         let text = "SELECT s.set_num\nFROM lego_sets s -- the sets\n# a template comment\nJOIN (\n    :compose(scopes/city.sqlc)\n) sc ON sc.theme_id = s.theme_id\nWHERE sc.scope_id = :bind(scope) -- the scope\n";
         assert_eq!(

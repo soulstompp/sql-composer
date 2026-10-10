@@ -5,7 +5,7 @@
 use sqlparser::ast::{Expr, Join, JoinConstraint, TableWithJoins};
 use sqlparser::dialect::Precedence;
 use sqlparser::keywords::Keyword;
-use sqlparser::tokenizer::Token;
+use sqlparser::tokenizer::{Token, Whitespace};
 
 use super::join_order::constraint;
 use super::place::{conjuncts, Edits};
@@ -142,10 +142,22 @@ fn join_at(statement: &Stmt, join: &Join) -> Option<JoinAt> {
 }
 
 /// The first of the plain spaces, tabs and newlines just before token `at`, or `at` where none
-/// are.
+/// are. The newline that ends a comment is the comment's.
 pub(crate) fn spaced_from(statement: &Stmt, at: usize) -> usize {
     let mut first = at;
     while first > 0 && plain_space(&statement.tokens[first - 1].token) {
+        let ends_a_comment = first >= 2
+            && matches!(
+                statement.tokens[first - 1].token,
+                Token::Whitespace(Whitespace::Newline)
+            )
+            && matches!(
+                statement.tokens[first - 2].token,
+                Token::Whitespace(Whitespace::SingleLineComment { .. })
+            );
+        if ends_a_comment {
+            break;
+        }
         first -= 1;
     }
     first
@@ -156,31 +168,59 @@ pub(crate) fn is_token(statement: &Stmt, at: usize, token: &Token) -> bool {
     statement.tokens[at].token == *token
 }
 
-/// The edits that take conjunct `n` out of the condition `chain`, the clause with it where it is
-/// the only one: the conjunct and the `AND` that joins it, and the plain spaces before that.
+/// The edits that take conjunct `n` out of the condition `chain`, the clause's keyword with it
+/// where it is the only one: the conjunct, the `AND` or keyword that joins it, and the plain
+/// spaces between them and before the `AND`. A comment among them stays where it stands.
 pub(crate) fn without(read: &Read, statement: &Stmt, chain: &Chain, n: usize) -> Option<Edits> {
     let (first, last) = chain.conjuncts[n];
-    let (start, end) = if chain.conjuncts.len() == 1 {
-        let from = spaced_from(statement, chain.keyword);
-        (
-            read.written(statement, from, from).0,
-            read.written(statement, last, last).1,
-        )
+    let mut runs = if chain.conjuncts.len() == 1 {
+        vec![
+            (spaced_from(statement, chain.keyword), chain.keyword),
+            (first, last),
+        ]
     } else if n == 0 {
-        let next = chain.conjuncts[1].0;
-        (
-            read.written(statement, first, first).0,
-            read.written(statement, next, next).0,
-        )
+        let and = statement.after(last)?;
+        vec![
+            (first, last),
+            (spaced_from(statement, and), spaced_to(statement, and)),
+        ]
     } else {
         let and = statement.before(first)?;
-        let from = spaced_from(statement, and);
-        (
-            read.written(statement, from, from).0,
-            read.written(statement, last, last).1,
-        )
+        vec![(spaced_from(statement, and), and), (first, last)]
     };
-    Some(vec![(start, end, String::new())])
+    runs = merged(statement, runs);
+    Some(
+        runs.into_iter()
+            .map(|(first, last)| {
+                let (start, end) = read.written(statement, first, last);
+                (start, end, String::new())
+            })
+            .collect(),
+    )
+}
+
+/// `runs` of tokens, in order, each joined to the next where only plain spaces lie between.
+fn merged(statement: &Stmt, runs: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (first, last) in runs {
+        if let Some(previous) = out.last_mut() {
+            if (previous.1 + 1..first).all(|t| plain_space(&statement.tokens[t].token)) {
+                previous.1 = last;
+                continue;
+            }
+        }
+        out.push((first, last));
+    }
+    out
+}
+
+/// The last of the plain spaces, tabs and newlines just after token `at`, or `at` where none are.
+pub(crate) fn spaced_to(statement: &Stmt, at: usize) -> usize {
+    let mut last = at;
+    while last + 1 < statement.tokens.len() && plain_space(&statement.tokens[last + 1].token) {
+        last += 1;
+    }
+    last
 }
 
 /// The edits that add `text` as the last conjunct of the condition `chain`, which is `whole`: an

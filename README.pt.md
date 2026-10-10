@@ -375,7 +375,8 @@ Poupa as cópias, porque uma relação que dois modelos compõem fica escrita du
 instrução que componha ambos: a instrução composta leva uma cópia da relação por cada caminho que lá
 vai dar, e a base de dados planeia cada uma delas. O
 [`reports/shared_moulds.sqlc`][examples/brick/sqlc/reports/shared_moulds.sqlc] lê o fecho dos temas
-pelas suas duas fontes, e a sua instrução composta tem por isso esse fecho duas vezes.
+pelas suas duas fontes, e a sua instrução composta tem por isso esse fecho duas vezes; o
+`cargo sqlc tree` desenha cada um dos caminhos (*Referência*).
 
 Com o `--with`, cada instrução composta abre com um único `WITH`, que nomeia cada relação que a
 instrução lê, cada uma depois das relações que ela própria lê, e a instrução vem no fim. Uma relação
@@ -573,6 +574,40 @@ Um programa em qualquer linguagem corre, assim, um ficheiro composto pelos nomes
 `color_name`, e o `$2` o `set_num`. No MySQL e no MariaDB, cada `?` toma o nome que ocupa o seu
 lugar no `bind_params`, onde um nome usado duas vezes aparece duas vezes.
 
+### `cargo sqlc tree`
+
+```sh
+cargo sqlc tree                                     # os modelos de cada ficheiro composto
+cargo sqlc tree reports/shared_moulds.sqlc          # os de um ficheiro composto
+cargo sqlc tree --invert shared/theme_closure.sqlc  # os ficheiros que guardam um modelo
+```
+
+Mostra os modelos de cada ficheiro composto como o `cargo tree` mostra as dependências de um pacote:
+cada modelo que o ficheiro guarda, uma vez por cada caminho que até ele vai dar, com a vaga onde está
+cada preenchimento e o nome que fica escrito sempre que um nome está no lugar de um corpo. Um modelo
+guardado mais do que uma vez tem ainda uma linha com as suas cópias:
+
+```text
+reports/shared_moulds.sqlc
+├── queries/technic_moulds.sqlc
+│   └── shared/scope_moulds.sqlc
+│       └── scopes/technic.sqlc (@scope)
+│           └── shared/theme_closure.sqlc
+└── queries/city_moulds.sqlc
+    └── shared/scope_moulds.sqlc
+        └── scopes/city.sqlc (@scope)
+            └── shared/theme_closure.sqlc
+shared/scope_moulds.sqlc: 2 copies
+shared/theme_closure.sqlc: 2 copies
+```
+
+Com o `--with`, o fecho fica nomeado uma só vez, à cabeça da instrução,
+`shared/theme_closure.sqlc (WITH shared_theme_closure)`, e cada sítio que o compunha lê o nome; se
+depois a base de dados lê uma cópia uma vez ou duas, quem o diz é o plano dela, no `EXPLAIN`. O
+`--invert` (`-i`) mostra, para um só modelo, cada ficheiro composto que o guarda, com as suas
+cópias, ou seja, cada instrução a que chega uma alteração nesse modelo. O `cargo sqlc tree` aceita o
+`--source`, o `--dialect`, o `--with`, o `--views` e o `--search-path`, como o `compose`.
+
 ### Diretivas
 
 | diretiva | compõe-se em |
@@ -618,6 +653,7 @@ O `source::compose_all` compõe todos os modelos de uma pasta como o `cargo sqlc
 com as opções que um `source::Flags` guarda, e diz o que fez de cada um: `Standing::Written`, com o
 seu `ComposedSql`; `Standing::Shape`; ou `Standing::Skipped`. O `Dialect::ALL` lista os dialetos, e
 o `"mysql".parse::<Dialect>()` lê um deles pelo nome que o `--dialect` lhe dá.
+O `Composer::tree` dá o que a composição de um modelo escreve, tal como o `cargo sqlc tree` o mostra.
 
 | tipo | o que é |
 |---|---|
@@ -631,6 +667,8 @@ o `"mysql".parse::<Dialect>()` lê um deles pelo nome que o `--dialect` lhe dá.
 | `CommandKind` | `Count`, `Union`, `Intersect` ou `Except` |
 | `Composer` | compõe modelos em SQL para um dialeto |
 | `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
+| `Held` | um modelo tal como uma instrução composta o guarda: como se chega a ele, o nome que fica escrito por ele e o que ele próprio guarda |
+| `Reach` | como se chega a um modelo: `Root`, `Compose`, `Slot`, `Define`, `Source` ou `Head` |
 | `source::Flags` | o dialeto, o `--with`, o `--views` e o `--search-path` com que uma pasta se compõe |
 | `source::Standing` | o que a composição fez de um modelo: escrito, forma ou saltado |
 | `source::Manifest` | o que o `manifest.json` guarda, com a funcionalidade `serde` |

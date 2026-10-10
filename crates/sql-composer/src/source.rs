@@ -53,9 +53,9 @@ pub enum Standing {
     },
 }
 
-/// Every `.sqlc` file under `source_dir`, at any depth, by its path under `source_dir`, with
-/// what composing it with `flags` makes of it.
-pub fn compose_all(source_dir: &Path, flags: &Flags) -> Result<BTreeMap<PathBuf, Standing>> {
+/// The composer that composes the templates under `source_dir` with `flags`: it reads them
+/// under `source_dir`, then under each search path.
+pub fn composer(source_dir: &Path, flags: &Flags) -> Result<Composer> {
     let mut composer = Composer::new(flags.dialect);
     composer.add_search_path(source_dir.to_path_buf());
     for path in &flags.search_paths {
@@ -65,6 +65,13 @@ pub fn compose_all(source_dir: &Path, flags: &Flags) -> Result<BTreeMap<PathBuf,
     if let Some(registry) = &flags.views {
         composer.load_view_registry(registry)?;
     }
+    Ok(composer)
+}
+
+/// Every `.sqlc` file under `source_dir`, at any depth, by its path under `source_dir`, with
+/// what composing it with `flags` makes of it.
+pub fn compose_all(source_dir: &Path, flags: &Flags) -> Result<BTreeMap<PathBuf, Standing>> {
+    let composer = composer(source_dir, flags)?;
 
     let mut results = BTreeMap::new();
 
@@ -216,4 +223,139 @@ fn as_composed(template: &Path, roots: &[&Path]) -> String {
         .unwrap_or_else(|| template.to_path_buf())
         .display()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::composer::{Held, Reach};
+
+    /// The brick example's templates, copied into a directory of their own, each opening with a
+    /// line that names it.
+    fn marked_brick() -> (tempfile::TempDir, PathBuf) {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("sqlc");
+        for entry in walkdir::WalkDir::new(&from) {
+            let entry = entry.unwrap();
+            let rel_path = entry.path().strip_prefix(&from).unwrap();
+            let to = source.join(rel_path);
+            if entry.file_type().is_dir() {
+                std::fs::create_dir_all(&to).unwrap();
+            } else {
+                let text = std::fs::read_to_string(entry.path()).unwrap();
+                std::fs::write(&to, format!("{}\n{text}", marker(rel_path))).unwrap();
+            }
+        }
+        (dir, source)
+    }
+
+    /// The line a template opens with in `marked_brick`.
+    fn marker(rel_path: &Path) -> String {
+        format!("-- held {}", rel_path.display())
+    }
+
+    /// `flags` for `dialect`, `with` or not.
+    fn flags(dialect: Dialect, with: bool) -> Flags {
+        let mut flags = Flags::new(dialect);
+        flags.with = with;
+        flags
+    }
+
+    #[test]
+    fn each_template_a_composed_file_holds_is_written_as_often_as_its_tree_says() {
+        let (_dir, source) = marked_brick();
+        for &dialect in Dialect::ALL {
+            for with in [false, true] {
+                let flags = flags(dialect, with);
+                let composer = composer(&source, &flags).unwrap();
+                let standings = compose_all(&source, &flags).unwrap();
+                let mut written = 0;
+                for (rel_path, standing) in &standings {
+                    let Standing::Written(composed) = standing else {
+                        continue;
+                    };
+                    let text = std::fs::read_to_string(source.join(rel_path)).unwrap();
+                    let template =
+                        parser::parse_template(&text, TemplateSource::File(source.join(rel_path)))
+                            .unwrap();
+                    let copies = composer.tree(&template).unwrap().copies();
+                    for (template, count) in &copies {
+                        let held = composed
+                            .sql
+                            .matches(&format!("{}\n", marker(template)))
+                            .count();
+                        assert_eq!(
+                            held,
+                            *count,
+                            "{} holds {} {held} times, its tree {count} ({dialect:?}, with: {with})",
+                            rel_path.display(),
+                            template.display()
+                        );
+                    }
+                    let marked = composed.sql.matches("-- held ").count();
+                    assert_eq!(
+                        marked,
+                        copies.values().sum::<usize>(),
+                        "{}",
+                        rel_path.display()
+                    );
+                    written += 1;
+                }
+                assert!(written > 40, "{written}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_shared_moulds_hold_the_theme_closure_twice_and_once_named() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let path = source.join("reports/shared_moulds.sqlc");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let template = parser::parse_template(&text, TemplateSource::File(path)).unwrap();
+        let closure = Path::new("shared/theme_closure.sqlc");
+
+        let plain = composer(&source, &flags(Dialect::Postgres, false)).unwrap();
+        let tree = plain.tree(&template).unwrap();
+        assert_eq!(tree.template, Path::new("reports/shared_moulds.sqlc"));
+        assert_eq!(tree.copies()[closure], 2);
+
+        let named = composer(&source, &flags(Dialect::Postgres, true)).unwrap();
+        let tree = named.tree(&template).unwrap();
+        assert_eq!(tree.copies()[closure], 1);
+        let head: Vec<&Held> = tree
+            .holds
+            .iter()
+            .filter(|h| h.reach == Reach::Head)
+            .collect();
+        assert!(
+            head.iter().any(|h| h.template == closure
+                && h.name.as_deref() == Some("shared_theme_closure")),
+            "{tree:?}"
+        );
+    }
+
+    #[test]
+    fn a_slot_is_held_as_the_template_that_fills_it() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let path = source.join("sets/select_colored_parts.sqlc");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let template = parser::parse_template(&text, TemplateSource::File(path)).unwrap();
+        let tree = composer(&source, &flags(Dialect::Postgres, false))
+            .unwrap()
+            .tree(&template)
+            .unwrap();
+        let [shape] = &tree.holds[..] else {
+            panic!("{tree:?}");
+        };
+        assert_eq!(shape.template, Path::new("shared/filtered_set_parts.sqlc"));
+        assert!(
+            shape
+                .holds
+                .iter()
+                .any(|h| h.reach == Reach::Slot("filter".into())
+                    && h.template == Path::new("filters/by_color.sqlc")),
+            "{shape:?}"
+        );
+    }
 }

@@ -366,6 +366,7 @@ composes both: a composed statement holds one copy of a relation for every path 
 and the database plans every copy.
 [`reports/shared_moulds.sqlc`][examples/brick/sqlc/reports/shared_moulds.sqlc] reads the theme
 closure through both of its sources, so its composed statement holds the closure twice.
+`cargo sqlc tree` draws each path (*Reference*).
 
 With `--with`, every composed statement opens with one `WITH` that names each relation it reads,
 each after the relations it reads in turn, and the statement comes last. A relation is named after
@@ -553,6 +554,40 @@ So a program in any language runs a composed file by its names: `$1` is `color_n
 `set_num`. On MySQL and MariaDB each `?` takes the name in its place in `bind_params`, where a name
 used twice is listed twice.
 
+### `cargo sqlc tree`
+
+```sh
+cargo sqlc tree                                     # every composed file's templates
+cargo sqlc tree reports/shared_moulds.sqlc          # one composed file's
+cargo sqlc tree --invert shared/theme_closure.sqlc  # the files that hold one template
+```
+
+It prints each composed file's templates as `cargo tree` prints a crate's dependencies: every
+template the file holds, once for every path that leads to it, with the slot each filling stands
+in, and the name written wherever a name stands for a body. A template held more than once gets a
+line with its copies:
+
+```text
+reports/shared_moulds.sqlc
+├── queries/technic_moulds.sqlc
+│   └── shared/scope_moulds.sqlc
+│       └── scopes/technic.sqlc (@scope)
+│           └── shared/theme_closure.sqlc
+└── queries/city_moulds.sqlc
+    └── shared/scope_moulds.sqlc
+        └── scopes/city.sqlc (@scope)
+            └── shared/theme_closure.sqlc
+shared/scope_moulds.sqlc: 2 copies
+shared/theme_closure.sqlc: 2 copies
+```
+
+With `--with` the closure is named once at the head of the statement,
+`shared/theme_closure.sqlc (WITH shared_theme_closure)`, and each place that composed it reads the
+name. Whether the database then reads a copy once or twice is its plan's to say, in `EXPLAIN`.
+`--invert` (`-i`) prints, for one template, each composed file that holds it with its copies: every
+statement a change to it reaches. `cargo sqlc tree` takes `--source`, `--dialect`, `--with`,
+`--views` and `--search-path` as `compose` does.
+
 ### Directives
 
 | directive | composes to |
@@ -597,6 +632,7 @@ table rows of your own, and `name_relations = true` composes as `--with` does.
 the flags a `source::Flags` holds, and says what it made of each: `Standing::Written`, with its
 `ComposedSql`; `Standing::Shape`; or `Standing::Skipped`. `Dialect::ALL` lists the dialects, and
 `"mysql".parse::<Dialect>()` reads one by the name `--dialect` takes.
+`Composer::tree` gives what composing a template writes, as `cargo sqlc tree` prints it.
 
 | type | what it is |
 |---|---|
@@ -610,6 +646,8 @@ the flags a `source::Flags` holds, and says what it made of each: `Standing::Wri
 | `CommandKind` | `Count`, `Union`, `Intersect` or `Except` |
 | `Composer` | composes templates into SQL for one dialect |
 | `ComposedSql` | the composed SQL, and its bind names in placeholder order |
+| `Held` | a template as a composed statement holds it: how it is reached, the name written for it, and what it holds |
+| `Reach` | how a template is reached: `Root`, `Compose`, `Slot`, `Define`, `Source` or `Head` |
 | `source::Flags` | the dialect, `--with`, `--views` and `--search-path` a directory is composed with |
 | `source::Standing` | what composing made of one template: written, a shape, or skipped |
 | `source::Manifest` | what `manifest.json` holds, under the feature `serde` |

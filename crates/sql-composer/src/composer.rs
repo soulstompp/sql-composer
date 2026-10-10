@@ -31,6 +31,65 @@ pub struct ComposedSql {
     pub statement_starts: Vec<usize>,
 }
 
+/// A template as a composed statement holds it, with what it holds in turn: one for every path to
+/// it, as composing writes it.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Held {
+    /// The template, by its path under the search path that holds it.
+    pub template: PathBuf,
+    /// How the template that holds it reaches it.
+    pub reach: Reach,
+    /// The name written in its place: a view, a name the statement declares for it, or the name
+    /// it is given at the head of the statement. Where the name stands in place of its body, it
+    /// holds nothing.
+    pub name: Option<String>,
+    /// What it holds, in the order its text holds it.
+    pub holds: Vec<Held>,
+}
+
+/// How a template reaches the template that holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Reach {
+    /// The template composed.
+    Root,
+    /// `:compose(path)`.
+    Compose,
+    /// `:compose(@slot)`: the slot it fills.
+    Slot(String),
+    /// `:define(path)`.
+    Define,
+    /// A source of `:count`, `:union`, `:intersect` or `:except`.
+    Source,
+    /// Written once at the head of the statement, under its name, as `name_relations` writes it.
+    Head,
+}
+
+impl Held {
+    /// Whether its body is written: at the head of the statement, or in place, where no name
+    /// stands for it.
+    pub fn written(&self) -> bool {
+        self.reach == Reach::Head || self.name.is_none()
+    }
+
+    /// How many times each template's body is written, this one's among them.
+    pub fn copies(&self) -> BTreeMap<PathBuf, usize> {
+        let mut copies = BTreeMap::new();
+        self.count_copies(&mut copies);
+        copies
+    }
+
+    fn count_copies(&self, copies: &mut BTreeMap<PathBuf, usize>) {
+        if self.written() {
+            *copies.entry(self.template.clone()).or_default() += 1;
+        }
+        for held in &self.holds {
+            held.count_copies(copies);
+        }
+    }
+}
+
 /// Composes parsed templates into final SQL.
 ///
 /// Handles dialect-specific placeholder generation, compose reference resolution,
@@ -468,6 +527,168 @@ impl Composer {
             bind_params,
             statement_starts,
         })
+    }
+
+    /// What composing `template` writes: the template, every template it holds, one for each path
+    /// to it, with the template each slot is filled by, and the name written wherever a name
+    /// stands for a body. Under `name_relations`, the relations each statement names come first,
+    /// each once, at the head of the statement that reads them.
+    pub fn tree(&self, template: &Template) -> Result<Held> {
+        self.written_for(template)?;
+        let root = match &template.source {
+            TemplateSource::File(path) => self.shown(path)?,
+            TemplateSource::Literal(name) => PathBuf::from(name),
+        };
+        let mut visited = HashSet::new();
+        if let TemplateSource::File(ref path) = template.source {
+            visited.insert(path.clone());
+        }
+        let mut holds = Vec::new();
+        if self.name_relations {
+            let mut closed = HashMap::new();
+            for elements in split_statements(&template.elements, self.dialect.regime()) {
+                let mut gathered = Gathered::default();
+                if let TemplateSource::File(ref path) = template.source {
+                    if let Ok(root) = std::fs::canonicalize(path) {
+                        gathered.open.insert(root);
+                    }
+                }
+                self.gather(
+                    &elements,
+                    &template.source,
+                    &HashMap::new(),
+                    &mut gathered,
+                    &mut closed,
+                )?;
+                let mut named = self.clone();
+                for (path, name) in &gathered.order {
+                    named.views.insert(path.clone(), name.clone());
+                }
+                for (path, name) in &gathered.order {
+                    let body = named.parse_file(path)?;
+                    let mut visited = HashSet::from([path.clone()]);
+                    holds.push(Held {
+                        template: named.shown(path)?,
+                        reach: Reach::Head,
+                        name: Some(name.clone()),
+                        holds: named.held(
+                            &body.elements,
+                            &body.source,
+                            &HashMap::new(),
+                            &mut visited,
+                        )?,
+                    });
+                }
+                holds.extend(named.held(
+                    &elements,
+                    &template.source,
+                    &HashMap::new(),
+                    &mut visited,
+                )?);
+            }
+        } else {
+            let scoped = self.scoped(template)?;
+            holds = scoped.held(
+                &template.elements,
+                &template.source,
+                &HashMap::new(),
+                &mut visited,
+            )?;
+        }
+        Ok(Held {
+            template: root,
+            reach: Reach::Root,
+            name: None,
+            holds,
+        })
+    }
+
+    /// What `elements`, the elements of the template `within`, hold, as emitting them writes it.
+    fn held(
+        &self,
+        elements: &[Element],
+        within: &TemplateSource,
+        slots: &HashMap<String, PathBuf>,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Result<Vec<Held>> {
+        let mut holds = Vec::new();
+        for element in elements {
+            match element {
+                Element::Sql(_) | Element::Bind(_) => {}
+                Element::Compose(compose_ref) => {
+                    let path = Self::resolve_compose_target(compose_ref, slots, within)?;
+                    let reach = match &compose_ref.target {
+                        ComposeTarget::Path(_) => Reach::Compose,
+                        ComposeTarget::Slot(slot) => Reach::Slot(slot.clone()),
+                        ComposeTarget::Definition(_) => Reach::Define,
+                    };
+                    let template = self.shown(&path)?;
+                    if let Some(name) = self.reference(compose_ref, &path)? {
+                        holds.push(Held {
+                            template,
+                            reach,
+                            name: Some(name),
+                            holds: vec![],
+                        });
+                        continue;
+                    }
+                    let resolved = self.find_template(&path)?;
+                    if !visited.insert(resolved.clone()) {
+                        return Err(Error::CircularReference { path });
+                    }
+                    let body = self.parse_file(&resolved)?;
+                    let inner = self.held(
+                        &body.elements,
+                        &body.source,
+                        &Self::build_child_slots(compose_ref),
+                        visited,
+                    )?;
+                    visited.remove(&resolved);
+                    holds.push(Held {
+                        template,
+                        reach,
+                        name: None,
+                        holds: inner,
+                    });
+                }
+                Element::Command(command) => {
+                    for source in &command.sources {
+                        let template = self.shown(source)?;
+                        if let Some(name) = self.view_reference(source)? {
+                            holds.push(Held {
+                                template,
+                                reach: Reach::Source,
+                                name: Some(name),
+                                holds: vec![],
+                            });
+                            continue;
+                        }
+                        let body = self.parse_file(&self.find_template(source)?)?;
+                        let inner =
+                            self.held(&body.elements, &body.source, &HashMap::new(), visited)?;
+                        holds.push(Held {
+                            template,
+                            reach: Reach::Source,
+                            name: None,
+                            holds: inner,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(holds)
+    }
+
+    /// The template at `path` by its path under the first search path that holds it, or as it is
+    /// written where none does.
+    fn shown(&self, path: &Path) -> Result<PathBuf> {
+        let resolved = std::fs::canonicalize(self.find_template(path)?)?;
+        Ok(self
+            .search_paths
+            .iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .find_map(|root| resolved.strip_prefix(&root).ok().map(Path::to_path_buf))
+            .unwrap_or_else(|| path.to_path_buf()))
     }
 
     /// Walk `elements`, the elements of the template `within`, as emitting them walks them, and

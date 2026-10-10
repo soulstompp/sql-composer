@@ -5,6 +5,8 @@
 //! mirroring the source directory structure, with `manifest.json` beside them.
 
 use clap::{Parser, ValueEnum};
+use sql_composer::composer::{Held, Reach};
+use sql_composer::parser;
 use sql_composer::source::{self, Flags, Manifest, Standing, MANIFEST};
 use sql_composer::types::Dialect;
 use std::collections::BTreeMap;
@@ -54,34 +56,23 @@ struct SqlcArgs {
 enum SqlcCommand {
     /// Compose template files into output SQL files.
     Compose(ComposeArgs),
+    /// Print each composed file's templates as a tree: every template it holds, one for each
+    /// path to it, with the template each slot is filled by.
+    Tree(TreeArgs),
 }
 
-#[derive(Debug, Parser)]
-struct ComposeArgs {
+/// The flags that decide what a template composes to.
+#[derive(Debug, clap::Args)]
+struct Composition {
     /// Source directory containing .sqlc template files.
     /// Falls back to SQLC_SOURCE_DIR env var, then "sqlc".
     #[arg(long, env = "SQLC_SOURCE_DIR", default_value = "sqlc")]
     source: PathBuf,
 
-    /// Target directory for composed .sql files and their manifest.json.
-    /// Falls back to SQLC_TARGET_DIR env var, then ".sql".
-    #[arg(long, env = "SQLC_TARGET_DIR", default_value = ".sql")]
-    target: PathBuf,
-
     /// The database to compose for: its placeholders, and the words it refuses as a name.
     /// `postgres` when it is left out.
     #[arg(long)]
     dialect: Option<DialectArg>,
-
-    /// Skip running `cargo sqlx prepare` after composing.
-    #[arg(long)]
-    skip_prepare: bool,
-
-    /// Verify that composed output matches existing target files, manifest.json among them.
-    /// Exits with code 1 if any files differ or are missing. A flag left out is read from the
-    /// target's manifest.json, and a flag given that it records otherwise is refused.
-    #[arg(long)]
-    verify: bool,
 
     /// A view registry: every `CREATE VIEW <name> AS :define(<path>)` in this template makes
     /// the composed SQL say `SELECT * FROM <name>` wherever `<path>` is composed, instead of
@@ -106,21 +97,62 @@ struct ComposeArgs {
     search_path: Vec<PathBuf>,
 }
 
+#[derive(Debug, Parser)]
+struct ComposeArgs {
+    #[command(flatten)]
+    composition: Composition,
+
+    /// Target directory for composed .sql files and their manifest.json.
+    /// Falls back to SQLC_TARGET_DIR env var, then ".sql".
+    #[arg(long, env = "SQLC_TARGET_DIR", default_value = ".sql")]
+    target: PathBuf,
+
+    /// Skip running `cargo sqlx prepare` after composing.
+    #[arg(long)]
+    skip_prepare: bool,
+
+    /// Verify that composed output matches existing target files, manifest.json among them.
+    /// Exits with code 1 if any files differ or are missing. A flag left out is read from the
+    /// target's manifest.json, and a flag given that it records otherwise is refused.
+    #[arg(long)]
+    verify: bool,
+}
+
+#[derive(Debug, Parser)]
+struct TreeArgs {
+    #[command(flatten)]
+    composition: Composition,
+
+    /// The templates whose composed files to print, by their path under the source. Every
+    /// template written when none is given.
+    templates: Vec<PathBuf>,
+
+    /// Print, for this template, the composed files that hold it and how many copies of it each
+    /// holds.
+    #[arg(
+        long,
+        short = 'i',
+        value_name = "TEMPLATE",
+        conflicts_with = "templates"
+    )]
+    invert: Option<PathBuf>,
+}
+
 fn main() {
     let Cli::Sqlc(args) = Cli::parse();
 
-    match args.command {
-        SqlcCommand::Compose(compose_args) => {
-            if let Err(e) = run_compose(&compose_args) {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        }
+    let ran = match args.command {
+        SqlcCommand::Compose(compose_args) => run_compose(&compose_args),
+        SqlcCommand::Tree(tree_args) => run_tree(&tree_args),
+    };
+    if let Err(e) = ran {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 }
 
 fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let source_dir = &args.source;
+    let source_dir = &args.composition.source;
     let target_dir = &args.target;
 
     if !source_dir.exists() {
@@ -130,7 +162,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let flags = if args.verify {
         recorded_flags(args)?
     } else {
-        given_flags(args)
+        given_flags(&args.composition)
     };
     let standings = source::compose_all(source_dir, &flags)?;
 
@@ -190,8 +222,134 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_tree(args: &TreeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let source_dir = &args.composition.source;
+    if !source_dir.exists() {
+        return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
+    }
+
+    let flags = given_flags(&args.composition);
+    let standings = source::compose_all(source_dir, &flags)?;
+    for template in &args.templates {
+        match standings.get(template) {
+            Some(Standing::Written(_)) => {}
+            Some(standing) => {
+                return Err(format!(
+                    "{}, so it has no composed file",
+                    line(source_dir, template, standing)
+                )
+                .into())
+            }
+            None => {
+                return Err(format!(
+                    "{} is no template under {}",
+                    template.display(),
+                    source_dir.display()
+                )
+                .into())
+            }
+        }
+    }
+
+    let composer = source::composer(source_dir, &flags)?;
+    let mut trees = Vec::new();
+    for (rel_path, standing) in &standings {
+        if !matches!(standing, Standing::Written(_))
+            || !(args.templates.is_empty() || args.templates.contains(rel_path))
+        {
+            continue;
+        }
+        let template = parser::parse_template_file(&source_dir.join(rel_path))?;
+        trees.push(composer.tree(&template)?);
+    }
+
+    let lines = match &args.invert {
+        Some(template) => invert_lines(template, &trees),
+        None => trees
+            .iter()
+            .map(tree_lines)
+            .collect::<Vec<_>>()
+            .join(&[String::new()][..]),
+    };
+    for line in lines {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// A composed file's tree, drawn as `cargo tree` draws one, then a line for each template it
+/// holds more than once.
+fn tree_lines(tree: &Held) -> Vec<String> {
+    let mut lines = vec![label(tree)];
+    branches(&tree.holds, "", &mut lines);
+    for (template, copies) in tree.copies() {
+        if copies > 1 {
+            lines.push(format!("{}: {copies} copies", template.display()));
+        }
+    }
+    lines
+}
+
+/// `holds` drawn under a node whose own lines begin with `prefix`.
+fn branches(holds: &[Held], prefix: &str, lines: &mut Vec<String>) {
+    for (i, held) in holds.iter().enumerate() {
+        let (branch, under) = if i + 1 == holds.len() {
+            ("└── ", "    ")
+        } else {
+            ("├── ", "│   ")
+        };
+        lines.push(format!("{prefix}{branch}{}", label(held)));
+        branches(&held.holds, &format!("{prefix}{under}"), lines);
+    }
+}
+
+/// A template as its tree names it: its path, then the slot it fills, a `:define`, and the name
+/// it is written as.
+fn label(held: &Held) -> String {
+    let mut notes = Vec::new();
+    match &held.reach {
+        Reach::Slot(slot) => notes.push(format!("@{slot}")),
+        Reach::Define => notes.push(":define".to_string()),
+        _ => {}
+    }
+    match (&held.reach, &held.name) {
+        (Reach::Head, Some(name)) => notes.push(format!("WITH {name}")),
+        (_, Some(name)) => notes.push(name.clone()),
+        _ => {}
+    }
+    if notes.is_empty() {
+        held.template.display().to_string()
+    } else {
+        format!("{} ({})", held.template.display(), notes.join(", "))
+    }
+}
+
+/// `template`, then each composed file that holds it, with how many copies of it the file
+/// holds.
+fn invert_lines(template: &Path, trees: &[Held]) -> Vec<String> {
+    fn holds(held: &Held, template: &Path) -> bool {
+        held.template == template || held.holds.iter().any(|h| holds(h, template))
+    }
+    let holding: Vec<&Held> = trees.iter().filter(|tree| holds(tree, template)).collect();
+    let mut lines = vec![template.display().to_string()];
+    for (i, tree) in holding.iter().enumerate() {
+        let branch = if i + 1 == holding.len() {
+            "└── "
+        } else {
+            "├── "
+        };
+        let copies = tree.copies().get(template).copied().unwrap_or(0);
+        let counted = if copies == 1 { "copy" } else { "copies" };
+        lines.push(format!(
+            "{branch}{} ({copies} {counted})",
+            tree.template.display()
+        ));
+    }
+    lines
+}
+
 /// The flags as given, each left out at its default.
-fn given_flags(args: &ComposeArgs) -> Flags {
+fn given_flags(args: &Composition) -> Flags {
     let mut flags = Flags::new(
         args.dialect
             .clone()
@@ -210,13 +368,15 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
     let path = args.target.join(MANIFEST);
     let manifest: Manifest = match std::fs::read_to_string(&path) {
         Ok(text) => Manifest::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(given_flags(args)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(given_flags(&args.composition))
+        }
         Err(e) => return Err(e.into()),
     };
     let at = path.display();
 
     let recorded: Dialect = manifest.dialect.parse()?;
-    let dialect = match args.dialect.clone().map(Dialect::from) {
+    let dialect = match args.composition.dialect.clone().map(Dialect::from) {
         Some(given) if given != recorded => {
             return Err(format!(
                 "--dialect {} is given, and {at} records --dialect {}",
@@ -227,12 +387,12 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
         }
         _ => recorded,
     };
-    if args.with && !manifest.with {
+    if args.composition.with && !manifest.with {
         return Err(
             format!("--with is given, and {at} records the files composed without it").into(),
         );
     }
-    if let Some(given) = &args.views {
+    if let Some(given) = &args.composition.views {
         if manifest.views.as_ref() != Some(given) {
             let recorded = match &manifest.views {
                 Some(views) => format!("--views {}", views.display()),
@@ -245,7 +405,9 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
             .into());
         }
     }
-    if !args.search_path.is_empty() && args.search_path != manifest.search_path {
+    if !args.composition.search_path.is_empty()
+        && args.composition.search_path != manifest.search_path
+    {
         let listed = |paths: &[PathBuf]| match paths {
             [] => "no --search-path".to_string(),
             paths => paths
@@ -256,7 +418,7 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
         };
         return Err(format!(
             "{} is given, and {at} records {}",
-            listed(&args.search_path),
+            listed(&args.composition.search_path),
             listed(&manifest.search_path)
         )
         .into());
@@ -599,8 +761,14 @@ mod tests {
         ] {
             let Cli::Sqlc(args) =
                 Cli::try_parse_from(["cargo", "sqlc", "compose", "--dialect", value]).unwrap();
-            let SqlcCommand::Compose(compose) = args.command;
-            assert_eq!(Dialect::from(compose.dialect.unwrap()), dialect, "{value}");
+            let SqlcCommand::Compose(compose) = args.command else {
+                panic!("{value}");
+            };
+            assert_eq!(
+                Dialect::from(compose.composition.dialect.unwrap()),
+                dialect,
+                "{value}"
+            );
         }
     }
 
@@ -661,7 +829,9 @@ mod tests {
             .into_iter()
             .chain(flags.iter().copied());
         let Cli::Sqlc(args) = Cli::try_parse_from(args).unwrap();
-        let SqlcCommand::Compose(compose) = args.command;
+        let SqlcCommand::Compose(compose) = args.command else {
+            panic!("{flags:?}");
+        };
         compose
     }
 
@@ -802,6 +972,83 @@ mod tests {
 
         std::fs::remove_file(&path).unwrap();
         assert!(run_compose(&verify).is_err());
+    }
+
+    /// The brick example's tree of `template`, `--with` or not.
+    fn brick_tree(template: &str, with: bool) -> Held {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let composer = source::composer(&source, &postgres(with, &[])).unwrap();
+        let template = parser::parse_template_file(&source.join(template)).unwrap();
+        composer.tree(&template).unwrap()
+    }
+
+    #[test]
+    fn test_the_tree_draws_every_path_to_a_template_with_its_copies() {
+        assert_eq!(
+            tree_lines(&brick_tree("reports/shared_moulds.sqlc", false)),
+            [
+                "reports/shared_moulds.sqlc",
+                "├── queries/technic_moulds.sqlc",
+                "│   └── shared/scope_moulds.sqlc",
+                "│       └── scopes/technic.sqlc (@scope)",
+                "│           └── shared/theme_closure.sqlc",
+                "└── queries/city_moulds.sqlc",
+                "    └── shared/scope_moulds.sqlc",
+                "        └── scopes/city.sqlc (@scope)",
+                "            └── shared/theme_closure.sqlc",
+                "shared/scope_moulds.sqlc: 2 copies",
+                "shared/theme_closure.sqlc: 2 copies",
+            ]
+        );
+        assert_eq!(
+            tree_lines(&brick_tree("reports/shared_moulds.sqlc", true)),
+            [
+                "reports/shared_moulds.sqlc",
+                "├── shared/theme_closure.sqlc (WITH shared_theme_closure)",
+                "├── queries/technic_moulds.sqlc",
+                "│   └── shared/scope_moulds.sqlc",
+                "│       └── scopes/technic.sqlc (@scope)",
+                "│           └── shared/theme_closure.sqlc (shared_theme_closure)",
+                "└── queries/city_moulds.sqlc",
+                "    └── shared/scope_moulds.sqlc",
+                "        └── scopes/city.sqlc (@scope)",
+                "            └── shared/theme_closure.sqlc (shared_theme_closure)",
+                "shared/scope_moulds.sqlc: 2 copies",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_the_inverted_tree_gives_each_composed_file_its_copies() {
+        let trees = [
+            brick_tree("reports/shared_moulds.sqlc", false),
+            brick_tree("sets/select_colored_parts.sqlc", false),
+            brick_tree("scopes/city.sqlc", false),
+        ];
+        assert_eq!(
+            invert_lines(Path::new("shared/theme_closure.sqlc"), &trees),
+            [
+                "shared/theme_closure.sqlc",
+                "├── reports/shared_moulds.sqlc (2 copies)",
+                "└── scopes/city.sqlc (1 copy)",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_the_tree_of_a_template_with_no_composed_file_is_refused() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let source = source.display().to_string();
+        for template in ["shared/filtered_set_parts.sqlc", "nowhere.sqlc"] {
+            let Cli::Sqlc(args) =
+                Cli::try_parse_from(["cargo", "sqlc", "tree", "--source", &source, template])
+                    .unwrap();
+            let SqlcCommand::Tree(tree) = args.command else {
+                panic!("{template}");
+            };
+            let err = run_tree(&tree).unwrap_err().to_string();
+            assert!(err.contains(template), "{err}");
+        }
     }
 
     #[test]

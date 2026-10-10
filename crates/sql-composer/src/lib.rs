@@ -42,7 +42,7 @@ mod scan;
 pub mod source;
 pub mod types;
 
-pub use composer::{ComposedSql, Composer};
+pub use composer::{ComposedSql, Composer, Held, Reach};
 pub use error::Error;
 pub use mock::{MockColumn, MockTable};
 pub use types::{

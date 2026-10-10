@@ -43,6 +43,9 @@ pub enum Axis {
     /// Negation: `NOT` over an `AND` or an `OR`, or pushed onto each operand, and `NOT NOT p` as
     /// `p`.
     Negation,
+    /// Join order: the relations of a join of inner joins in another order, each condition at the
+    /// first `ON` where every relation it names is joined.
+    JoinOrder,
     /// How a relation read once is named: inline, as a WITH query at the statement's head, or as
     /// a template of its own.
     Naming,
@@ -53,6 +56,7 @@ pub enum Axis {
 impl Axis {
     /// Each axis, in the order a template is written in their picks.
     pub const ALL: &'static [Axis] = &[
+        Axis::JoinOrder,
         Axis::Naming,
         Axis::Conditions,
         Axis::Negation,
@@ -64,6 +68,7 @@ impl Axis {
         match self {
             Axis::Conditions => "conditions",
             Axis::Negation => "negation",
+            Axis::JoinOrder => "join_order",
             Axis::Naming => "naming",
             Axis::SemiJoin => "semi_join",
         }
@@ -74,6 +79,7 @@ impl Axis {
         match self {
             Axis::Conditions => "where a condition sits",
             Axis::Negation => "negation",
+            Axis::JoinOrder => "join order",
             Axis::Naming => "how a relation read once is named",
             Axis::SemiJoin => "a semi-join's form",
         }
@@ -83,6 +89,7 @@ impl Axis {
     /// for; `resolve` reads the templates it composes.
     fn places(&self, read: &Read, resolve: Resolve, want: Option<Want>) -> Vec<Place> {
         match self {
+            Axis::JoinOrder => join_order::places(read, resolve, want),
             Axis::Naming => naming::places(read, resolve, want),
             Axis::Conditions => conditions::places(read, want),
             Axis::Negation => negation::places(read, want),

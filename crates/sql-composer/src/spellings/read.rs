@@ -368,10 +368,11 @@ impl Stmt {
         }
     }
 
-    /// The first and last tokens of the table factor `factor`.
+    /// The first and last tokens of the table factor `factor`: read from the first token of its
+    /// span, or from a few tokens before it, the nearest that reads back as `factor`.
     pub(crate) fn factor(&self, factor: &TableFactor) -> Option<(usize, usize)> {
         let mut at = self.first_token(factor)?;
-        loop {
+        for _ in 0..8 {
             if let Some((parsed, last)) = self.parse_at(at, |p| p.parse_table_factor()) {
                 if parsed == *factor {
                     return Some((at, last));
@@ -380,11 +381,18 @@ impl Stmt {
             let before = self.before(at)?;
             match &self.tokens[before].token {
                 Token::LParen => {}
-                Token::Word(w) if w.keyword == Keyword::LATERAL || w.keyword == Keyword::ONLY => {}
+                Token::Word(w)
+                    if !matches!(w.keyword, Keyword::JOIN | Keyword::FROM | Keyword::ON) =>
+                {
+                    if w.quote_style.is_some() {
+                        return None;
+                    }
+                }
                 _ => return None,
             }
             at = before;
         }
+        None
     }
 }
 

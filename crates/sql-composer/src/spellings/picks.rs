@@ -43,8 +43,9 @@ pub struct Picks {
     pub naming: Option<String>,
     /// A semi-join's form: `in` or `exists`.
     pub semi_join: Option<String>,
-    /// Join order: one template's join list in the order picked, which takes effect once
-    /// outermost first gives that order.
+    /// Join order: one template's join list in the order picked. [`confirm`] reads whether
+    /// outermost first gives that order; [`spell`] writes no join order, since an order can
+    /// change the plan PostgreSQL makes.
     pub join_order: Option<JoinOrderPick>,
 }
 
@@ -116,14 +117,14 @@ impl Picks {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum JoinRule {
-    /// Outermost first gives the order picked: the rule takes effect.
+    /// Outermost first gives the order picked.
     Confirmed {
         /// The template it was picked on.
         template: PathBuf,
         /// The order picked, which outermost first gives.
         order: Vec<String>,
     },
-    /// Outermost first gives another order, or none: join order stays as written.
+    /// Outermost first gives another order, or none.
     Parted {
         /// The template it was picked on.
         template: PathBuf,
@@ -251,26 +252,18 @@ pub fn outermost_first(text: &str, resolve: Resolve) -> Vec<(Vec<String>, Vec<St
 const ROUNDS: usize = 8;
 
 /// `text`, the template at `template` under its tree, written in `picks`: each axis picked, in
-/// the order [`Axis::ALL`] lists them, until a round changes nothing, and join order outermost
-/// first where its pick confirms the rule. Every place no spelling of a pick reads back at stays
-/// as written; `beside` reads the templates it composes, and a template it says another takes in
-/// is written no WITH query at its head.
+/// the order [`Axis::ALL`] lists them, until a round changes nothing. Join order is never written,
+/// its pick confirmed or not: an order can change the plan PostgreSQL makes, which the text does
+/// not show. Every place no spelling of a pick reads back at stays as written; `beside` reads the
+/// templates it composes, and a template it says another takes in is written no WITH query at
+/// its head.
 pub fn spell(text: &str, template: &Path, picks: &Picks, beside: &Beside) -> String {
-    let resolve = beside.resolve;
     let among = super::beside::Among { beside, template };
-    let join_order = match &picks.join_order {
-        Some(pick) => matches!(confirm(pick, resolve), JoinRule::Confirmed { .. }),
-        None => false,
-    };
     let mut text = text.to_string();
     for _ in 0..ROUNDS {
         let before = text.clone();
         for &axis in Axis::ALL {
-            let pick = match axis {
-                Axis::JoinOrder if join_order => Some(join_order::OUTERMOST),
-                axis => picks.pick(axis),
-            };
-            if let Some(pick) = pick {
+            if let Some(pick) = picks.pick(axis) {
                 text = written_in(&text, axis, pick, among);
             }
         }
@@ -381,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn join_order_takes_effect_once_its_pick_confirms_outermost_first() {
+    fn spell_writes_no_join_order_even_where_its_pick_confirms_outermost_first() {
         let pick = |order: &[&str]| JoinOrderPick {
             template: "shared/scope_sets.sqlc".into(),
             order: order.iter().map(|s| s.to_string()).collect(),
@@ -410,20 +403,32 @@ mod tests {
             join_order: Some(pick(&["s", "sc", "scope"])),
             ..Picks::default()
         };
+        assert!(matches!(
+            confirm(picks.join_order.as_ref().unwrap(), &brick),
+            JoinRule::Confirmed { .. }
+        ));
+        let layers_at = Path::new("layers.sqlc");
         assert_eq!(
-            spell(layers, Path::new("layers.sqlc"), &picks, &Beside::new(&brick)),
-            "SELECT d.filing, n.size, s.name\nFROM (SELECT z.filing, z.name FROM scope z) s\nJOIN (SELECT x.filing, x.layer, x.size FROM demand x) d USING (filing)\nJOIN (SELECT y.filing, y.layer, y.size FROM nameplate y) n USING (filing, layer)"
+            spell(layers, layers_at, &picks, &Beside::new(&brick)),
+            layers
         );
         picks.join_order = Some(pick(&["sc", "s", "scope"]));
         assert_eq!(
-            spell(
-                layers,
-                Path::new("layers.sqlc"),
-                &picks,
-                &Beside::new(&brick)
-            ),
+            spell(layers, layers_at, &picks, &Beside::new(&brick)),
             layers
         );
+        let picks = Picks {
+            join_order: Some(pick(&["s", "sc", "scope"])),
+            ..Picks::default()
+        };
+        for (path, text) in templates() {
+            assert_eq!(
+                spell(&text, &path, &picks, &Beside::new(&brick)),
+                text,
+                "{}",
+                path.display()
+            );
+        }
         assert_eq!(
             outermost_first(layers, &brick),
             [(

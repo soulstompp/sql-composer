@@ -63,11 +63,15 @@ enum SqlcCommand {
     /// Lay out a template's spellings: the other ways to write it that return the same rows,
     /// counted at each place each axis applies, then each written with every other place as
     /// written. A template the templates under --source and --search-path take in is offered no
-    /// WITH query at its head; one taken in only from another tree is not seen.
+    /// WITH query at its head; one taken in only from another tree is not seen. Join orders are
+    /// laid out to be read: spell writes none, since an order can change the plan PostgreSQL
+    /// makes.
     Spellings(SpellingsArgs),
     /// Write the templates under the source in the spellings picked in its spellings.toml, as
     /// `cargo fmt` writes code. A template the templates under --source and --search-path take
     /// in is written no WITH query at its head; one taken in only from another tree is not seen.
+    /// Join order is never written, its pick confirmed or not, since an order can change the plan
+    /// PostgreSQL makes.
     Spell(SpellArgs),
 }
 
@@ -438,8 +442,14 @@ fn spellings_lines(
         } else {
             String::new()
         };
+        let unwritten = if axis.axis == spellings::Axis::JoinOrder {
+            ", laid out to be read: cargo sqlc spell writes no join order, since an order can \
+             change the plan PostgreSQL makes"
+        } else {
+            ""
+        };
         lines.push(format!(
-            "  {}: {}{product}",
+            "  {}: {}{product}{unwritten}",
             axis.axis.words(),
             axis.count()
         ));
@@ -539,13 +549,16 @@ fn run_spell(
                     )?,
                 }
             }
-            spellings::JoinRule::Parted { template, at } => writeln!(
-                out,
-                "Join order stays as written: on {}, {at}",
-                template.display()
-            )?,
-            other => writeln!(out, "Join order stays as written: {other:?}")?,
+            spellings::JoinRule::Parted { template, at } => {
+                writeln!(out, "Join order: on {}, {at}", template.display())?
+            }
+            other => writeln!(out, "Join order: {other:?}")?,
         }
+        writeln!(
+            out,
+            "Join order is not written: an order can change the plan PostgreSQL makes, and \
+             cargo sqlc spellings lays the orders out to be read"
+        )?;
     }
 
     let trees: Vec<PathBuf> = roots(&args.templates).cloned().collect();
@@ -1504,7 +1517,8 @@ mod tests {
                 &*format!(
                     "{source}/shared/scope_sets.sqlc: 108 spelling(s), counted an axis at a time"
                 ),
-                "  join order: 6",
+                "  join order: 6, laid out to be read: cargo sqlc spell writes no join order, since \
+                 an order can change the plan PostgreSQL makes",
                 "    the join of s, sc, scope: 6 of the 3! = 6 orders",
                 "  how a relation read once is named: 1",
                 "  where a condition sits: 18 = 3 × 3 × 2",
@@ -1637,26 +1651,20 @@ mod tests {
     }
 
     #[test]
-    fn join_order_is_shown_on_a_second_template_once_its_pick_confirms_the_rule() {
+    fn spell_writes_no_join_order_even_with_its_pick_confirmed() {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("sqlc");
         std::fs::create_dir_all(&source).unwrap();
-        let layers = |head: &str| {
-            format!(
-                "SELECT d.filing, n.size, s.name\nFROM {head}\nJOIN (SELECT y.filing, y.layer, y.size FROM nameplate y) n USING (filing, layer)\nJOIN (SELECT z.filing, z.name FROM scope z) s USING (filing)\n"
-            )
-        };
+        let b = "SELECT d.filing, n.size, s.name\nFROM (SELECT x.filing, x.layer, x.size FROM demand x) d\nJOIN (SELECT y.filing, y.layer, y.size FROM nameplate y) n USING (filing, layer)\nJOIN (SELECT z.filing, z.name FROM scope z) s USING (filing)\n";
         std::fs::write(
             source.join("a.sqlc"),
             "SELECT s.id, t.id FROM s JOIN t ON t.s = s.id\n",
         )
         .unwrap();
-        std::fs::write(
-            source.join("b.sqlc"),
-            layers("(SELECT x.filing, x.layer, x.size FROM demand x) d"),
-        )
-        .unwrap();
+        std::fs::write(source.join("b.sqlc"), b).unwrap();
         let src = source.display().to_string();
+        let not_written = "Join order is not written: an order can change the plan PostgreSQL \
+                           makes, and cargo sqlc spellings lays the orders out to be read";
 
         std::fs::write(
             source.join("spellings.toml"),
@@ -1665,14 +1673,15 @@ mod tests {
         .unwrap();
         let (out, refused) = printed(&["spell", "--source", &src]);
         assert_eq!(refused, None);
-        assert!(out.starts_with("Join order stays as written: on a.sqlc, outermost first orders it s, t: at place 1 it puts s, joined by 1 column where the pick puts t, joined by 1 column\n"), "{out}");
-        assert!(
-            out.ends_with(
-                "Spelled 0 of 2 template(s) under {src} in the picks\n"
-                    .replace("{src}", &src)
-                    .as_str()
-            ),
-            "{out}"
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "Join order: on a.sqlc, outermost first orders it s, t: at place 1 it puts s, \
+                 joined by 1 column where the pick puts t, joined by 1 column",
+                not_written,
+                &*format!("Spelled 0 of 2 template(s) under {src} in the picks"),
+            ]
         );
 
         std::fs::write(
@@ -1680,22 +1689,25 @@ mod tests {
             "[join_order]\ntemplate = \"a.sqlc\"\norder = [\"s\", \"t\"]\n",
         )
         .unwrap();
-        let (out, refused) = printed(&["spell", "--source", &src]);
-        assert_eq!(refused, None);
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(
-            lines,
-            [
-                "Join order: outermost first, which orders a.sqlc as picked: s, t",
-                "Join order: on b.sqlc it orders d, n, s as s, d, n",
-                &*format!("Spelled {src}/b.sqlc"),
-                &*format!("Spelled 1 of 2 template(s) under {src} in the picks"),
-            ]
-        );
-        assert!(std::fs::read_to_string(source.join("b.sqlc"))
-            .unwrap()
-            .starts_with(
-                "SELECT d.filing, n.size, s.name\nFROM (SELECT z.filing, z.name FROM scope z) s\n"
-            ));
+        for check in [false, true] {
+            let args = ["spell", "--source", &src, "--check"];
+            let (out, refused) = printed(&args[..if check { 4 } else { 3 }]);
+            assert_eq!(refused, None, "{out}");
+            let lines: Vec<&str> = out.lines().collect();
+            assert_eq!(
+                lines,
+                [
+                    "Join order: outermost first, which orders a.sqlc as picked: s, t",
+                    "Join order: on b.sqlc it orders d, n, s as s, d, n",
+                    not_written,
+                    &*if check {
+                        "Spell check OK: all 2 template(s) in the picks".to_string()
+                    } else {
+                        format!("Spelled 0 of 2 template(s) under {src} in the picks")
+                    },
+                ]
+            );
+            assert_eq!(std::fs::read_to_string(source.join("b.sqlc")).unwrap(), b);
+        }
     }
 }

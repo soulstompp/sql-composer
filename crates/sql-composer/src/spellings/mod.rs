@@ -11,9 +11,10 @@
 //! [`lay_out`] counts a template's spellings at each place an axis applies, and writes each of
 //! them with every other place as written: an axis at a time, and never as the product. The
 //! picks are kept in `spellings.toml` at the root of the source ([`Picks`]), and [`spell`] writes
-//! a template in them. Join order's pick is one template's join list in the order picked, and it
-//! takes effect only where outermost first gives that order ([`confirm`]). Nothing reads a
-//! catalog: each condition is read from the template's own text. A template, or a statement of
+//! a template in them. Join orders are laid out and counted to be read, and never written: an
+//! order can change the plan PostgreSQL makes, which the text does not show. Join order's pick is
+//! one template's join list in the order picked, and [`confirm`] reads whether outermost first
+//! gives it. Nothing reads a catalog: each condition is read from the template's own text. A template, or a statement of
 //! it, that the parser cannot read is left as written, and so is every template when no spelling
 //! is picked.
 
@@ -54,7 +55,8 @@ pub enum Axis {
     /// `p`.
     Negation,
     /// Join order: the relations of a join of inner joins in another order, each condition at the
-    /// first `ON` where every relation it names is joined.
+    /// first `ON` where every relation it names is joined. Its orders are laid out to be read and
+    /// never written, since an order can change the plan PostgreSQL makes.
     JoinOrder,
     /// How a relation read once is named: inline, as a WITH query at the statement's head, or as
     /// a template of its own.

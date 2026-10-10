@@ -7,7 +7,11 @@
 //!    named by what the planner did, and a difference nothing names fails the law.
 //! 2. Every template under the source takes exactly one standing. It needs no database, so it is
 //!    `cargo-sqlc`'s test `test_every_template_under_the_source_is_reported_once`.
-//! 3. Each spelling's same round: it waits for the spellings.
+//! 3. Each spelling of each template, written in its place, leaves every composed file that holds
+//!    the template, plain and with `--with`, planning the tree it plans as written. A join of
+//!    eight relations plans one tree whichever end it is written from, and so does one where three
+//!    of the eight are equated on one key; the same join with a ninth relation is planned in the
+//!    pieces it is written in, and its two orders part the plans.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -15,6 +19,7 @@ use std::path::{Path, PathBuf};
 use sql_composer::composer::{ComposedSql, Composer};
 use sql_composer::parser::{parse_template, parse_template_file};
 use sql_composer::source::{self, Flags, Standing};
+use sql_composer::spellings::{lay_out, Beside};
 use sql_composer::types::{Dialect, Element, Template, TemplateSource};
 use sqlx::{AssertSqlSafe, PgPool, Row};
 
@@ -450,6 +455,402 @@ async fn seeds(
     first && second
 }
 
+/// Where two plans part, when they do: the first line that differs, with each plan's.
+fn parting(first: &[String], second: &[String]) -> Option<String> {
+    let at = (0..first.len().max(second.len())).find(|&i| first.get(i) != second.get(i))?;
+    let line = |plan: &[String]| plan.get(at).map_or("nothing", |l| l.trim()).to_string();
+    Some(format!(
+        "line {}, {} against {}",
+        at + 1,
+        line(first),
+        line(second)
+    ))
+}
+
+/// A line of a plan cut into its words, each a run of letters, digits and `_`, and the characters
+/// between them, each apart.
+fn cut(line: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut in_word = false;
+    for c in line.chars() {
+        let word = c.is_alphanumeric() || c == '_';
+        match parts.last_mut() {
+            Some(part) if word && in_word => part.push(c),
+            _ => parts.push(c.to_string()),
+        }
+        in_word = word;
+    }
+    parts
+}
+
+/// The names a plan reads relations by: a subquery's, a WITH query's or a function's, and each
+/// table's alias, but never a table's own name.
+fn aliases(plan: &[String], tables: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for line in plan {
+        let Some((_, after)) = line.split_once(" on ") else {
+            continue;
+        };
+        let words: Vec<&str> = after
+            .split_whitespace()
+            .take_while(|w| !w.starts_with('('))
+            .collect();
+        let name = match words.as_slice() {
+            [name] => name,
+            [_, alias, ..] => alias,
+            [] => continue,
+        };
+        if !tables.contains(*name) {
+            found.insert(name.to_string());
+        }
+    }
+    found
+}
+
+/// The conditions of a plan line such as `Hash Cond: ((a = b) AND (c = d))`, each apart and
+/// sorted, with what the line calls them; none where it holds one condition alone.
+fn conditions(line: &str) -> Option<(&str, Vec<&str>)> {
+    let (label, expr) = line.split_once(": ")?;
+    let expr = expr.trim();
+    let mut depth = 0;
+    for (i, c) in expr.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && i + 1 < expr.len() {
+            return None;
+        }
+    }
+    let inner = expr.strip_prefix('(')?.strip_suffix(')')?;
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0, 0);
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && inner[i..].starts_with(" AND ") {
+            parts.push(&inner[start..i]);
+            start = i + " AND ".len();
+        }
+    }
+    parts.push(&inner[start..]);
+    if parts.len() < 2 {
+        return None;
+    }
+    parts.sort();
+    Some((label, parts))
+}
+
+/// What two plans that part differ by, where they differ only in how the plan is printed: a
+/// node's conditions in another order, or a relation read by another name, each name of the one
+/// plan standing for one name of the other; none where anything else differs.
+fn named(first: &[String], second: &[String], tables: &BTreeSet<String>) -> Option<String> {
+    if first.len() != second.len() {
+        return None;
+    }
+    let (from, to) = (aliases(first, tables), aliases(second, tables));
+
+    // The names of the first plan the second reads by another, where its lines differ in names
+    // alone.
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    for (a, b) in first.iter().zip(second) {
+        let (a, b) = (cut(a), cut(b));
+        if a.len() != b.len() {
+            continue;
+        }
+        for (x, y) in a.into_iter().zip(b) {
+            if x != y && from.contains(&x) && to.contains(&y) {
+                names.entry(x).or_insert(y);
+            }
+        }
+    }
+    let mut taken = BTreeSet::new();
+    for (x, y) in &names {
+        let kept_by_another = from.contains(y) && !names.contains_key(y);
+        if kept_by_another || !taken.insert(y) || x == y {
+            return None;
+        }
+    }
+
+    // Every line of the first, its names renamed, is the second's line, or holds its conditions
+    // in another order.
+    let mut reordered = 0;
+    for (a, b) in first.iter().zip(second) {
+        let renamed: String = cut(a)
+            .into_iter()
+            .map(|part| names.get(&part).cloned().unwrap_or(part))
+            .collect();
+        if renamed == *b {
+            continue;
+        }
+        match (conditions(&renamed), conditions(b)) {
+            (Some(x), Some(y)) if x == y => reordered += 1,
+            _ => return None,
+        }
+    }
+    let mut kinds = Vec::new();
+    if reordered > 0 {
+        kinds.push(format!(
+            "{reordered} line(s) of the same conditions in another order"
+        ));
+    }
+    if !names.is_empty() {
+        let renamed: Vec<String> = names.iter().map(|(a, b)| format!("{a} as {b}")).collect();
+        kinds.push(format!(
+            "relations read by another name, {}",
+            renamed.join(", ")
+        ));
+    }
+    Some(kinds.join(" and "))
+}
+
+/// Every file under `from`, copied to the same place under `to`.
+fn copy_tree(from: &Path, to: &Path) {
+    for entry in walkdir::WalkDir::new(from) {
+        let entry = entry.expect("read failed");
+        let target = to.join(entry.path().strip_prefix(from).expect("under the source"));
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&target).expect("write failed");
+        } else {
+            std::fs::copy(entry.path(), &target).expect("write failed");
+        }
+    }
+}
+
+/// Law 3, composed plain or with `--with`: each spelling `lay_out` writes of each template, written
+/// into a copy of the source in its place, leaves every composed file that holds the template
+/// planning the tree it plans as written, or one that differs as [`named`] says alone.
+async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSet<String>) -> bool {
+    let mode = if with { "--with" } else { "plain" };
+    let mut flags = Flags::new(Dialect::Postgres);
+    flags.with = with;
+    let (composer, standings) = composed(sqlc_dir, with);
+    let mut all_hold = true;
+
+    // Each composed file's plan as written, and the templates its tree holds.
+    let mut files: BTreeMap<PathBuf, (Vec<String>, BTreeSet<PathBuf>)> = BTreeMap::new();
+    for (rel_path, standing) in &standings {
+        let Standing::Written(composed) = standing else {
+            continue;
+        };
+        match explain(pool, composed).await {
+            Ok(plan) => {
+                let holds = copies(&composer, sqlc_dir, rel_path).into_keys().collect();
+                files.insert(rel_path.clone(), (plan, holds));
+            }
+            Err(e) => {
+                let law = format!("{}, {mode}, is planned as written", rel_path.display());
+                all_hold &= verdict(&law, false, &e);
+            }
+        }
+    }
+
+    let copy = tempfile::tempdir().expect("write failed");
+    copy_tree(sqlc_dir, copy.path());
+    let read = |path: &Path| std::fs::read_to_string(sqlc_dir.join(path)).ok();
+    let beside = Beside::of_trees(&read, &[sqlc_dir.to_path_buf()]).expect("read failed");
+    for entry in walkdir::WalkDir::new(sqlc_dir).sort_by_file_name() {
+        let path = entry.expect("read failed").into_path();
+        if path.extension().is_none_or(|ext| ext != "sqlc") {
+            continue;
+        }
+        let rel_path = path.strip_prefix(sqlc_dir).expect("under the source");
+        let text = read(rel_path).expect("read failed");
+        let layout = lay_out(&text, rel_path, &beside);
+        let mut spellings = Vec::new();
+        for axis in &layout.axes {
+            for place in &axis.places {
+                for spelling in place.spellings.iter().skip(1) {
+                    let what = format!("{}, {}: {}", axis.axis.words(), place.what, spelling.name);
+                    spellings.push((what, &spelling.text));
+                }
+            }
+        }
+        let holding: Vec<&PathBuf> = files
+            .iter()
+            .filter(|(_, (_, holds))| holds.contains(rel_path))
+            .map(|(file, _)| file)
+            .collect();
+        if spellings.is_empty() || holding.is_empty() {
+            continue;
+        }
+        let mut parted = Vec::new();
+        let mut kinds = BTreeSet::new();
+        for (what, spelled) in &spellings {
+            std::fs::write(copy.path().join(rel_path), spelled).expect("write failed");
+            let spelled_standings = match source::compose_all(copy.path(), &flags) {
+                Ok(standings) => standings,
+                Err(e) => {
+                    parted.push(format!("{what}: the source does not compose: {e}"));
+                    continue;
+                }
+            };
+            for file in &holding {
+                let Some(Standing::Written(composed)) = spelled_standings.get(*file) else {
+                    parted.push(format!("{what}: {} is not composed", file.display()));
+                    continue;
+                };
+                let (written, _) = &files[*file];
+                match explain(pool, composed).await {
+                    Ok(plan) => {
+                        if let Some(at) = parting(written, &plan) {
+                            match named(written, &plan, tables) {
+                                Some(kind) => {
+                                    kinds.insert(format!("{}: {kind}", file.display()));
+                                }
+                                None => {
+                                    parted.push(format!("{what}: {} parts at {at}", file.display()))
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => parted.push(format!(
+                        "{what}: {} could not be planned: {e}",
+                        file.display()
+                    )),
+                }
+            }
+        }
+        std::fs::write(copy.path().join(rel_path), &text).expect("write failed");
+        let law = format!(
+            "{}, {mode}, plans as written in each of its {} spelling(s), in the {} composed file(s) \
+             holding it",
+            rel_path.display(),
+            spellings.len(),
+            holding.len()
+        );
+        let detail = match (parted.is_empty(), kinds.is_empty()) {
+            (true, true) => "each plans the same tree".to_string(),
+            (true, false) => format!(
+                "each plans the same tree, printed otherwise in {}",
+                kinds.into_iter().collect::<Vec<_>>().join("; ")
+            ),
+            (false, _) => parted.join("; "),
+        };
+        all_hold &= verdict(&law, parted.is_empty(), &detail);
+    }
+    all_hold
+}
+
+/// A join of nine relations, each with its alias and the condition joining it to the next, on keys
+/// no third relation shares.
+const KEYED: [(&str, &str, &str); 9] = [
+    ("lego_cities", "ci", "ci.city_id = pc.city_id"),
+    ("lego_postcodes", "pc", "pc.postcode_id = st.postcode_id"),
+    ("lego_streets", "st", "st.street_id = b.street_id"),
+    ("lego_builders", "b", "b.builder_id = co.builder_id"),
+    ("lego_collection", "co", "co.set_num = s.set_num"),
+    ("lego_sets", "s", "s.theme_id = t.id"),
+    ("lego_themes", "t", "t.parent_id = pt.id"),
+    ("lego_themes", "pt", "pt.parent_id = gt.id"),
+    ("lego_themes", "gt", ""),
+];
+
+/// A join of eight relations, as [`KEYED`] is written, three of them equated on one key: the
+/// collection row's set, the set and the set's inventory.
+const SHARED: [(&str, &str, &str); 8] = [
+    ("lego_cities", "ci", "ci.city_id = pc.city_id"),
+    ("lego_postcodes", "pc", "pc.postcode_id = st.postcode_id"),
+    ("lego_streets", "st", "st.street_id = b.street_id"),
+    ("lego_builders", "b", "b.builder_id = co.builder_id"),
+    ("lego_collection", "co", "co.set_num = s.set_num"),
+    ("lego_sets", "s", "s.set_num = i.set_num"),
+    ("lego_inventories", "i", "i.id = ip.inventory_id"),
+    ("lego_inventory_parts", "ip", ""),
+];
+
+/// `links` as one statement, joined from the first or from the last, each relation joined to the
+/// one already beside it, and one city named.
+fn chain(links: &[(&str, &str, &str)], from_last: bool) -> String {
+    let n = links.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    if from_last {
+        order.reverse();
+    }
+    let mut sql = format!("SELECT ci.name, {}.* FROM ", links[n - 1].1);
+    for (k, &r) in order.iter().enumerate() {
+        let (table, alias, _) = links[r];
+        if k == 0 {
+            sql.push_str(&format!("{table} {alias}"));
+            continue;
+        }
+        let on = if from_last {
+            links[r].2
+        } else {
+            links[r - 1].2
+        };
+        sql.push_str(&format!(" JOIN {table} {alias} ON {on}"));
+    }
+    sql.push_str(" WHERE ci.name = 'Lisboa'");
+    sql
+}
+
+/// Where `links` joined from its first relation and from its last part their plans, when they do.
+async fn orders_part(pool: &PgPool, links: &[(&str, &str, &str)]) -> Option<String> {
+    let mut plans = Vec::new();
+    for from_last in [false, true] {
+        let template = parse_template(
+            &chain(links, from_last),
+            TemplateSource::Literal("chain".into()),
+        )
+        .expect("parse failed");
+        let composed = Composer::new(Dialect::Postgres)
+            .compose(&template)
+            .expect("compose failed");
+        match explain(pool, &composed).await {
+            Ok(plan) => plans.push(plan),
+            Err(e) => return Some(format!("it could not be planned: {e}")),
+        }
+    }
+    parting(&plans[0], &plans[1])
+}
+
+/// Law 3's joins in two orders: eight relations on keys no third shares plan one tree, and so do
+/// eight with three equated on one key; the seed, nine relations on keys no third shares, parts
+/// the plans, the law failing on it as it must. Whether the laws hold, and whether the seed fails.
+async fn joins_in_two_orders(pool: &PgPool) -> (bool, bool) {
+    let mut hold = true;
+    for (law, links) in [
+        (
+            "a join of eight relations, from its first or its last, plans one tree",
+            &KEYED[..8],
+        ),
+        (
+            "a join of eight relations, three of them equated on one key, from its first or its \
+             last, plans one tree",
+            &SHARED[..],
+        ),
+    ] {
+        let parted = orders_part(pool, links).await;
+        hold &= verdict(
+            law,
+            parted.is_none(),
+            &parted.map_or("the two orders plan alike".into(), |at| {
+                format!("the orders part at {at}")
+            }),
+        );
+    }
+    let parted = orders_part(pool, &KEYED).await;
+    println!(
+        "SEED a join of nine relations, from its first or its last: {} — {}",
+        if parted.is_some() {
+            "the law FAILS on it, as it must"
+        } else {
+            "THE LAW HOLDS ON IT"
+        },
+        parted
+            .as_deref()
+            .map_or("the two orders plan alike".into(), |at| format!(
+                "the orders part at {at}"
+            ))
+    );
+    (hold, parted.is_some())
+}
+
 pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> bool {
     println!("\n=== The fit's laws ===");
     let tables = tables(pool, schema).await;
@@ -475,7 +876,14 @@ pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> boo
     }
     let seeds_fail = seeds(pool, sqlc_dir, &mut texts, &tables).await;
 
-    // 3. Each spelling's same round comes here, once the spellings are written.
+    // 3. Each spelling, plain and with --with, plans as written in every file holding its
+    //    template; eight relations plan one tree in either order, and nine part.
+    for with in [false, true] {
+        all_hold &= same_round(pool, sqlc_dir, with, &tables).await;
+    }
+    let (joins_hold, nine) = joins_in_two_orders(pool).await;
+    all_hold &= joins_hold;
+    let seeds_fail = seeds_fail && nine;
 
     println!(
         "=== The fit's laws: {} ===",
@@ -486,4 +894,87 @@ pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> boo
         }
     );
     all_hold && seeds_fail
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|l| l.to_string()).collect()
+    }
+
+    fn tables() -> BTreeSet<String> {
+        ["lego_sets", "lego_themes"].map(String::from).into()
+    }
+
+    #[test]
+    fn a_plan_printed_otherwise_is_named() {
+        let written = plan(&[
+            "Hash Join",
+            "  Hash Cond: ((s.a = t.a) AND (s.b = t.b))",
+            "  ->  Subquery Scan on shared_theme_closure",
+            "  ->  Seq Scan on lego_sets s",
+            "        Filter: (shared_theme_closure.id = s.theme_id)",
+        ]);
+        let spelled = plan(&[
+            "Hash Join",
+            "  Hash Cond: ((s.b = t.b) AND (s.a = t.a))",
+            "  ->  Subquery Scan on tc",
+            "  ->  Seq Scan on lego_sets s",
+            "        Filter: (tc.id = s.theme_id)",
+        ]);
+        assert_eq!(
+            named(&written, &spelled, &tables()).as_deref(),
+            Some(
+                "1 line(s) of the same conditions in another order and relations read by another \
+                 name, shared_theme_closure as tc"
+            )
+        );
+    }
+
+    #[test]
+    fn a_plan_that_differs_otherwise_is_not_named() {
+        let written = plan(&[
+            "Merge Join",
+            "  Merge Cond: (s.id = r.id)",
+            "  ->  Seq Scan on lego_sets s",
+            "  ->  Seq Scan on lego_themes r",
+        ]);
+        let renamed = plan(&[
+            "Merge Join",
+            "  Merge Cond: (x.id = r.id)",
+            "  ->  Seq Scan on lego_sets x",
+            "  ->  Seq Scan on lego_themes r",
+        ]);
+        assert_eq!(
+            named(&written, &renamed, &tables()).as_deref(),
+            Some("relations read by another name, s as x")
+        );
+        let other = |at: usize, line: &str| {
+            let mut spelled = written.clone();
+            spelled[at] = line.to_string();
+            spelled
+        };
+        for (spelled, why) in [
+            (other(1, "  Merge Cond: (r.id = s.id)"), "sides swapped"),
+            (other(2, "  ->  Seq Scan on lego_themes s"), "another table"),
+            (
+                other(1, "  Merge Cond: (s.id = r.parent_id)"),
+                "another column",
+            ),
+            (
+                other(2, "  ->  Seq Scan on lego_sets x"),
+                "an alias renamed in one line alone",
+            ),
+            (
+                other(2, "  ->  Seq Scan on lego_sets r"),
+                "an alias renamed to one the plan holds",
+            ),
+            (written[..3].to_vec(), "a line fewer"),
+        ] {
+            assert!(parting(&written, &spelled).is_some(), "{why}");
+            assert_eq!(named(&written, &spelled, &tables()), None, "{why}");
+        }
+    }
 }

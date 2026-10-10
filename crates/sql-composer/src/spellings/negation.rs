@@ -557,12 +557,12 @@ impl Steps<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::laws::{holds, Trap};
-    use super::super::{written_in, Axis};
+    use super::super::{written_alone, Axis};
     use super::*;
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Negation, pick, &|_| None, true)
+        written_alone(text, Axis::Negation, pick, &|_| None)
     }
 
     #[test]

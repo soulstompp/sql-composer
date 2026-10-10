@@ -31,6 +31,7 @@ mod place;
 mod read;
 mod semi_join;
 
+use beside::Among;
 pub use beside::Beside;
 pub use columns::Resolve;
 pub use picks::{confirm, outermost_first, spell, JoinOrderPick, JoinRule, Picks, FILE};
@@ -107,10 +108,11 @@ impl Axis {
 
     /// The places in `read` this axis applies at, each spelling unchecked, or those `want` asks
     /// for; `resolve` reads the templates it composes.
-    fn places(&self, read: &Read, resolve: Resolve, want: Option<Want>, head: bool) -> Vec<Place> {
+    fn places(&self, read: &Read, want: Option<Want>, among: Among) -> Vec<Place> {
+        let resolve = among.resolve();
         match self {
             Axis::JoinOrder => join_order::places(read, resolve, want),
-            Axis::Naming => naming::places(read, resolve, want, head),
+            Axis::Naming => naming::places(read, want, among),
             Axis::Conditions => conditions::places(read, want),
             Axis::Negation => negation::places(read, want),
             Axis::SemiJoin => semi_join::places(read, want),
@@ -119,9 +121,8 @@ impl Axis {
 }
 
 /// `text` written in `pick` on `axis` wherever the axis applies and a spelling of the pick reads
-/// back as it must; everywhere else as written. `resolve` reads the templates it composes, and
-/// `head` is whether a WITH query may be written at its head.
-fn written_in(text: &str, axis: Axis, pick: &str, resolve: Resolve, head: bool) -> String {
+/// back as it must; everywhere else as written. `among` reads the templates beside it.
+fn written_in(text: &str, axis: Axis, pick: &str, among: Among) -> String {
     let mut text = text.to_string();
     let mut refused = 0;
     for _ in 0..MOVES {
@@ -133,7 +134,7 @@ fn written_in(text: &str, axis: Axis, pick: &str, resolve: Resolve, head: bool) 
             enough: refused + 1,
         };
         let Some(place) = axis
-            .places(&read, resolve, Some(want), head)
+            .places(&read, Some(want), among)
             .into_iter()
             .nth(refused)
         else {
@@ -227,8 +228,7 @@ impl Layout {
 /// `text`, the template at `template` under its tree, with its spellings laid out and counted;
 /// `beside` reads the templates it composes and says whether another takes it in.
 pub fn lay_out(text: &str, template: &Path, beside: &Beside) -> Layout {
-    let head = !beside.takes_in(template);
-    let resolve = beside.resolve;
+    let among = Among { beside, template };
     let reading = read(text);
     let Ok(read) = Read::new(text) else {
         return Layout {
@@ -241,7 +241,7 @@ pub fn lay_out(text: &str, template: &Path, beside: &Beside) -> Layout {
         .map(|&axis| AxisLayout {
             axis,
             places: axis
-                .places(&read, resolve, None, head)
+                .places(&read, None, among)
                 .into_iter()
                 .map(|place| checked(&read, place))
                 .filter(|place| place.choices.len() > 1)
@@ -320,6 +320,22 @@ pub fn read(text: &str) -> Reading {
         unparsed,
         read_back,
     }
+}
+
+/// `text` written in `pick` on `axis`, a template no other takes in, reading the templates it
+/// composes with `resolve`.
+#[cfg(test)]
+fn written_alone(text: &str, axis: Axis, pick: &str, resolve: Resolve) -> String {
+    let beside = Beside::new(resolve);
+    written_in(
+        text,
+        axis,
+        pick,
+        Among {
+            beside: &beside,
+            template: Path::new("template.sqlc"),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -566,14 +582,15 @@ mod census {
     }
 }
 
-/// A tree of templates written in every pick, composed beside the tree as written.
+/// A tree of templates written in every pick, composed beside the tree as written: its WITH
+/// queries stand where they stood and are read from as many places.
 #[cfg(test)]
 mod composed {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::ops::ControlFlow;
     use std::path::{Path, PathBuf};
 
-    use sqlparser::ast::{Query, Visit, Visitor};
+    use sqlparser::ast::{Query, TableFactor, Visit, Visitor};
     use sqlparser::parser::Parser;
 
     use super::{spell, Beside, Picks};
@@ -582,18 +599,33 @@ mod composed {
     use crate::source::{compose_all, Flags, Standing};
     use crate::types::Dialect;
 
-    /// How many WITH clauses stand below the head of each statement of `sql`; none where a
-    /// statement does not parse.
-    fn withs_below_heads(sql: &str) -> Option<usize> {
-        struct Below {
+    /// What a composed file holds of WITH queries: how many WITH clauses stand below the head of
+    /// a statement, and each WITH query at a statement's head that is read from two places or
+    /// more.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Shape {
+        below: usize,
+        shared: BTreeSet<String>,
+    }
+
+    /// The shape of `sql`, a composed file; none where a statement does not parse.
+    fn shape(sql: &str) -> Option<Shape> {
+        struct Walk {
             depth: usize,
-            found: usize,
+            below: usize,
+            heads: Vec<String>,
+            reads: BTreeMap<String, usize>,
         }
-        impl Visitor for Below {
+        impl Visitor for Walk {
             type Break = ();
             fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<()> {
-                if self.depth > 0 && query.with.is_some() {
-                    self.found += 1;
+                if let Some(with) = &query.with {
+                    if self.depth > 0 {
+                        self.below += 1;
+                    } else {
+                        self.heads
+                            .extend(with.cte_tables.iter().map(|c| c.alias.name.value.clone()));
+                    }
                 }
                 self.depth += 1;
                 ControlFlow::Continue(())
@@ -602,10 +634,19 @@ mod composed {
                 self.depth -= 1;
                 ControlFlow::Continue(())
             }
+            fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<()> {
+                if let TableFactor::Table { name, .. } = factor {
+                    *self.reads.entry(name.to_string()).or_default() += 1;
+                }
+                ControlFlow::Continue(())
+            }
         }
         let mut ends = Scanner::new(&POSTGRES).ends(sql);
         ends.push(sql.len());
-        let mut found = 0;
+        let mut found = Shape {
+            below: 0,
+            shared: BTreeSet::new(),
+        };
         let mut start = 0;
         for end in ends {
             let piece = &sql[start..end];
@@ -616,17 +657,26 @@ mod composed {
             for statement in
                 Parser::parse_sql(&Postgres::default(), &masked(&piece[code..])).ok()?
             {
-                let mut below = Below { depth: 0, found: 0 };
-                let _ = statement.visit(&mut below);
-                found += below.found;
+                let mut walk = Walk {
+                    depth: 0,
+                    below: 0,
+                    heads: vec![],
+                    reads: BTreeMap::new(),
+                };
+                let _ = statement.visit(&mut walk);
+                found.below += walk.below;
+                found.shared.extend(
+                    walk.heads
+                        .into_iter()
+                        .filter(|name| walk.reads.get(name).is_some_and(|&n| n > 1)),
+                );
             }
         }
         Some(found)
     }
 
-    /// Each composed file of the tree at `source`, by its template's path, with how many WITH
-    /// clauses stand below its statements' heads.
-    fn composed(source: &Path, search: &[PathBuf], with: bool) -> BTreeMap<PathBuf, Option<usize>> {
+    /// Each composed file of the tree at `source`, by its template's path, with its shape.
+    fn composed(source: &Path, search: &[PathBuf], with: bool) -> BTreeMap<PathBuf, Option<Shape>> {
         let mut flags = Flags::new(Dialect::Postgres);
         flags.with = with;
         flags.search_paths = search.to_vec();
@@ -634,7 +684,7 @@ mod composed {
             .unwrap()
             .into_iter()
             .filter_map(|(path, standing)| match standing {
-                Standing::Written(composed) => Some((path, withs_below_heads(&composed.sql))),
+                Standing::Written(composed) => Some((path, shape(&composed.sql))),
                 _ => None,
             })
             .collect()
@@ -678,10 +728,11 @@ mod composed {
         changed
     }
 
-    /// Every composed file of `source` written in `picks` holds no WITH below a statement's head
-    /// that the file composed from the tree as written does not; how many templates were
-    /// written.
-    fn no_new_withs_below_heads(source: &Path, search: &[PathBuf], picks: &Picks) -> usize {
+    /// Every composed file of `source` written in `picks` holds as many WITH clauses below a
+    /// statement's head as the file composed from the tree as written, and still reads from two
+    /// places or more each WITH query at a head it reads from two or more; how many templates
+    /// were written.
+    fn withs_kept(source: &Path, search: &[PathBuf], picks: &Picks) -> usize {
         let dir = tempfile::tempdir().unwrap();
         let copy = dir.path().join("sqlc");
         let changed = spelled(source, search, picks, &copy);
@@ -692,31 +743,37 @@ mod composed {
                 before.keys().collect::<Vec<_>>(),
                 after.keys().collect::<Vec<_>>()
             );
-            let grown: Vec<String> = before
+            let parted: Vec<String> = before
                 .iter()
-                .filter(|(path, count)| {
-                    after[*path] != **count && (after[*path].is_none() || after[*path] > **count)
+                .filter(|(path, shape)| match (shape, &after[*path]) {
+                    (Some(before), Some(after)) => {
+                        before.below != after.below || !before.shared.is_subset(&after.shared)
+                    }
+                    (None, _) => false,
+                    (Some(_), None) => true,
                 })
-                .map(|(path, count)| format!("{}: {count:?} -> {:?}", path.display(), after[path]))
+                .map(|(path, shape)| format!("{}: {shape:?} -> {:?}", path.display(), after[path]))
                 .collect();
-            assert!(grown.is_empty(), "with: {with}: {grown:#?}");
+            assert!(parted.is_empty(), "with: {with}: {parted:#?}");
         }
         changed
     }
 
-    /// Every axis picked.
-    fn every_axis() -> Picks {
-        Picks::from_toml(
-            "conditions = \"where\"\nnegation = \"pushed\"\nnaming = \"with\"\nsemi_join = \"exists\"\n\n[join_order]\ntemplate = \"shared/scope_sets.sqlc\"\norder = [\"s\", \"sc\", \"scope\"]\n",
-        )
+    /// Every axis picked, naming as `naming` names it.
+    fn every_axis(naming: &str) -> Picks {
+        Picks::from_toml(&format!(
+            "conditions = \"where\"\nnegation = \"pushed\"\nnaming = \"{naming}\"\nsemi_join = \"exists\"\n\n[join_order]\ntemplate = \"shared/scope_sets.sqlc\"\norder = [\"s\", \"sc\", \"scope\"]\n"
+        ))
         .unwrap()
     }
 
     #[test]
-    fn the_brick_templates_written_in_every_pick_compose_no_with_below_a_head() {
+    fn the_brick_templates_written_in_every_pick_keep_their_with_queries() {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
-        let changed = no_new_withs_below_heads(&source, &[], &every_axis());
-        assert!(changed > 0, "{changed}");
+        for naming in ["with", "inline", "template"] {
+            let changed = withs_kept(&source, &[], &every_axis(naming));
+            assert!(changed > 0, "{naming}: {changed}");
+        }
     }
 
     /// The tree `SQLC_CENSUS_SOURCE` names, its composed templates read under it and then under
@@ -724,7 +781,7 @@ mod composed {
     /// `spellings.toml` `SQLC_TREE_PICKS` names, or in every axis but join order.
     #[test]
     #[ignore = "reads a tree of templates: set SQLC_CENSUS_SOURCE"]
-    fn a_tree_written_in_every_pick_composes_no_with_below_a_head() {
+    fn a_tree_written_in_every_pick_keeps_its_with_queries() {
         let source = PathBuf::from(std::env::var("SQLC_CENSUS_SOURCE").unwrap());
         let search: Vec<PathBuf> = std::env::var("SQLC_CENSUS_SEARCH_PATH")
             .map(|paths| paths.split(':').map(PathBuf::from).collect())
@@ -736,7 +793,7 @@ mod composed {
             )
             .unwrap(),
         };
-        let changed = no_new_withs_below_heads(&source, &search, &picks);
+        let changed = withs_kept(&source, &search, &picks);
         println!("{changed} template(s) written in the picks");
     }
 }

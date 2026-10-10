@@ -788,7 +788,7 @@ fn list_place(
 #[cfg(test)]
 mod tests {
     use super::super::laws::{holds, Trap};
-    use super::super::{written_in, Axis};
+    use super::super::{written_alone, Axis};
     use super::*;
     use crate::mock::MockTable;
 
@@ -810,7 +810,7 @@ mod tests {
     }
 
     fn written(text: &str) -> String {
-        written_in(text, Axis::JoinOrder, OUTERMOST, &|_| None, true)
+        written_alone(text, Axis::JoinOrder, OUTERMOST, &|_| None)
     }
 
     const SCOPE_SETS: &str = "SELECT s.set_num, scope.name AS theme_group\nFROM lego_sets s\nJOIN (\n    :compose(@scope)\n) sc ON sc.theme_id = s.theme_id\nJOIN lego_themes scope ON scope.id = sc.scope_id\nWHERE s.year >= :bind(min_year)";
@@ -898,7 +898,7 @@ mod tests {
         ] {
             assert_eq!(why_kept(text), why, "{text}");
             assert_eq!(
-                written_in(text, Axis::JoinOrder, OUTERMOST, &|_| None, true),
+                written_alone(text, Axis::JoinOrder, OUTERMOST, &|_| None),
                 text
             );
         }
@@ -947,7 +947,7 @@ mod tests {
         );
         for text in [unqualified.0, star.0] {
             assert_eq!(
-                written_in(text, Axis::JoinOrder, OUTERMOST, &|_| None, true),
+                written_alone(text, Axis::JoinOrder, OUTERMOST, &|_| None),
                 text
             );
         }

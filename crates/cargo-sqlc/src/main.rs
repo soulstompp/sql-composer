@@ -1553,11 +1553,12 @@ mod tests {
             "--axis",
             "naming",
         ]);
+        // Five templates take in shared/purchase_sets.sqlc, so its :compose is not written inline.
         assert!(
-            out.contains("    the relation purchase_sets (a WITH query): 3\n"),
+            out.contains("    the relation purchase_sets (a WITH query): 2\n"),
             "{out}"
         );
-        assert_eq!(out.lines().filter(|l| l.starts_with("-- ")).count(), 3);
+        assert_eq!(out.lines().filter(|l| l.starts_with("-- ")).count(), 2);
         let (_, refused) = printed(&[
             "spellings",
             "--source",

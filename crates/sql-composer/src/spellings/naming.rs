@@ -10,9 +10,15 @@
 //! A template composed in a `FROM` is written inline from its own text, each slot it leaves open
 //! written as the template this `:compose` fills it with. A relation the statement writes inline
 //! is not made a template of its own here: that needs a file named for it. A statement with a
-//! WITH anywhere but at its head is left as written, and so is a statement that writes. A template
-//! another takes in is offered no WITH query at its head, which would stand below the head of the
-//! statement it is composed into; a WITH query it holds already can still be written inline.
+//! WITH anywhere but at its head is left as written, and so is a statement that writes.
+//!
+//! A template another takes in keeps its head as written: nothing moves to a WITH query at its
+//! head, and no WITH query at its head is written inline. Composed into a `FROM`, a WITH query at
+//! its head keeps it a level of its own in the statement it is composed into, and a new one would
+//! add a level. A `:compose` is written inline only where it is the one place any template takes
+//! in the template it names: composed with `--with`, every template that takes in the same one
+//! reads one WITH query PostgreSQL computes once, and one of them written inline would leave the
+//! others reading it alone, where PostgreSQL writes it into the plan instead.
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -25,6 +31,7 @@ use sqlparser::ast::{
 use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::Token;
 
+use super::beside::Among;
 use super::columns::Resolve;
 use super::extent::{spaced_from, spaced_to};
 use super::place::{enough, passed, wants, Choice, Edits, Place, Want};
@@ -163,12 +170,9 @@ impl Visitor for Walk {
 }
 
 /// Each relation read once in `read`, with each naming it reads back in.
-pub(crate) fn places(
-    read: &Read,
-    resolve: Resolve,
-    want: Option<Want>,
-    to_head: bool,
-) -> Vec<Place> {
+pub(crate) fn places(read: &Read, want: Option<Want>, among: Among) -> Vec<Place> {
+    let resolve = among.resolve();
+    let head_kept = among.head_kept();
     let mut places = Vec::new();
     for (at, statement) in read.parsed() {
         let Statement::Query(query) = &statement.ast else {
@@ -208,12 +212,13 @@ pub(crate) fn places(
             let name = normal(&alias.name);
             let free_name = !head.iter().any(|c| normal(&c.alias.name) == name)
                 && !form.reads.contains_key(&name);
-            if to_head && factor.free && free_name && wants(want, WITH) {
+            if !head_kept && factor.free && free_name && wants(want, WITH) {
                 if let Some(choice) = names.hoisted(&head, factor, alias, subquery) {
                     choices.push(choice);
                 }
             }
-            if let Some(compose) = compose.filter(|_| wants(want, INLINE)) {
+            let inline = compose.filter(|c| wants(want, INLINE) && one_take(c, among));
+            if let Some(compose) = inline {
                 if let Some(choice) = names.inlined(factor, compose, resolve) {
                     choices.push(choice);
                 }
@@ -249,7 +254,7 @@ pub(crate) fn places(
         let Some(with) = &query.with else {
             continue;
         };
-        if with.recursive {
+        if with.recursive || head_kept {
             continue;
         }
         for (j, cte) in with.cte_tables.iter().enumerate() {
@@ -293,7 +298,8 @@ pub(crate) fn places(
                     choices.push(choice);
                 }
             }
-            if let Some(compose) = compose.filter(|_| wants(want, INLINE)) {
+            let inline = compose.filter(|c| wants(want, INLINE) && one_take(c, among));
+            if let Some(compose) = inline {
                 if let Some(choice) =
                     names.resolved_at_reader(with, j, cte, reader, compose, resolve)
                 {
@@ -746,6 +752,14 @@ fn subquery_last(statement: &Stmt, query: &Query) -> usize {
         .unwrap_or(first)
 }
 
+/// Whether `compose` is the one place any template takes in the template it names.
+fn one_take(compose: &ComposeRef, among: Among) -> bool {
+    match &compose.target {
+        ComposeTarget::Path(path) => among.inline(path),
+        _ => false,
+    }
+}
+
 /// A relation read by `name`, as a `FROM` holds it.
 fn table_named(name: &str) -> Option<TableFactor> {
     let query = reparse(&format!("SELECT * FROM {name}"), |p| p.parse_query())?;
@@ -786,7 +800,7 @@ fn replace_factor(statement: &mut Statement, index: usize, with: TableFactor) {
 #[cfg(test)]
 mod tests {
     use super::super::laws::{holds, Trap};
-    use super::super::{written_in, Axis};
+    use super::super::{written_alone, Axis};
     use super::*;
     use crate::mock::MockTable;
     use std::path::Path;
@@ -805,7 +819,7 @@ mod tests {
     }
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Naming, pick, &resolve, true)
+        written_alone(text, Axis::Naming, pick, &resolve)
     }
 
     #[test]
@@ -880,15 +894,22 @@ mod tests {
     #[test]
     fn each_place_is_counted_with_each_naming() {
         let read = Read::new("WITH a AS (SELECT 1 AS x)\nSELECT a.x, sc.theme_id FROM a JOIN (\n    :compose(scopes/city.sqlc)\n) sc ON true").unwrap();
-        let found: Vec<(String, Vec<String>)> = places(&read, &resolve, None, true)
-            .iter()
-            .map(|p| {
-                (
-                    p.what.clone(),
-                    p.choices.iter().map(|c| c.name.clone()).collect(),
-                )
-            })
-            .collect();
+        let found: Vec<(String, Vec<String>)> = places(
+            &read,
+            None,
+            Among {
+                beside: &super::super::Beside::new(&resolve),
+                template: Path::new("t.sqlc"),
+            },
+        )
+        .iter()
+        .map(|p| {
+            (
+                p.what.clone(),
+                p.choices.iter().map(|c| c.name.clone()).collect(),
+            )
+        })
+        .collect();
         assert_eq!(
             found,
             vec![
@@ -944,48 +965,125 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_template_another_takes_in_is_offered_no_with_query_at_its_head() {
-        use super::super::{lay_out, spell, Beside, Picks};
+    /// The templates `files` lay in a tree of their own, with what reads them beside it.
+    fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            std::fs::write(dir.path().join(path), text).unwrap();
+        }
+        dir
+    }
+
+    /// Each naming place of `text`, the template at `path` in the tree at `root`, with the names
+    /// of its spellings.
+    fn namings(root: &Path, text: &str, path: &str) -> Vec<Vec<String>> {
+        use super::super::{lay_out, Beside};
+        let read = |p: &Path| std::fs::read_to_string(root.join(p)).ok();
+        let beside = Beside::of_trees(&read, &[root.to_path_buf()]).unwrap();
+        let layout = lay_out(text, Path::new(path), &beside);
+        let axis = layout.axes.iter().find(|a| a.axis == Axis::Naming).unwrap();
+        axis.places
+            .iter()
+            .map(|p| p.spellings.iter().map(|s| s.name.clone()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn a_template_another_takes_in_keeps_its_head_as_written() {
+        use super::super::{spell, Beside, Picks};
         let inner = "SELECT d.x FROM (SELECT t.x FROM t) d\n";
+        let held = "WITH d AS (SELECT t.x FROM t)\nSELECT d.x FROM d\n";
         let outer = "SELECT o.x FROM (\n    :compose(inner.sqlc)\n) o\n";
-        std::fs::write(dir.path().join("inner.sqlc"), inner).unwrap();
-        std::fs::write(dir.path().join("outer.sqlc"), outer).unwrap();
-        let root = dir.path().to_path_buf();
-        let read = |path: &Path| std::fs::read_to_string(root.join(path)).ok();
-        let beside = Beside::of_trees(&read, std::slice::from_ref(&root)).unwrap();
-        let namings = |text: &str, path: &str| -> Vec<Vec<String>> {
-            let layout = lay_out(text, Path::new(path), &beside);
-            let axis = layout.axes.iter().find(|a| a.axis == Axis::Naming).unwrap();
-            axis.places
-                .iter()
-                .map(|p| p.spellings.iter().map(|s| s.name.clone()).collect())
-                .collect()
-        };
-        assert!(namings(inner, "inner.sqlc").is_empty());
+        let dir = tree(&[("inner.sqlc", inner), ("outer.sqlc", outer)]);
+        let root = dir.path();
+        assert!(
+            namings(root, inner, "inner.sqlc").is_empty(),
+            "nothing moves to its head"
+        );
+        assert!(
+            namings(root, held, "inner.sqlc").is_empty(),
+            "no WITH query of its head is written inline"
+        );
         assert_eq!(
-            namings(outer, "outer.sqlc"),
+            namings(root, held, "alone.sqlc"),
+            [["a WITH query at the head", "inline"]]
+        );
+        assert_eq!(
+            namings(root, outer, "outer.sqlc"),
             [[
                 "a template of its own",
                 "a WITH query at the head",
                 "inline"
             ]]
         );
+        let read = |p: &Path| std::fs::read_to_string(root.join(p)).ok();
+        let beside = Beside::of_trees(&read, &[root.to_path_buf()]).unwrap();
+        for pick in ["with", "inline"] {
+            let picks = Picks::from_toml(&format!("naming = \"{pick}\"")).unwrap();
+            assert_eq!(
+                spell(held, Path::new("inner.sqlc"), &picks, &beside),
+                held,
+                "{pick}"
+            );
+            assert_eq!(
+                spell(inner, Path::new("inner.sqlc"), &picks, &beside),
+                inner,
+                "{pick}"
+            );
+        }
         let picks = Picks::from_toml("naming = \"with\"").unwrap();
-        assert_eq!(
-            spell(inner, Path::new("inner.sqlc"), &picks, &beside),
-            inner
-        );
         assert_eq!(
             spell(outer, Path::new("outer.sqlc"), &picks, &beside),
             "WITH o AS (\n    :compose(inner.sqlc)\n)\nSELECT o.x FROM o\n"
         );
-        let held = "WITH d AS (SELECT t.x FROM t)\nSELECT d.x FROM d\n";
+    }
+
+    #[test]
+    fn a_compose_is_written_inline_only_where_it_alone_takes_in_its_template() {
+        let closure = "SELECT t.id FROM themes t\n";
+        let once = "SELECT c.id FROM (\n    :compose(closure.sqlc)\n) c\n";
+        let shared = "SELECT u.id FROM (\n    :compose(shared.sqlc)\n) u\n";
+        let dir = tree(&[
+            ("closure.sqlc", closure),
+            ("once.sqlc", once),
+            ("shared.sqlc", "SELECT s.id FROM s\n"),
+            ("first.sqlc", shared),
+            ("second.sqlc", shared),
+        ]);
+        let root = dir.path();
         assert_eq!(
-            namings(held, "inner.sqlc"),
-            [["a WITH query at the head", "inline"]],
-            "a WITH query a template holds already can still be written inline"
+            namings(root, once, "once.sqlc"),
+            [[
+                "a template of its own",
+                "a WITH query at the head",
+                "inline"
+            ]]
+        );
+        assert_eq!(
+            namings(root, shared, "first.sqlc"),
+            [["a template of its own", "a WITH query at the head"]],
+            "another template takes in shared.sqlc too"
+        );
+        let twice = "SELECT a.id FROM (\n    :compose(closure.sqlc)\n) a JOIN (\n    :compose(closure.sqlc)\n) b ON b.id = a.id\n";
+        let dir = tree(&[("closure.sqlc", closure), ("twice.sqlc", twice)]);
+        assert_eq!(
+            namings(dir.path(), twice, "twice.sqlc"),
+            [
+                ["a template of its own", "a WITH query at the head"],
+                ["a template of its own", "a WITH query at the head"]
+            ],
+            "the template takes in closure.sqlc twice itself"
+        );
+        let head = "WITH c AS (\n    :compose(shared.sqlc)\n)\nSELECT c.id FROM c\n";
+        let dir = tree(&[
+            ("shared.sqlc", "SELECT s.id FROM s\n"),
+            ("head.sqlc", head),
+            ("first.sqlc", shared),
+        ]);
+        assert_eq!(
+            namings(dir.path(), head, "head.sqlc"),
+            [["a WITH query at the head", "a template of its own"]],
+            "a WITH query's template is written at its reader, not inline"
         );
     }
 }

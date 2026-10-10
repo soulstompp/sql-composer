@@ -457,11 +457,11 @@ impl Visitor for ReadsVisit {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{written_in, Axis};
+    use super::super::{written_alone, Axis};
     use super::*;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Conditions, pick, &|_| None, true)
+        written_alone(text, Axis::Conditions, pick, &|_| None)
     }
 
     const SETS: &str = "SELECT s.set_num, t.name\nFROM lego_sets s\nJOIN lego_themes t ON t.id = s.theme_id\nWHERE s.year >= :bind(min_year)\n  AND t.name = 'City'";
@@ -654,11 +654,11 @@ mod tests {
             "SELECT s.set_num, t.name\nFROM sets s\nLEFT JOIN themes t ON t.id = s.theme_id AND t.name = 'City'\nWHERE s.year >= :bind(min_year)",
         );
         assert_eq!(
-            written_in(near.0, Axis::Conditions, ON, &|_| None, true),
+            written_alone(near.0, Axis::Conditions, ON, &|_| None),
             near.0
         );
         for pick in [ON, WHERE] {
-            let spelled = written_in(written, Axis::Conditions, pick, &|_| None, true);
+            let spelled = written_alone(written, Axis::Conditions, pick, &|_| None);
             let found = super::super::laws::holds(written, &spelled, near, &trap);
             assert_eq!(found.written, 2, "{spelled}");
         }

@@ -416,12 +416,12 @@ fn as_in(
 #[cfg(test)]
 mod tests {
     use super::super::laws::{holds, Trap};
-    use super::super::{written_in, Axis};
+    use super::super::{written_alone, Axis};
     use super::*;
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::SemiJoin, pick, &|_| None, true)
+        written_alone(text, Axis::SemiJoin, pick, &|_| None)
     }
 
     const IN_FORM: &str =

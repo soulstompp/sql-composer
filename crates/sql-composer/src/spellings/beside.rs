@@ -1,7 +1,7 @@
-//! The templates beside the one a spelling reads: how to read each it composes, and which of them
-//! other templates take in.
+//! The templates beside the one a spelling reads: how to read each it composes, and which
+//! templates take in which.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use super::columns::Resolve;
@@ -11,12 +11,21 @@ use crate::types::{ComposeTarget, Element};
 
 /// The templates beside the one a spelling reads.
 ///
-/// A template another takes in is not offered a WITH query at its own head: composed into a
-/// `FROM`, that WITH would stand below the head of the statement it is composed into. Which
-/// templates are taken in is read from the trees given to [`Beside::of_trees`]. A template taken
-/// in only from outside those trees cannot be seen there, as the templates of a tree that another
-/// tree composes over `--search-path` are taken in from that other tree, and is read as taken in
-/// by none.
+/// A template another takes in keeps its head as written. No subquery or template of it moves to
+/// a WITH query at its head, and no WITH query at its head is written inline: composed into a
+/// `FROM`, a WITH query at its head keeps it a level of its own in the statement it is composed
+/// into, and a new one would add a level.
+///
+/// A `:compose` is written inline only where it is the one place any template takes in the
+/// template it names. Composed with `--with`, the templates that take in the same template read
+/// one WITH query named for it, which PostgreSQL computes once for all of them; one of them
+/// written inline would leave that WITH query read by the others alone, and PostgreSQL then
+/// writes it into the plan where it is read.
+///
+/// Which templates take in which is read from the trees given to [`Beside::of_trees`]. A template
+/// taken in only from outside those trees cannot be seen there, as the templates of a tree that
+/// another tree composes over `--search-path` are taken in from that other tree, and is read as
+/// taken in by none.
 ///
 /// ```
 /// use std::path::Path;
@@ -30,16 +39,17 @@ use crate::types::{ComposeTarget, Element};
 ///     axis.places.iter().map(|p| p.spellings.len()).sum::<usize>()
 /// };
 /// assert_eq!(naming(&beside), 2);
-/// beside.taken.insert("d.sqlc".into());
+/// beside.take_in("report.sqlc", "d.sqlc");
 /// assert_eq!(naming(&beside), 0);
 /// ```
 #[non_exhaustive]
 pub struct Beside<'r> {
     /// Reads a template a template composes, by its path as `:compose` names it.
     pub resolve: Resolve<'r>,
-    /// Every template another takes in, by its path as they name it: by `:compose`, a slot's
-    /// fill, `:union`, `:count`, `:intersect`, `:except` or `:define`.
-    pub taken: BTreeSet<PathBuf>,
+    /// Each template another takes in, by its path as they name it, with each template that
+    /// takes it in, by its path under its tree, once for each time it does: by `:compose`, a
+    /// slot's fill, `:union`, `:count`, `:intersect`, `:except` or `:define`.
+    pub takers: BTreeMap<PathBuf, Vec<PathBuf>>,
 }
 
 impl<'r> Beside<'r> {
@@ -47,12 +57,12 @@ impl<'r> Beside<'r> {
     pub fn new(resolve: Resolve<'r>) -> Self {
         Beside {
             resolve,
-            taken: BTreeSet::new(),
+            takers: BTreeMap::new(),
         }
     }
 
-    /// `resolve`, with every template the templates under `roots` take in, each read as the
-    /// template reader reads it. A template the reader refuses takes in none.
+    /// `resolve`, with each template the templates under `roots` take in, and who takes it in,
+    /// each read as the template reader reads it. A template the reader refuses takes in none.
     pub fn of_trees(resolve: Resolve<'r>, roots: &[PathBuf]) -> Result<Self> {
         let mut beside = Beside::new(resolve);
         for root in roots {
@@ -63,15 +73,57 @@ impl<'r> Beside<'r> {
                     continue;
                 }
                 let text = std::fs::read_to_string(path)?;
-                beside.taken.extend(taken_in(&text));
+                let taker = path.strip_prefix(root).unwrap_or(path);
+                for template in taken_in(&text) {
+                    beside.take_in(taker, template);
+                }
             }
         }
         Ok(beside)
     }
 
+    /// Record that `taker` takes in `template` once more, each by its path under its tree.
+    pub fn take_in(&mut self, taker: impl AsRef<Path>, template: impl AsRef<Path>) {
+        self.takers
+            .entry(plain(template.as_ref()))
+            .or_default()
+            .push(plain(taker.as_ref()));
+    }
+
     /// Whether another template takes in `template`, by its path under its tree.
     pub fn takes_in(&self, template: &Path) -> bool {
-        self.taken.contains(&plain(template))
+        !self.takers_of(template).is_empty()
+    }
+
+    /// Each template that takes in `template`, once for each time it does.
+    pub fn takers_of(&self, template: &Path) -> &[PathBuf] {
+        self.takers.get(&plain(template)).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// A template's place among the templates beside it, as the naming axis reads it.
+#[derive(Clone, Copy)]
+pub(crate) struct Among<'b> {
+    pub(crate) beside: &'b Beside<'b>,
+    /// The template, by its path under its tree.
+    pub(crate) template: &'b Path,
+}
+
+impl<'b> Among<'b> {
+    /// Reads a template the template composes.
+    pub(crate) fn resolve(&self) -> Resolve<'b> {
+        self.beside.resolve
+    }
+
+    /// Whether the template keeps its head as written: another takes it in.
+    pub(crate) fn head_kept(&self) -> bool {
+        self.beside.takes_in(self.template)
+    }
+
+    /// Whether a `:compose` of the template at `composed` may be written inline: it is the one
+    /// place any template takes that template in.
+    pub(crate) fn inline(&self, composed: &Path) -> bool {
+        self.beside.takers_of(composed).len() <= 1
     }
 }
 
@@ -137,8 +189,8 @@ mod tests {
         );
         let beside = Beside::of_trees(&|_| None, &[dir.path().to_path_buf()]).unwrap();
         let taken: Vec<String> = beside
-            .taken
-            .iter()
+            .takers
+            .keys()
             .map(|p| p.display().to_string())
             .collect();
         assert_eq!(
@@ -157,6 +209,14 @@ mod tests {
             ]
         );
         assert!(beside.takes_in(Path::new("shared/b.sqlc")));
+        assert_eq!(
+            beside.takers_of(Path::new("e.sqlc")),
+            [PathBuf::from("d.sqlc")]
+        );
+        assert_eq!(
+            beside.takers_of(Path::new("rows/c.sqlc")),
+            [PathBuf::from("a.sqlc")]
+        );
         assert!(beside.takes_in(Path::new("./rows/c.sqlc")));
         assert!(!beside.takes_in(Path::new("a.sqlc")));
     }

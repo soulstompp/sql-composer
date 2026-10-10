@@ -257,7 +257,7 @@ const ROUNDS: usize = 8;
 /// is written no WITH query at its head.
 pub fn spell(text: &str, template: &Path, picks: &Picks, beside: &Beside) -> String {
     let resolve = beside.resolve;
-    let head = !beside.takes_in(template);
+    let among = super::beside::Among { beside, template };
     let join_order = match &picks.join_order {
         Some(pick) => matches!(confirm(pick, resolve), JoinRule::Confirmed { .. }),
         None => false,
@@ -271,7 +271,7 @@ pub fn spell(text: &str, template: &Path, picks: &Picks, beside: &Beside) -> Str
                 axis => picks.pick(axis),
             };
             if let Some(pick) = pick {
-                text = written_in(&text, axis, pick, resolve, head);
+                text = written_in(&text, axis, pick, among);
             }
         }
         if text == before {

@@ -825,6 +825,15 @@ mod tests {
                 unwritten.is_empty(),
                 "in the manifest, not written: {unwritten:?}"
             );
+            let absent: Vec<_> = manifest
+                .files
+                .keys()
+                .filter(|f| !on_disk.contains(f))
+                .collect();
+            assert!(
+                absent.is_empty(),
+                "in the manifest, not on disk: {absent:?}"
+            );
             assert_eq!(on_disk.len(), manifest.files.len());
             assert!(on_disk.iter().all(|f| listed(f) == 1), "{on_disk:?}");
         }

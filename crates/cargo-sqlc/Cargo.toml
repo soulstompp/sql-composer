@@ -15,7 +15,7 @@ name = "cargo-sqlc"
 path = "src/main.rs"
 
 [dependencies]
-sql-composer = { workspace = true, features = ["serde", "respell"] }
+sql-composer = { workspace = true, features = ["serde", "respell", "spellings"] }
 clap.workspace = true
 walkdir.workspace = true
 tempfile.workspace = true

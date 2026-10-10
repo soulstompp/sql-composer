@@ -8,6 +8,7 @@ use clap::{Parser, ValueEnum};
 use sql_composer::composer::{Held, Reach};
 use sql_composer::parser;
 use sql_composer::source::{self, Flags, Manifest, Standing, MANIFEST};
+use sql_composer::spellings;
 use sql_composer::types::Dialect;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -59,6 +60,13 @@ enum SqlcCommand {
     /// Print each composed file's templates as a tree: every template it holds, one for each
     /// path to it, with the template each slot is filled by.
     Tree(TreeArgs),
+    /// Lay out a template's spellings: the other ways to write it that return the same rows,
+    /// counted at each place each axis applies, then each written with every other place as
+    /// written.
+    Spellings(SpellingsArgs),
+    /// Write the templates under the source in the spellings picked in its spellings.toml, as
+    /// `cargo fmt` writes code.
+    Spell(SpellArgs),
 }
 
 /// The flags that decide what a template composes to.
@@ -145,12 +153,55 @@ struct TreeArgs {
     invert: Option<PathBuf>,
 }
 
+/// Where the spelling commands read templates.
+#[derive(Debug, clap::Args)]
+struct Templates {
+    /// Source directory containing .sqlc template files, and spellings.toml at its root.
+    /// Falls back to SQLC_SOURCE_DIR env var, then "sqlc".
+    #[arg(long, env = "SQLC_SOURCE_DIR", default_value = "sqlc")]
+    source: PathBuf,
+
+    /// Another directory to look for the templates a template composes in, after the source.
+    /// Repeat it to search more than one.
+    #[arg(long = "search-path", value_name = "DIR")]
+    search_path: Vec<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+struct SpellingsArgs {
+    #[command(flatten)]
+    templates: Templates,
+
+    /// The template, by its path under the source.
+    template: PathBuf,
+
+    /// Write the spellings of this axis alone, by its key in spellings.toml: join_order, naming,
+    /// conditions, negation or semi_join. Every axis is counted.
+    #[arg(long, value_name = "KEY")]
+    axis: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct SpellArgs {
+    #[command(flatten)]
+    templates: Templates,
+
+    /// Report each template not written in the picks, and write nothing. Exits with code 1 if
+    /// any is not.
+    #[arg(long)]
+    check: bool,
+}
+
 fn main() {
     let Cli::Sqlc(args) = Cli::parse();
 
     let ran = match args.command {
         SqlcCommand::Compose(compose_args) => run_compose(&compose_args),
         SqlcCommand::Tree(tree_args) => run_tree(&tree_args),
+        SqlcCommand::Spellings(spellings_args) => {
+            run_spellings(&spellings_args, &mut std::io::stdout())
+        }
+        SqlcCommand::Spell(spell_args) => run_spell(&spell_args, &mut std::io::stdout()),
     };
     if let Err(e) = ran {
         eprintln!("Error: {e}");
@@ -305,6 +356,229 @@ fn run_tree(args: &TreeArgs) -> Result<(), Box<dyn std::error::Error>> {
     for line in lines {
         println!("{line}");
     }
+    Ok(())
+}
+
+/// Reads a template another composes, under the source and then each search path.
+fn resolver(templates: &Templates) -> impl Fn(&Path) -> Option<String> + '_ {
+    move |path: &Path| {
+        std::iter::once(&templates.source)
+            .chain(&templates.search_path)
+            .find_map(|root| std::fs::read_to_string(root.join(path)).ok())
+    }
+}
+
+fn run_spellings(
+    args: &SpellingsArgs,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = &args.templates.source;
+    let path = source.join(&args.template);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let only = match &args.axis {
+        Some(key) => Some(
+            *spellings::Axis::ALL
+                .iter()
+                .find(|axis| axis.key() == key)
+                .ok_or_else(|| {
+                    let keys: Vec<&str> = spellings::Axis::ALL.iter().map(|a| a.key()).collect();
+                    format!("{key} is no axis: {}", keys.join(", "))
+                })?,
+        ),
+        None => None,
+    };
+    let resolve = resolver(&args.templates);
+    let layout = spellings::lay_out(&text, &resolve);
+    for line in spellings_lines(&path, &layout, only) {
+        writeln!(out, "{line}")?;
+    }
+    Ok(())
+}
+
+/// The lines `cargo sqlc spellings` prints for the template at `path`: what is left as written,
+/// the count of its spellings axis by axis and place by place, then each spelling.
+fn spellings_lines(
+    path: &Path,
+    layout: &spellings::Layout,
+    only: Option<spellings::Axis>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let reading = &layout.reading;
+    if let Some(why) = &reading.unread {
+        lines.push(format!("{}: left as written: {why}", path.display()));
+        return lines;
+    }
+    lines.push(format!(
+        "{}: {} spelling(s), counted an axis at a time",
+        path.display(),
+        layout.count()
+    ));
+    for (at, why) in &reading.unparsed {
+        lines.push(format!(
+            "  statement {} of {} left as written, which the parser does not read: {why}",
+            at + 1,
+            reading.statements
+        ));
+    }
+    for axis in &layout.axes {
+        let counts: Vec<String> = axis
+            .places
+            .iter()
+            .map(|p| p.spellings.len().to_string())
+            .collect();
+        let product = if counts.len() > 1 {
+            format!(" = {}", counts.join(" × "))
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "  {}: {}{product}",
+            axis.axis.words(),
+            axis.count()
+        ));
+        for place in &axis.places {
+            let of = match place.relations {
+                Some(n) => format!(
+                    " of the {n}! = {} orders",
+                    (1..=n as u128).product::<u128>()
+                ),
+                None => String::new(),
+            };
+            lines.push(format!("    {}: {}{of}", place.what, place.spellings.len()));
+        }
+    }
+    for axis in &layout.axes {
+        if only.is_some_and(|only| only != axis.axis) {
+            continue;
+        }
+        for place in &axis.places {
+            let n = place.spellings.len();
+            for (k, spelling) in place.spellings.iter().enumerate() {
+                let mut notes = Vec::new();
+                if k == 0 {
+                    notes.push("as written".to_string());
+                }
+                notes.extend(spelling.picks.iter().cloned());
+                let notes = if notes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", notes.join("; "))
+                };
+                lines.push(String::new());
+                lines.push(format!(
+                    "-- {}, {}: {} of {n}, {}{notes}",
+                    axis.axis.words(),
+                    place.what,
+                    k + 1,
+                    spelling.name
+                ));
+                lines.extend(spelling.text.lines().map(str::to_string));
+            }
+        }
+    }
+    lines
+}
+
+fn run_spell(
+    args: &SpellArgs,
+    out: &mut impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = &args.templates.source;
+    if !source.exists() {
+        return Err(format!("Source directory does not exist: {}", source.display()).into());
+    }
+    let picks = spellings::Picks::of_source(source)?;
+    let resolve = resolver(&args.templates);
+    let mut templates: Vec<PathBuf> = WalkDir::new(source)
+        .into_iter()
+        .map(|entry| entry.map(walkdir::DirEntry::into_path))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "sqlc"))
+        .collect();
+    templates.sort();
+
+    if let Some(pick) = &picks.join_order {
+        match spellings::confirm(pick, &resolve) {
+            spellings::JoinRule::Confirmed { template, order } => {
+                writeln!(
+                    out,
+                    "Join order: outermost first, which orders {} as picked: {}",
+                    template.display(),
+                    order.join(", ")
+                )?;
+                let shown = templates.iter().find_map(|path| {
+                    let rel_path = path.strip_prefix(source).ok()?;
+                    if rel_path == template {
+                        return None;
+                    }
+                    let text = std::fs::read_to_string(path).ok()?;
+                    let first = spellings::outermost_first(&text, &resolve)
+                        .into_iter()
+                        .next()?;
+                    Some((rel_path.to_path_buf(), first))
+                });
+                match shown {
+                    Some((rel_path, (written, rule))) => writeln!(
+                        out,
+                        "Join order: on {} it orders {} as {}",
+                        rel_path.display(),
+                        written.join(", "),
+                        rule.join(", ")
+                    )?,
+                    None => writeln!(
+                        out,
+                        "Join order: no other template's join it orders otherwise"
+                    )?,
+                }
+            }
+            spellings::JoinRule::Parted { template, at } => writeln!(
+                out,
+                "Join order stays as written: on {}, {at}",
+                template.display()
+            )?,
+            other => writeln!(out, "Join order stays as written: {other:?}")?,
+        }
+    }
+
+    let mut differ = Vec::new();
+    for path in &templates {
+        let text = std::fs::read_to_string(path)?;
+        let spelled = spellings::spell(&text, &picks, &resolve);
+        if spelled == text {
+            continue;
+        }
+        if args.check {
+            writeln!(out, "Not in the picks: {}", path.display())?;
+        } else {
+            std::fs::write(path, &spelled)?;
+            writeln!(out, "Spelled {}", path.display())?;
+        }
+        differ.push(path.clone());
+    }
+    if args.check {
+        if differ.is_empty() {
+            writeln!(
+                out,
+                "Spell check OK: all {} template(s) in the picks",
+                templates.len()
+            )?;
+            return Ok(());
+        }
+        return Err(format!(
+            "{} of {} template(s) not in the picks — run `cargo sqlc spell` to write them",
+            differ.len(),
+            templates.len()
+        )
+        .into());
+    }
+    writeln!(
+        out,
+        "Spelled {} of {} template(s) under {} in the picks",
+        differ.len(),
+        templates.len(),
+        source.display()
+    )?;
     Ok(())
 }
 
@@ -1183,5 +1457,236 @@ mod tests {
         let (_dir, source, _shared) = trees();
         let err = compose_all(&source, &postgres(true, &[])).unwrap_err();
         assert!(err.to_string().contains("layers/figures.sqlc"), "{err}");
+    }
+
+    /// `cargo sqlc` parsed from `args`, after `cargo sqlc`.
+    fn command(args: &[&str]) -> SqlcCommand {
+        let Cli::Sqlc(parsed) =
+            Cli::try_parse_from(["cargo", "sqlc"].into_iter().chain(args.iter().copied())).unwrap();
+        parsed.command
+    }
+
+    /// What `cargo sqlc` prints, run with `args`, and whether it was refused.
+    fn printed(args: &[&str]) -> (String, Option<String>) {
+        let mut out = Vec::new();
+        let ran = match command(args) {
+            SqlcCommand::Spellings(a) => run_spellings(&a, &mut out),
+            SqlcCommand::Spell(a) => run_spell(&a, &mut out),
+            other => panic!("{other:?}"),
+        };
+        (
+            String::from_utf8(out).unwrap(),
+            ran.err().map(|e| e.to_string()),
+        )
+    }
+
+    #[test]
+    fn spellings_counts_each_place_before_it_writes_each_spelling() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        let source = source.display().to_string();
+        let (out, refused) = printed(&["spellings", "--source", &source, "shared/scope_sets.sqlc"]);
+        assert_eq!(refused, None);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            &lines[..12],
+            [
+                &*format!(
+                    "{source}/shared/scope_sets.sqlc: 216 spelling(s), counted an axis at a time"
+                ),
+                "  join order: 6",
+                "    the join of s, sc, scope: 6 of the 3! = 6 orders",
+                "  how a relation read once is named: 2",
+                "    the relation sc (:compose(@scope)): 2",
+                "  where a condition sits: 18 = 3 × 3 × 2",
+                "    the condition s.year >= :bind(min_year): 3",
+                "    the condition sc.theme_id = s.theme_id: 3",
+                "    the condition scope.id = sc.scope_id: 2",
+                "  negation: 1",
+                "  a semi-join's form: 1",
+                "",
+            ]
+        );
+        let first_spelling = lines.iter().position(|l| l.starts_with("-- ")).unwrap();
+        assert_eq!(first_spelling, 12, "nothing is written before the count");
+        for (place, count) in [
+            ("join order, the join of s, sc, scope", 6),
+            (
+                "how a relation read once is named, the relation sc (:compose(@scope))",
+                2,
+            ),
+            (
+                "where a condition sits, the condition s.year >= :bind(min_year)",
+                3,
+            ),
+            (
+                "where a condition sits, the condition sc.theme_id = s.theme_id",
+                3,
+            ),
+            (
+                "where a condition sits, the condition scope.id = sc.scope_id",
+                2,
+            ),
+        ] {
+            let written: Vec<&&str> = lines
+                .iter()
+                .filter(|l| l.starts_with(&format!("-- {place}: ")))
+                .collect();
+            assert_eq!(written.len(), count, "{place}");
+            assert!(
+                written[0].ends_with(&format!(
+                    ": 1 of {count}, {}",
+                    written[0].rsplit(", ").next().unwrap()
+                )) || written[0].contains("(as written"),
+                "{}",
+                written[0]
+            );
+        }
+        let (out, _) = printed(&[
+            "spellings",
+            "--source",
+            &source,
+            "shared/scope_sets.sqlc",
+            "--axis",
+            "naming",
+        ]);
+        assert_eq!(out.lines().filter(|l| l.starts_with("-- ")).count(), 2);
+        let (_, refused) = printed(&[
+            "spellings",
+            "--source",
+            &source,
+            "shared/scope_sets.sqlc",
+            "--axis",
+            "order",
+        ]);
+        assert!(refused.unwrap().contains("order is no axis"));
+    }
+
+    #[test]
+    fn spell_check_reports_and_writes_nothing_and_spell_writes_the_picks() {
+        let (_dir, source) = brick();
+        let src = source.display().to_string();
+        let (out, refused) = printed(&["spell", "--source", &src, "--check"]);
+        assert_eq!(refused, None, "{out}");
+        assert!(
+            out.ends_with("Spell check OK: all 51 template(s) in the picks\n"),
+            "{out}"
+        );
+
+        std::fs::write(source.join("spellings.toml"), "conditions = \"where\"\n").unwrap();
+        let before: Vec<(PathBuf, String)> = WalkDir::new(&source)
+            .into_iter()
+            .map(|e| e.unwrap().into_path())
+            .filter(|p| p.is_file())
+            .map(|p| (p.clone(), std::fs::read_to_string(&p).unwrap()))
+            .collect();
+        let (out, refused) = printed(&["spell", "--source", &src, "--check"]);
+        let reported: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("Not in the picks: "))
+            .collect();
+        assert!(!reported.is_empty(), "{out}");
+        assert_eq!(
+            refused.unwrap(),
+            format!(
+                "{} of 51 template(s) not in the picks — run `cargo sqlc spell` to write them",
+                reported.len()
+            )
+        );
+        for (path, text) in &before {
+            assert_eq!(
+                &std::fs::read_to_string(path).unwrap(),
+                text,
+                "--check wrote {}",
+                path.display()
+            );
+        }
+
+        let (out, refused) = printed(&["spell", "--source", &src]);
+        assert_eq!(refused, None);
+        assert!(
+            out.ends_with(&format!(
+                "Spelled {} of 51 template(s) under {src} in the picks\n",
+                reported.len()
+            )),
+            "{out}"
+        );
+        let scope_sets = std::fs::read_to_string(source.join("shared/scope_sets.sqlc")).unwrap();
+        assert!(
+            scope_sets.contains("CROSS JOIN lego_themes scope\nWHERE s.year >= :bind(min_year)"),
+            "{scope_sets}"
+        );
+        let (out, refused) = printed(&["spell", "--source", &src, "--check"]);
+        assert_eq!(refused, None, "{out}");
+        for (path, text) in &before {
+            let rel = path.strip_prefix(&source).unwrap().display().to_string();
+            if !reported.iter().any(|r| r.ends_with(&rel)) {
+                assert_eq!(&std::fs::read_to_string(path).unwrap(), text, "{rel}");
+            }
+        }
+        let composed = compose_all(&source, &postgres(false, &[])).unwrap();
+        assert_eq!(composed.len(), 51);
+    }
+
+    #[test]
+    fn join_order_is_shown_on_a_second_template_once_its_pick_confirms_the_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("sqlc");
+        std::fs::create_dir_all(&source).unwrap();
+        let layers = |head: &str| {
+            format!(
+                "SELECT d.filing, n.size, s.name\nFROM {head}\nJOIN (SELECT y.filing, y.layer, y.size FROM nameplate y) n USING (filing, layer)\nJOIN (SELECT z.filing, z.name FROM scope z) s USING (filing)\n"
+            )
+        };
+        std::fs::write(
+            source.join("a.sqlc"),
+            "SELECT s.id, t.id FROM s JOIN t ON t.s = s.id\n",
+        )
+        .unwrap();
+        std::fs::write(
+            source.join("b.sqlc"),
+            layers("(SELECT x.filing, x.layer, x.size FROM demand x) d"),
+        )
+        .unwrap();
+        let src = source.display().to_string();
+
+        std::fs::write(
+            source.join("spellings.toml"),
+            "[join_order]\ntemplate = \"a.sqlc\"\norder = [\"t\", \"s\"]\n",
+        )
+        .unwrap();
+        let (out, refused) = printed(&["spell", "--source", &src]);
+        assert_eq!(refused, None);
+        assert!(out.starts_with("Join order stays as written: on a.sqlc, outermost first orders it s, t: at place 1 it puts s, joined by 1 column where the pick puts t, joined by 1 column\n"), "{out}");
+        assert!(
+            out.ends_with(
+                "Spelled 0 of 2 template(s) under {src} in the picks\n"
+                    .replace("{src}", &src)
+                    .as_str()
+            ),
+            "{out}"
+        );
+
+        std::fs::write(
+            source.join("spellings.toml"),
+            "[join_order]\ntemplate = \"a.sqlc\"\norder = [\"s\", \"t\"]\n",
+        )
+        .unwrap();
+        let (out, refused) = printed(&["spell", "--source", &src]);
+        assert_eq!(refused, None);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                "Join order: outermost first, which orders a.sqlc as picked: s, t",
+                "Join order: on b.sqlc it orders d, n, s as s, d, n",
+                &*format!("Spelled {src}/b.sqlc"),
+                &*format!("Spelled 1 of 2 template(s) under {src} in the picks"),
+            ]
+        );
+        assert!(std::fs::read_to_string(source.join("b.sqlc"))
+            .unwrap()
+            .starts_with(
+                "SELECT d.filing, n.size, s.name\nFROM (SELECT z.filing, z.name FROM scope z) s\n"
+            ));
     }
 }

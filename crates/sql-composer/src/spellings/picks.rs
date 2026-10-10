@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use sqlparser::ast::Visit;
 
+use super::beside::Beside;
 use super::columns::Resolve;
 use super::join_order::{self, Selects};
 use super::read::Read;
@@ -249,11 +250,14 @@ pub fn outermost_first(text: &str, resolve: Resolve) -> Vec<(Vec<String>, Vec<St
 /// How many rounds over the axes a template is written in before it is left as far as it got.
 const ROUNDS: usize = 8;
 
-/// `text` written in `picks`: each axis picked, in the order [`Axis::ALL`] lists them, until a
-/// round changes nothing, and join order outermost first where its pick confirms the rule. Every
-/// place no spelling of a pick reads back at stays as written; `resolve` reads the templates it
-/// composes, by their path under the source.
-pub fn spell(text: &str, picks: &Picks, resolve: Resolve) -> String {
+/// `text`, the template at `template` under its tree, written in `picks`: each axis picked, in
+/// the order [`Axis::ALL`] lists them, until a round changes nothing, and join order outermost
+/// first where its pick confirms the rule. Every place no spelling of a pick reads back at stays
+/// as written; `beside` reads the templates it composes, and a template it says another takes in
+/// is written no WITH query at its head.
+pub fn spell(text: &str, template: &Path, picks: &Picks, beside: &Beside) -> String {
+    let resolve = beside.resolve;
+    let head = !beside.takes_in(template);
     let join_order = match &picks.join_order {
         Some(pick) => matches!(confirm(pick, resolve), JoinRule::Confirmed { .. }),
         None => false,
@@ -267,7 +271,7 @@ pub fn spell(text: &str, picks: &Picks, resolve: Resolve) -> String {
                 axis => picks.pick(axis),
             };
             if let Some(pick) = pick {
-                text = written_in(&text, axis, pick, resolve);
+                text = written_in(&text, axis, pick, resolve, head);
             }
         }
         if text == before {
@@ -334,9 +338,10 @@ mod tests {
 
     #[test]
     fn with_no_pick_every_template_is_written_byte_for_byte() {
+        let beside = Beside::of_trees(&brick, &[source()]).unwrap();
         for (path, text) in templates() {
             assert_eq!(
-                spell(&text, &Picks::default(), &brick),
+                spell(&text, &path, &Picks::default(), &beside),
                 text,
                 "{}",
                 path.display()
@@ -357,10 +362,11 @@ mod tests {
             ("template", "naming = \"template\""),
         ] {
             let picks = Picks::from_toml(picks).unwrap();
+            let beside = Beside::of_trees(&brick, &[source()]).unwrap();
             let mut changed = 0;
             for (path, text) in templates() {
-                let spelled = spell(&text, &picks, &brick);
-                assert_eq!(spell(&spelled, &picks, &brick), spelled, "{axes}: {}", path.display());
+                let spelled = spell(&text, &path, &picks, &beside);
+                assert_eq!(spell(&spelled, &path, &picks, &beside), spelled, "{axes}: {}", path.display());
                 let reading = super::super::read(&spelled);
                 assert!(reading.unparsed.is_empty() && reading.read_back, "{axes}: {spelled}");
                 let template = parse_template(&spelled, TemplateSource::File(source().join(&path))).unwrap();
@@ -405,11 +411,19 @@ mod tests {
             ..Picks::default()
         };
         assert_eq!(
-            spell(layers, &picks, &brick),
+            spell(layers, Path::new("layers.sqlc"), &picks, &Beside::new(&brick)),
             "SELECT d.filing, n.size, s.name\nFROM (SELECT z.filing, z.name FROM scope z) s\nJOIN (SELECT x.filing, x.layer, x.size FROM demand x) d USING (filing)\nJOIN (SELECT y.filing, y.layer, y.size FROM nameplate y) n USING (filing, layer)"
         );
         picks.join_order = Some(pick(&["sc", "s", "scope"]));
-        assert_eq!(spell(layers, &picks, &brick), layers);
+        assert_eq!(
+            spell(
+                layers,
+                Path::new("layers.sqlc"),
+                &picks,
+                &Beside::new(&brick)
+            ),
+            layers
+        );
         assert_eq!(
             outermost_first(layers, &brick),
             [(

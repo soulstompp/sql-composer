@@ -421,7 +421,7 @@ mod tests {
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::SemiJoin, pick, &|_| None)
+        written_in(text, Axis::SemiJoin, pick, &|_| None, true)
     }
 
     const IN_FORM: &str =

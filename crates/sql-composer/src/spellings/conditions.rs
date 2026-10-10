@@ -461,7 +461,7 @@ mod tests {
     use super::*;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Conditions, pick, &|_| None)
+        written_in(text, Axis::Conditions, pick, &|_| None, true)
     }
 
     const SETS: &str = "SELECT s.set_num, t.name\nFROM lego_sets s\nJOIN lego_themes t ON t.id = s.theme_id\nWHERE s.year >= :bind(min_year)\n  AND t.name = 'City'";
@@ -653,9 +653,12 @@ mod tests {
             "SELECT s.set_num, t.name\nFROM sets s\nLEFT JOIN themes t ON t.id = s.theme_id\nWHERE t.name = 'City'\n  AND s.year >= :bind(min_year)",
             "SELECT s.set_num, t.name\nFROM sets s\nLEFT JOIN themes t ON t.id = s.theme_id AND t.name = 'City'\nWHERE s.year >= :bind(min_year)",
         );
-        assert_eq!(written_in(near.0, Axis::Conditions, ON, &|_| None), near.0);
+        assert_eq!(
+            written_in(near.0, Axis::Conditions, ON, &|_| None, true),
+            near.0
+        );
         for pick in [ON, WHERE] {
-            let spelled = written_in(written, Axis::Conditions, pick, &|_| None);
+            let spelled = written_in(written, Axis::Conditions, pick, &|_| None, true);
             let found = super::super::laws::holds(written, &spelled, near, &trap);
             assert_eq!(found.written, 2, "{spelled}");
         }

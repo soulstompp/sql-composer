@@ -562,7 +562,7 @@ mod tests {
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Negation, pick, &|_| None)
+        written_in(text, Axis::Negation, pick, &|_| None, true)
     }
 
     #[test]

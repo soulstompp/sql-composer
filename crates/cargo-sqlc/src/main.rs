@@ -62,10 +62,12 @@ enum SqlcCommand {
     Tree(TreeArgs),
     /// Lay out a template's spellings: the other ways to write it that return the same rows,
     /// counted at each place each axis applies, then each written with every other place as
-    /// written.
+    /// written. A template the templates under --source and --search-path take in is offered no
+    /// WITH query at its head; one taken in only from another tree is not seen.
     Spellings(SpellingsArgs),
     /// Write the templates under the source in the spellings picked in its spellings.toml, as
-    /// `cargo fmt` writes code.
+    /// `cargo fmt` writes code. A template the templates under --source and --search-path take
+    /// in is written no WITH query at its head; one taken in only from another tree is not seen.
     Spell(SpellArgs),
 }
 
@@ -362,10 +364,13 @@ fn run_tree(args: &TreeArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// Reads a template another composes, under the source and then each search path.
 fn resolver(templates: &Templates) -> impl Fn(&Path) -> Option<String> + '_ {
     move |path: &Path| {
-        std::iter::once(&templates.source)
-            .chain(&templates.search_path)
-            .find_map(|root| std::fs::read_to_string(root.join(path)).ok())
+        roots(templates).find_map(|root| std::fs::read_to_string(root.join(path)).ok())
     }
+}
+
+/// The source, then each search path.
+fn roots(templates: &Templates) -> impl Iterator<Item = &PathBuf> {
+    std::iter::once(&templates.source).chain(&templates.search_path)
 }
 
 fn run_spellings(
@@ -388,7 +393,9 @@ fn run_spellings(
         None => None,
     };
     let resolve = resolver(&args.templates);
-    let layout = spellings::lay_out(&text, &resolve);
+    let trees: Vec<PathBuf> = roots(&args.templates).cloned().collect();
+    let beside = spellings::Beside::of_trees(&resolve, &trees)?;
+    let layout = spellings::lay_out(&text, &args.template, &beside);
     for line in spellings_lines(&path, &layout, only) {
         writeln!(out, "{line}")?;
     }
@@ -541,10 +548,13 @@ fn run_spell(
         }
     }
 
+    let trees: Vec<PathBuf> = roots(&args.templates).cloned().collect();
+    let beside = spellings::Beside::of_trees(&resolve, &trees)?;
     let mut differ = Vec::new();
     for path in &templates {
         let text = std::fs::read_to_string(path)?;
-        let spelled = spellings::spell(&text, &picks, &resolve);
+        let rel_path = path.strip_prefix(source).unwrap_or(path);
+        let spelled = spellings::spell(&text, rel_path, &picks, &beside);
         if spelled == text {
             continue;
         }
@@ -1487,16 +1497,16 @@ mod tests {
         let (out, refused) = printed(&["spellings", "--source", &source, "shared/scope_sets.sqlc"]);
         assert_eq!(refused, None);
         let lines: Vec<&str> = out.lines().collect();
+        // Other templates take this one in, so it is offered no WITH query at its head.
         assert_eq!(
-            &lines[..12],
+            &lines[..11],
             [
                 &*format!(
-                    "{source}/shared/scope_sets.sqlc: 216 spelling(s), counted an axis at a time"
+                    "{source}/shared/scope_sets.sqlc: 108 spelling(s), counted an axis at a time"
                 ),
                 "  join order: 6",
                 "    the join of s, sc, scope: 6 of the 3! = 6 orders",
-                "  how a relation read once is named: 2",
-                "    the relation sc (:compose(@scope)): 2",
+                "  how a relation read once is named: 1",
                 "  where a condition sits: 18 = 3 × 3 × 2",
                 "    the condition s.year >= :bind(min_year): 3",
                 "    the condition sc.theme_id = s.theme_id: 3",
@@ -1507,13 +1517,9 @@ mod tests {
             ]
         );
         let first_spelling = lines.iter().position(|l| l.starts_with("-- ")).unwrap();
-        assert_eq!(first_spelling, 12, "nothing is written before the count");
+        assert_eq!(first_spelling, 11, "nothing is written before the count");
         for (place, count) in [
             ("join order, the join of s, sc, scope", 6),
-            (
-                "how a relation read once is named, the relation sc (:compose(@scope))",
-                2,
-            ),
             (
                 "where a condition sits, the condition s.year >= :bind(min_year)",
                 3,
@@ -1533,10 +1539,8 @@ mod tests {
                 .collect();
             assert_eq!(written.len(), count, "{place}");
             assert!(
-                written[0].ends_with(&format!(
-                    ": 1 of {count}, {}",
-                    written[0].rsplit(", ").next().unwrap()
-                )) || written[0].contains("(as written"),
+                written[0].contains(&format!(": 1 of {count}, "))
+                    && written[0].contains("(as written"),
                 "{}",
                 written[0]
             );
@@ -1545,11 +1549,15 @@ mod tests {
             "spellings",
             "--source",
             &source,
-            "shared/scope_sets.sqlc",
+            "sets/never_bought.sqlc",
             "--axis",
             "naming",
         ]);
-        assert_eq!(out.lines().filter(|l| l.starts_with("-- ")).count(), 2);
+        assert!(
+            out.contains("    the relation purchase_sets (a WITH query): 3\n"),
+            "{out}"
+        );
+        assert_eq!(out.lines().filter(|l| l.starts_with("-- ")).count(), 3);
         let (_, refused) = printed(&[
             "spellings",
             "--source",

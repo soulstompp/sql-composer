@@ -510,7 +510,7 @@ escrita da mesma resposta em SQL direto, e duas delas sobre tabelas simuladas; s
 cargo sqlc compose                                  # sqlc/ para .sql/, e depois cargo sqlx prepare
 cargo sqlc compose --source assets/sqlc --target assets/.sql
 cargo sqlc compose --search-path ../shared/sqlc     # mais modelos, lidos depois do --source
-cargo sqlc compose --dialect mysql                  # postgres (por omissão), mysql ou sqlite
+cargo sqlc compose --dialect mysql                  # um de cinco, postgres por omissão
 cargo sqlc compose --skip-prepare                   # sem o cargo sqlx prepare
 cargo sqlc compose --verify                         # compara, sem escrever nada
 cargo sqlc compose --with                           # cada relação nomeada uma vez por instrução
@@ -531,7 +531,8 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   `--source`, pelo que um modelo pode compor uma relação que está noutra árvore. Os modelos que lá
   estão não dão ficheiro nenhum, e, com `--with`, uma relação encontrada lá toma o nome do seu
   caminho dentro dessa pasta. Para procurar em mais do que uma, repete-se a opção.
-- **`--dialect`** escolhe os marcadores: `postgres`, `mysql` ou `sqlite`.
+- **`--dialect`** escolhe o dialeto, `postgres` (por omissão), `mysql`, `mariadb`, `sqlite` ou
+  `duckdb`, e é dele que dependem os marcadores e os nomes reservados.
 - **`--skip-prepare`** deixa de fora o `cargo sqlx prepare`, que de outro modo corre assim que os
   ficheiros estão escritos. Se este falhar, o comando sai com 1, e os ficheiros ficam escritos na
   mesma.
@@ -599,7 +600,7 @@ compõe-se como com o `--with`.
 | `CommandKind` | `Count`, `Union`, `Intersect` ou `Except` |
 | `Composer` | compõe modelos em SQL para um dialeto |
 | `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
-| `Dialect` | `Postgres`, `Mysql` ou `Sqlite` |
+| `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` ou `Duckdb` |
 | `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
 | `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |
 
@@ -668,8 +669,7 @@ use sql_composer_duckdb::DuckDbConnection;
 let conn = DuckDbConnection::open_in_memory().unwrap();
 let input = "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)";
 let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
-// o DuckDB lê os marcadores $N do PostgreSQL
-let composer = Composer::new(Dialect::Postgres);
+let composer = Composer::new(Dialect::Duckdb);
 
 let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn duckdb::ToSql>]);
 let (sql, params) = conn.compose(&composer, &template, values).unwrap();

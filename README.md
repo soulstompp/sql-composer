@@ -491,7 +491,7 @@ same answer in direct SQL, and two run on mock tables. `laws` exits 1 if any of 
 cargo sqlc compose                                  # sqlc/ into .sql/, then cargo sqlx prepare
 cargo sqlc compose --source assets/sqlc --target assets/.sql
 cargo sqlc compose --search-path ../shared/sqlc     # more templates, read after --source
-cargo sqlc compose --dialect mysql                  # postgres (the default), mysql or sqlite
+cargo sqlc compose --dialect mysql                  # one of five, postgres by default
 cargo sqlc compose --skip-prepare                   # leave out cargo sqlx prepare
 cargo sqlc compose --verify                         # compare, write nothing
 cargo sqlc compose --with                           # each relation named once per statement
@@ -511,7 +511,8 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
   template can compose a relation another tree holds. Nothing is composed for the templates there
   themselves, and under `--with` a relation found there is named after its path there. Repeat it to
   search more than one.
-- **`--dialect`** chooses the placeholders: `postgres`, `mysql` or `sqlite`.
+- **`--dialect`** chooses the dialect: `postgres` (the default), `mysql`, `mariadb`, `sqlite` or
+  `duckdb`. It decides the placeholders, and the names the dialect reserves.
 - **`--skip-prepare`** leaves out `cargo sqlx prepare`, which otherwise runs once the files are
   written. If it fails, the command exits 1, and the files are written all the same.
 - **`--verify`** composes in memory and compares with the target. It reports each file `CHANGED`,
@@ -574,7 +575,7 @@ table rows of your own, and `name_relations = true` composes as `--with` does.
 | `CommandKind` | `Count`, `Union`, `Intersect` or `Except` |
 | `Composer` | composes templates into SQL for one dialect |
 | `ComposedSql` | the composed SQL, and its bind names in placeholder order |
-| `Dialect` | `Postgres`, `Mysql` or `Sqlite` |
+| `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` or `Duckdb` |
 | `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
 | `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |
 
@@ -643,8 +644,7 @@ use sql_composer_duckdb::DuckDbConnection;
 let conn = DuckDbConnection::open_in_memory().unwrap();
 let input = "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)";
 let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
-// DuckDB reads PostgreSQL's $N placeholders
-let composer = Composer::new(Dialect::Postgres);
+let composer = Composer::new(Dialect::Duckdb);
 
 let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn duckdb::ToSql>]);
 let (sql, params) = conn.compose(&composer, &template, values).unwrap();

@@ -7,11 +7,11 @@
 //!    named by what the planner did, and a difference nothing names fails the law.
 //! 2. Every template under the source takes exactly one standing. It needs no database, so it is
 //!    `cargo-sqlc`'s test `test_every_template_under_the_source_is_reported_once`.
-//! 3. Each spelling of each template, written in its place, leaves every composed file that holds
-//!    the template, plain and with `--with`, planning the tree it plans as written. A join of
-//!    eight relations plans one tree whichever end it is written from, and so does one where three
-//!    of the eight are equated on one key; the same join with a ninth relation is planned in the
-//!    pieces it is written in, and its two orders part the plans.
+//! 3. Each spelling `cargo sqlc spell` can write of each template, written in its place, leaves
+//!    every composed file that holds the template, plain and with `--with`, planning the tree it
+//!    plans as written. Join orders are laid out and never written, and the law fails on them:
+//!    nine relations from either end, eight with three equated on one key, and the orders of
+//!    `shared/set_roots.sqlc`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use sql_composer::composer::{ComposedSql, Composer};
 use sql_composer::parser::{parse_template, parse_template_file};
 use sql_composer::source::{self, Flags, Standing};
-use sql_composer::spellings::{lay_out, Beside};
+use sql_composer::spellings::{lay_out, Axis, Beside};
 use sql_composer::types::{Dialect, Element, Template, TemplateSource};
 use sqlx::{AssertSqlSafe, PgPool, Row};
 
@@ -621,18 +621,51 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// Law 3, composed plain or with `--with`: each spelling `lay_out` writes of each template, written
-/// into a copy of the source in its place, leaves every composed file that holds the template
-/// planning the tree it plans as written, or one that differs as [`named`] says alone.
-async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSet<String>) -> bool {
-    let mode = if with { "--with" } else { "plain" };
+/// One template's spellings held to the plans of the composed files that hold it: how many
+/// spellings and files, each way a plan parts that nothing names, and each plan printed otherwise.
+struct Round {
+    rel_path: PathBuf,
+    spellings: usize,
+    files: usize,
+    parted: Vec<String>,
+    printed_otherwise: BTreeSet<String>,
+}
+
+impl Round {
+    /// The round in words: each parting, or that each spelling plans the same tree.
+    fn detail(&self) -> String {
+        if !self.parted.is_empty() {
+            return self.parted.join("; ");
+        }
+        if self.printed_otherwise.is_empty() {
+            return "each plans the same tree".to_string();
+        }
+        let printed: Vec<&str> = self.printed_otherwise.iter().map(String::as_str).collect();
+        format!(
+            "each plans the same tree, printed otherwise in {}",
+            printed.join("; ")
+        )
+    }
+}
+
+/// Each template's spellings on the axes `only` takes, composed plain or with `--with`: each
+/// written into a copy of the source in its place, and every composed file holding the template
+/// planned against its plan as written, a difference [`named`] names counted as the same tree.
+/// Each composed file that cannot be planned as written is returned apart, with why.
+async fn rounds(
+    pool: &PgPool,
+    sqlc_dir: &Path,
+    with: bool,
+    tables: &BTreeSet<String>,
+    only: impl Fn(&Path, Axis) -> bool,
+) -> (Vec<Round>, Vec<(PathBuf, String)>) {
     let mut flags = Flags::new(Dialect::Postgres);
     flags.with = with;
     let (composer, standings) = composed(sqlc_dir, with);
-    let mut all_hold = true;
 
     // Each composed file's plan as written, and the templates its tree holds.
     let mut files: BTreeMap<PathBuf, (Vec<String>, BTreeSet<PathBuf>)> = BTreeMap::new();
+    let mut unplanned = Vec::new();
     for (rel_path, standing) in &standings {
         let Standing::Written(composed) = standing else {
             continue;
@@ -642,10 +675,7 @@ async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSe
                 let holds = copies(&composer, sqlc_dir, rel_path).into_keys().collect();
                 files.insert(rel_path.clone(), (plan, holds));
             }
-            Err(e) => {
-                let law = format!("{}, {mode}, is planned as written", rel_path.display());
-                all_hold &= verdict(&law, false, &e);
-            }
+            Err(e) => unplanned.push((rel_path.clone(), e)),
         }
     }
 
@@ -653,6 +683,7 @@ async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSe
     copy_tree(sqlc_dir, copy.path());
     let read = |path: &Path| std::fs::read_to_string(sqlc_dir.join(path)).ok();
     let beside = Beside::of_trees(&read, &[sqlc_dir.to_path_buf()]).expect("read failed");
+    let mut found = Vec::new();
     for entry in walkdir::WalkDir::new(sqlc_dir).sort_by_file_name() {
         let path = entry.expect("read failed").into_path();
         if path.extension().is_none_or(|ext| ext != "sqlc") {
@@ -662,7 +693,7 @@ async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSe
         let text = read(rel_path).expect("read failed");
         let layout = lay_out(&text, rel_path, &beside);
         let mut spellings = Vec::new();
-        for axis in &layout.axes {
+        for axis in layout.axes.iter().filter(|a| only(rel_path, a.axis)) {
             for place in &axis.places {
                 for spelling in place.spellings.iter().skip(1) {
                     let what = format!("{}, {}: {}", axis.axis.words(), place.what, spelling.name);
@@ -678,37 +709,49 @@ async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSe
         if spellings.is_empty() || holding.is_empty() {
             continue;
         }
-        let mut parted = Vec::new();
-        let mut kinds = BTreeSet::new();
+        let mut round = Round {
+            rel_path: rel_path.to_path_buf(),
+            spellings: spellings.len(),
+            files: holding.len(),
+            parted: vec![],
+            printed_otherwise: BTreeSet::new(),
+        };
         for (what, spelled) in &spellings {
             std::fs::write(copy.path().join(rel_path), spelled).expect("write failed");
             let spelled_standings = match source::compose_all(copy.path(), &flags) {
                 Ok(standings) => standings,
                 Err(e) => {
-                    parted.push(format!("{what}: the source does not compose: {e}"));
+                    round
+                        .parted
+                        .push(format!("{what}: the source does not compose: {e}"));
                     continue;
                 }
             };
             for file in &holding {
                 let Some(Standing::Written(composed)) = spelled_standings.get(*file) else {
-                    parted.push(format!("{what}: {} is not composed", file.display()));
+                    round
+                        .parted
+                        .push(format!("{what}: {} is not composed", file.display()));
                     continue;
                 };
                 let (written, _) = &files[*file];
                 match explain(pool, composed).await {
                     Ok(plan) => {
-                        if let Some(at) = parting(written, &plan) {
-                            match named(written, &plan, tables) {
-                                Some(kind) => {
-                                    kinds.insert(format!("{}: {kind}", file.display()));
-                                }
-                                None => {
-                                    parted.push(format!("{what}: {} parts at {at}", file.display()))
-                                }
+                        let Some(at) = parting(written, &plan) else {
+                            continue;
+                        };
+                        match named(written, &plan, tables) {
+                            Some(kind) => {
+                                round
+                                    .printed_otherwise
+                                    .insert(format!("{}: {kind}", file.display()));
                             }
+                            None => round
+                                .parted
+                                .push(format!("{what}: {} parts at {at}", file.display())),
                         }
                     }
-                    Err(e) => parted.push(format!(
+                    Err(e) => round.parted.push(format!(
                         "{what}: {} could not be planned: {e}",
                         file.display()
                     )),
@@ -716,22 +759,34 @@ async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSe
             }
         }
         std::fs::write(copy.path().join(rel_path), &text).expect("write failed");
+        found.push(round);
+    }
+    (found, unplanned)
+}
+
+/// Law 3, composed plain or with `--with`: each spelling `cargo sqlc spell` can write leaves every
+/// composed file holding its template planning the tree it plans as written. Join orders are laid
+/// out and never written, so they are the seeds' ([`seeds_of_the_round`]).
+async fn same_round(pool: &PgPool, sqlc_dir: &Path, with: bool, tables: &BTreeSet<String>) -> bool {
+    let mode = if with { "--with" } else { "plain" };
+    let (found, unplanned) = rounds(pool, sqlc_dir, with, tables, |_, axis| {
+        axis != Axis::JoinOrder
+    })
+    .await;
+    let mut all_hold = true;
+    for (rel_path, e) in unplanned {
+        let law = format!("{}, {mode}, is planned as written", rel_path.display());
+        all_hold &= verdict(&law, false, &e);
+    }
+    for round in found {
         let law = format!(
             "{}, {mode}, plans as written in each of its {} spelling(s), in the {} composed file(s) \
              holding it",
-            rel_path.display(),
-            spellings.len(),
-            holding.len()
+            round.rel_path.display(),
+            round.spellings,
+            round.files
         );
-        let detail = match (parted.is_empty(), kinds.is_empty()) {
-            (true, true) => "each plans the same tree".to_string(),
-            (true, false) => format!(
-                "each plans the same tree, printed otherwise in {}",
-                kinds.into_iter().collect::<Vec<_>>().join("; ")
-            ),
-            (false, _) => parted.join("; "),
-        };
-        all_hold &= verdict(&law, parted.is_empty(), &detail);
+        all_hold &= verdict(&law, round.parted.is_empty(), &round.detail());
     }
     all_hold
 }
@@ -809,46 +864,56 @@ async fn orders_part(pool: &PgPool, links: &[(&str, &str, &str)]) -> Option<Stri
     parting(&plans[0], &plans[1])
 }
 
-/// Law 3's joins in two orders: eight relations on keys no third shares plan one tree, and so do
-/// eight with three equated on one key; the seed, nine relations on keys no third shares, parts
-/// the plans, the law failing on it as it must. Whether the laws hold, and whether the seed fails.
-async fn joins_in_two_orders(pool: &PgPool) -> (bool, bool) {
-    let mut hold = true;
-    for (law, links) in [
+/// Whether the law fails on a seed, which is reported with what the law said of it.
+fn seed_fails(seed: &str, fails: bool, detail: &str) -> bool {
+    println!(
+        "SEED {seed}: {} — {detail}",
+        if fails {
+            "the law FAILS on it, as it must"
+        } else {
+            "THE LAW HOLDS ON IT"
+        }
+    );
+    fails
+}
+
+/// Law 3's seeds, each a join written in another order, where the law must fail: the join of nine
+/// relations from its first or its last, which PostgreSQL plans in the pieces it is written in;
+/// eight relations from either end, three of them equated on one key; and the join orders
+/// `cargo sqlc spellings` lays out for `shared/set_roots.sqlc`, composed plain. Whether the law
+/// fails on each.
+async fn seeds_of_the_round(pool: &PgPool, sqlc_dir: &Path, tables: &BTreeSet<String>) -> bool {
+    let mut all_fail = true;
+    for (seed, links) in [
         (
-            "a join of eight relations, from its first or its last, plans one tree",
-            &KEYED[..8],
+            "a join of nine relations, from its first or its last",
+            &KEYED[..],
         ),
         (
             "a join of eight relations, three of them equated on one key, from its first or its \
-             last, plans one tree",
+             last",
             &SHARED[..],
         ),
     ] {
         let parted = orders_part(pool, links).await;
-        hold &= verdict(
-            law,
-            parted.is_none(),
-            &parted.map_or("the two orders plan alike".into(), |at| {
-                format!("the orders part at {at}")
-            }),
-        );
-    }
-    let parted = orders_part(pool, &KEYED).await;
-    println!(
-        "SEED a join of nine relations, from its first or its last: {} — {}",
-        if parted.is_some() {
-            "the law FAILS on it, as it must"
-        } else {
-            "THE LAW HOLDS ON IT"
-        },
-        parted
+        let detail = parted
             .as_deref()
-            .map_or("the two orders plan alike".into(), |at| format!(
-                "the orders part at {at}"
-            ))
-    );
-    (hold, parted.is_some())
+            .map_or("the two orders plan alike".into(), |at| {
+                format!("the orders part at {at}")
+            });
+        all_fail &= seed_fails(seed, parted.is_some(), &detail);
+    }
+    let set_roots = Path::new("shared/set_roots.sqlc");
+    let (found, _) = rounds(pool, sqlc_dir, false, tables, |path, axis| {
+        path == set_roots && axis == Axis::JoinOrder
+    })
+    .await;
+    let seed = format!("{}'s join orders, plain", set_roots.display());
+    all_fail &= match found.first() {
+        Some(round) => seed_fails(&seed, !round.parted.is_empty(), &round.detail()),
+        None => seed_fails(&seed, false, "CANNOT BE MADE — it lays out no join order"),
+    };
+    all_fail
 }
 
 pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> bool {
@@ -876,14 +941,12 @@ pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> boo
     }
     let seeds_fail = seeds(pool, sqlc_dir, &mut texts, &tables).await;
 
-    // 3. Each spelling, plain and with --with, plans as written in every file holding its
-    //    template; eight relations plan one tree in either order, and nine part.
+    // 3. Each spelling `cargo sqlc spell` can write, plain and with --with, plans as written in
+    //    every file holding its template; a join written in another order parts the plans.
     for with in [false, true] {
         all_hold &= same_round(pool, sqlc_dir, with, &tables).await;
     }
-    let (joins_hold, nine) = joins_in_two_orders(pool).await;
-    all_hold &= joins_hold;
-    let seeds_fail = seeds_fail && nine;
+    let seeds_fail = seeds_fail && seeds_of_the_round(pool, sqlc_dir, &tables).await;
 
     println!(
         "=== The fit's laws: {} ===",

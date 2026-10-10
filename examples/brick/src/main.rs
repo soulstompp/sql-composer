@@ -11,6 +11,8 @@ use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
 use sqlx::query::Query;
 use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool, Postgres, Row};
 
+mod fit;
+
 /// The set the examples use by default: Café Corner, a single-version set.
 const DEFAULT_SET: &str = "10182-1";
 /// A set LEGO sold in two versions, whose parts are listed version by version.
@@ -143,6 +145,8 @@ enum Commands {
     },
     /// Check the example's laws; exits 1 if any fails
     Laws,
+    /// Check the fit's laws, from EXPLAIN alone, running nothing; exits 1 if any fails
+    Fit,
     /// Run all examples with default values, then the laws
     All,
 }
@@ -391,6 +395,11 @@ async fn main() {
         Commands::Nearest { city_id, top } => cmd_nearest(&pool, dir, city_id, top).await,
         Commands::Laws => {
             if !cmd_laws(&pool, dir).await {
+                std::process::exit(1);
+            }
+        }
+        Commands::Fit => {
+            if !fit::cmd_fit(&pool, dir, &cli.schema).await {
                 std::process::exit(1);
             }
         }

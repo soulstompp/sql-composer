@@ -14,9 +14,9 @@
 //! a template in them. Join orders are laid out and counted to be read, and never written: an
 //! order can change the plan PostgreSQL makes, which the text does not show. Join order's pick is
 //! one template's join list in the order picked, and [`confirm`] reads whether outermost first
-//! gives it. Nothing reads a catalog: each condition is read from the template's own text. A template, or a statement of
-//! it, that the parser cannot read is left as written, and so is every template when no spelling
-//! is picked.
+//! gives it. Nothing reads a catalog: each condition is read from the template's own text. A
+//! template, or a statement of it, that the parser cannot read is left as written, and so is
+//! every template when no spelling is picked.
 
 mod beside;
 mod columns;

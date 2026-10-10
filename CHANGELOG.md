@@ -65,6 +65,14 @@
 - **`cargo sqlc tree`** — Prints each composed file's templates as `cargo tree` prints a crate's dependencies: every path to a template, the slot each filling stands in, the names `--with` and `--views` write, and a line for each template held more than once (`shared/theme_closure.sqlc: 2 copies`). `cargo sqlc tree <template>` prints one composed file's, and `--invert <template>` (`-i`) each composed file that holds the template, with its copies. It takes `compose`'s `--source`, `--dialect`, `--with`, `--views` and `--search-path`.
 - **`--respell`** — `cargo sqlc compose --respell` writes that respelling for PostgreSQL, and is refused for every other dialect. Each file respelled gets a line, `Respelled …: 1 union(s), of 32 arms`, and a statement that does not parse one on standard error, `Unparsed …`. The manifest records the flag, and `--verify` reads it.
 
+### sql-composer-ffi
+
+- **A C ABI** — New in 0.1.0. A C program parses a template, composes it for any dialect with search paths, named relations, a view registry, mock tables and a count of values for each binding, and gets the SQL, its bind names in placeholder order and where each statement's names begin. It composes a whole directory as `cargo sqlc compose` does, `--respell` among its flags, with each template's standing and the text of `manifest.json`. Handles are opaque and freed by the library; a refusal is a status with sql-composer's own message. The header is `sql_composer.h`, written by cbindgen.
+
+### sql-composer-py
+
+- **A Python module** — New in 0.1.0: PyPI's `sql-composer`, imported as `sql_composer`, built by maturin. `parse`, `parse_file`, a `Composer` for a dialect named by its string, and `compose_all` for a directory, `respell` among its keywords, giving each template's standing and the text of `manifest.json`. A refusal raises `sql_composer.Error` with sql-composer's own message.
+
 ### examples
 
 - **The brick example** — `examples/lego` is `examples/brick` (crate `brick-example`, binary `brick`, database `sqlc_brick`, `SQLC_BRICK_DATABASE_URL`), and runs on the database sqlc-brickgen builds, which already holds the composite indexes for its joins; the `setup` subcommand and its downloader are gone.

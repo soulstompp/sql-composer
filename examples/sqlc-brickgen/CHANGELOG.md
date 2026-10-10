@@ -5,6 +5,7 @@
 - **The search extensions in a schema of their own** — `cube`, `earthdistance` and `pg_trgm` are created in `--extension-schema`, `extensions` by default, which the generator creates with the first of them; 0.0.1 created them in `public`, beside the real catalogue. An extension the database already has stays where it is. A schema a run drops (`--schema`, `--oo-schema`, a `--partitioning` schema) is refused. `--extension-schema public` creates them where 0.0.1 did, and is what PostgreSQL 15 and earlier need: there, `earthdistance`'s functions find `cube` only on the caller's `search_path`.
 - **Stores without the brand word** — Purchases are made at a "brand store", an "online shop" and a "brand house", beside the "toy shop" and the "second-hand market"; 0.0.1 named the first three for the brand. Each takes the same share of purchases and keeps the same hours, but the rows differ from 0.0.1's.
 - **sqlx 0.9** — The generator runs on sqlx 0.9, and a URL that names no user still connects as the operating system's user. It needs Rust 1.94, as sqlx 0.9 does.
+- **Loading the real catalogue** — The README loads it into `public` of a new database with `curl` and `psql`, from the sample it has always come from, before the generator is given that database. 0.0.1's README sent you to the example's `setup`, which is gone.
 
 ## 0.0.1
 

@@ -78,6 +78,33 @@ pub(crate) fn template(input: &str) -> Result<(Vec<Dialect>, Vec<Element>)> {
     Reader::new(input).read()
 }
 
+/// What the reader reads as the template's own, by where it stands in the text.
+#[cfg(feature = "spellings")]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Mark {
+    /// A directive, from its `:` to its closing `)`.
+    Directive(Element),
+    /// A `#` comment, from its `#` to the end of its line, the newline left out.
+    Comment,
+    /// The `:dialect(…)` declaration, from its `:` to its closing `)`.
+    Declaration,
+}
+
+/// Read a template as [`template`] does, giving the dialects it declares and each byte range the
+/// reader reads as the template's own, in the order they stand.
+#[cfg(feature = "spellings")]
+pub(crate) fn marked(input: &str) -> Result<(Vec<Dialect>, Marks)> {
+    Reader::new(input)
+        .read_marked()
+        .map(|(dialects, _, marks)| (dialects, marks))
+}
+
+/// Each byte range the reader reads as the template's own, with what it read there.
+#[cfg(feature = "spellings")]
+pub(crate) type Marks = Vec<(usize, usize, Mark)>;
+#[cfg(not(feature = "spellings"))]
+type Marks = ();
+
 /// What the reader does at a byte one database's reading of the template decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Act {
@@ -101,6 +128,7 @@ struct Reader<'i> {
     /// The dialects the template declares, and whether it has declared them.
     dialects: Vec<Dialect>,
     declared: bool,
+    marks: Marks,
 }
 
 impl<'i> Reader<'i> {
@@ -126,10 +154,16 @@ impl<'i> Reader<'i> {
             stripped: false,
             dialects: Vec::new(),
             declared: false,
+            marks: Marks::default(),
         }
     }
 
-    fn read(mut self) -> Result<(Vec<Dialect>, Vec<Element>)> {
+    fn read(self) -> Result<(Vec<Dialect>, Vec<Element>)> {
+        self.read_marked()
+            .map(|(dialects, elements, _)| (dialects, elements))
+    }
+
+    fn read_marked(mut self) -> Result<(Vec<Dialect>, Vec<Element>, Marks)> {
         while self.pos < self.input.len() {
             let input = self.input;
             let rest = &input[self.pos..];
@@ -161,7 +195,7 @@ impl<'i> Reader<'i> {
             Stand::Code => (Act::Read, "in SQL"),
             _ => (Act::Keep, ""),
         })?;
-        Ok((self.dialects, self.elements))
+        Ok((self.dialects, self.elements, self.marks))
     }
 
     /// The directive at the reader's place, read where every database reads it in SQL itself
@@ -201,6 +235,12 @@ impl<'i> Reader<'i> {
                         })
                     })?;
                 self.end_element();
+                #[cfg(feature = "spellings")]
+                self.marks.push((
+                    self.pos,
+                    self.input.len() - rest.len(),
+                    Mark::Directive(element.clone()),
+                ));
                 self.elements.push(element);
                 self.pos = self.input.len() - rest.len();
                 Ok(true)
@@ -222,6 +262,12 @@ impl<'i> Reader<'i> {
         if act != Act::Read {
             return Ok(false);
         }
+        #[cfg(feature = "spellings")]
+        self.marks.push((
+            self.pos,
+            self.pos + 1 + after.find('\n').unwrap_or(after.len()),
+            Mark::Comment,
+        ));
         self.pos = match after.find('\n') {
             Some(newline) => self.pos + 1 + newline + 1,
             None => self.input.len(),
@@ -262,6 +308,8 @@ impl<'i> Reader<'i> {
                 dialects.push(dialect);
             }
         }
+        #[cfg(feature = "spellings")]
+        self.marks.push((self.pos, close + 1, Mark::Declaration));
         let rest = self.input[close + 1..].trim_start_matches([' ', '\t']);
         let rest = rest
             .strip_prefix("\r\n")

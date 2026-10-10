@@ -36,12 +36,16 @@ pub mod composer;
 pub mod driver;
 pub mod error;
 pub mod mock;
+#[cfg(any(feature = "respell", feature = "spellings"))]
+mod parsed;
 pub mod parser;
 mod reserved;
 #[cfg(feature = "respell")]
 pub mod respell;
 mod scan;
 pub mod source;
+#[cfg(feature = "spellings")]
+pub mod spellings;
 pub mod types;
 
 pub use composer::{ComposedSql, Composer, Held, Reach};

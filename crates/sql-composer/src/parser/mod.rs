@@ -7,6 +7,9 @@ pub mod command;
 pub mod compose;
 mod template;
 
+#[cfg(feature = "spellings")]
+pub(crate) use template::{marked, Mark};
+
 use crate::error;
 use crate::types::{Template, TemplateSource};
 

@@ -775,8 +775,6 @@ examples/
   sqlc-brickgen/          # sqlc-brickgen: a large catalogue built from a real one, for PostgreSQL
 ```
 
-The crates are at 0.1.0: a later 0.1 release keeps the API, and only 0.2 may change it.
-
 ## Licence
 
 MIT, copyright Kenneth Allen Flegal: see [LICENSE][LICENSE]. Each published crate carries the same

@@ -800,8 +800,6 @@ examples/
   sqlc-brickgen/          # sqlc-brickgen: um catálogo grande, feito a partir de um real, para o PostgreSQL
 ```
 
-Os pacotes estão na versão 0.1.0: as versões 0.1 que vierem depois mantêm a API, que só a 0.2 pode mudar.
-
 ## Licença
 
 MIT, com direitos de autor de Kenneth Allen Flegal: ver [LICENSE][LICENSE]. Cada pacote publicado

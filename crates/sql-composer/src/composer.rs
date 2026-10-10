@@ -16,6 +16,7 @@ use crate::types::{
 
 /// The result of composing a template: final SQL and ordered bind parameter names.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ComposedSql {
     /// The final SQL string with dialect-specific placeholders.
     pub sql: String,
@@ -3335,7 +3336,7 @@ mod tests {
             "root.sqlc",
             "SELECT n FROM (\n:compose(pg/one.sqlc)\n) o",
         );
-        for dialect in Dialect::ALL {
+        for &dialect in Dialect::ALL {
             let mut composer = Composer::new(dialect);
             composer.add_search_path(dir.path().to_path_buf());
             let child = composer.compose(&file_template(&dir, "pg/one.sqlc"));
@@ -3401,7 +3402,7 @@ mod tests {
 
         write_temp_file(&dir, "both.sqlc", "SELECT $$ :compose(bound.sqlc) $$");
         let both = file_template(&dir, "both.sqlc");
-        for dialect in Dialect::ALL {
+        for &dialect in Dialect::ALL {
             let mut composer = Composer::new(dialect);
             composer.add_search_path(dir.path().to_path_buf());
             let composed = composer.compose(&both);

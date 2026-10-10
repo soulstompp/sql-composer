@@ -2,14 +2,13 @@
 //!
 //! Scans a directory tree of `.sqlc` template files, composes them into final
 //! SQL with dialect-specific placeholders, and writes `.sql` output files
-//! mirroring the source directory structure.
+//! mirroring the source directory structure, with `manifest.json` beside them.
 
 use clap::{Parser, ValueEnum};
-use sql_composer::composer::Composer;
-use sql_composer::error::Error as ComposeError;
-use sql_composer::parser;
-use sql_composer::types::{ComposeRef, ComposeTarget, Dialect, Element, Template, TemplateSource};
-use std::collections::{BTreeMap, BTreeSet};
+use serde::{Deserialize, Serialize};
+use sql_composer::source::{self, Flags, Standing};
+use sql_composer::types::Dialect;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
@@ -65,21 +64,23 @@ struct ComposeArgs {
     #[arg(long, env = "SQLC_SOURCE_DIR", default_value = "sqlc")]
     source: PathBuf,
 
-    /// Target directory for composed .sql files.
+    /// Target directory for composed .sql files and their manifest.json.
     /// Falls back to SQLC_TARGET_DIR env var, then ".sql".
     #[arg(long, env = "SQLC_TARGET_DIR", default_value = ".sql")]
     target: PathBuf,
 
     /// The database to compose for: its placeholders, and the words it refuses as a name.
-    #[arg(long, default_value = "postgres")]
-    dialect: DialectArg,
+    /// `postgres` when it is left out.
+    #[arg(long)]
+    dialect: Option<DialectArg>,
 
     /// Skip running `cargo sqlx prepare` after composing.
     #[arg(long)]
     skip_prepare: bool,
 
-    /// Verify that composed output matches existing target files.
-    /// Exits with code 1 if any files differ or are missing.
+    /// Verify that composed output matches existing target files, manifest.json among them.
+    /// Exits with code 1 if any files differ or are missing. A flag left out is read from the
+    /// target's manifest.json, and a flag given that it records otherwise is refused.
     #[arg(long)]
     verify: bool,
 
@@ -106,6 +107,34 @@ struct ComposeArgs {
     search_path: Vec<PathBuf>,
 }
 
+/// The file at the root of the target that records how its files were composed.
+const MANIFEST: &str = "manifest.json";
+
+/// What `manifest.json` holds: the flags the target's files were composed with, and each
+/// composed file's names.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Manifest {
+    /// `--dialect`, as it is named.
+    dialect: String,
+    /// `--with`.
+    with: bool,
+    /// `--views`, as it was given.
+    views: Option<PathBuf>,
+    /// Each `--search-path`, as it was given, in order.
+    search_path: Vec<PathBuf>,
+    /// Each composed file, by its path under the target.
+    files: BTreeMap<String, Names>,
+}
+
+/// The names a composed file's placeholders stand for.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct Names {
+    /// The bind names, in placeholder order.
+    bind_params: Vec<String>,
+    /// Where each statement's names begin in `bind_params`, one entry per statement.
+    statement_starts: Vec<usize>,
+}
+
 fn main() {
     let Cli::Sqlc(args) = Cli::parse();
 
@@ -119,129 +148,27 @@ fn main() {
     }
 }
 
-/// What `cargo sqlc compose` makes of one template under the source.
-#[derive(Debug, PartialEq)]
-enum Standing {
-    /// Composed: the SQL its file holds.
-    Written(String),
-    /// A shape: the slots of its own a caller fills. It is composed only inside that caller.
-    Shape(Vec<String>),
-    /// A caller that leaves a slot open: the slot, and the template it stands in, as `:compose`
-    /// names it.
-    Skipped { slot: String, template: String },
-}
-
-/// Every `.sqlc` file under `source_dir`, at any depth, by its path under `source_dir`, with
-/// what composing it makes of it.
-fn compose_all(
-    source_dir: &Path,
-    search_paths: &[PathBuf],
-    dialect: Dialect,
-    views: Option<&Path>,
-    with: bool,
-) -> Result<BTreeMap<PathBuf, Standing>, Box<dyn std::error::Error>> {
-    let mut composer = Composer::new(dialect);
-    composer.add_search_path(source_dir.to_path_buf());
-    for path in search_paths {
-        composer.add_search_path(path.clone());
-    }
-    composer.name_relations = with;
-    if let Some(registry) = views {
-        composer.load_view_registry(registry)?;
-    }
-
-    let mut results = BTreeMap::new();
-
-    for entry in WalkDir::new(source_dir) {
-        let entry = entry?;
-        let path = entry.path();
-
-        if !path.is_file() || !path.extension().is_some_and(|ext| ext == "sqlc") {
-            continue;
-        }
-
-        let rel_path = path
-            .strip_prefix(source_dir)
-            .expect("walkdir entry must be under source_dir");
-
-        let content = std::fs::read_to_string(path)?;
-        let template = parser::parse_template(&content, TemplateSource::File(path.to_path_buf()))?;
-        let standing = match composer.compose(&template) {
-            Ok(r) => Standing::Written(r.sql),
-            Err(ComposeError::MissingSlot {
-                name,
-                template: within,
-            }) => {
-                let own = open_slots(&template);
-                if own.is_empty() {
-                    let roots: Vec<&Path> = std::iter::once(source_dir)
-                        .chain(search_paths.iter().map(PathBuf::as_path))
-                        .collect();
-                    Standing::Skipped {
-                        slot: name,
-                        template: as_composed(Path::new(&within), &roots),
-                    }
-                } else {
-                    Standing::Shape(own)
-                }
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        results.insert(rel_path.to_path_buf(), standing);
-    }
-
-    Ok(results)
-}
-
-/// The slots a template leaves for its caller to fill, each named once, in order.
-fn open_slots(template: &Template) -> Vec<String> {
-    let mut slots = BTreeSet::new();
-    for element in &template.elements {
-        if let Element::Compose(ComposeRef {
-            target: ComposeTarget::Slot(name),
-            ..
-        }) = element
-        {
-            slots.insert(name.clone());
-        }
-    }
-    slots.into_iter().collect()
-}
-
-/// `template` as a `:compose` names it: its path under the first of `roots` that holds it.
-fn as_composed(template: &Path, roots: &[&Path]) -> String {
-    let resolved = std::fs::canonicalize(template).unwrap_or_else(|_| template.to_path_buf());
-    roots
-        .iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
-        .find_map(|root| resolved.strip_prefix(&root).ok().map(Path::to_path_buf))
-        .unwrap_or_else(|| template.to_path_buf())
-        .display()
-        .to_string()
-}
-
 fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let source_dir = &args.source;
     let target_dir = &args.target;
-    let dialect: Dialect = args.dialect.clone().into();
 
     if !source_dir.exists() {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
     }
 
-    let standings = compose_all(
-        source_dir,
-        &args.search_path,
-        dialect,
-        args.views.as_deref(),
-        args.with,
-    )?;
+    let flags = if args.verify {
+        recorded_flags(args)?
+    } else {
+        given_flags(args)
+    };
+    let standings = source::compose_all(source_dir, &flags)?;
 
     if standings.is_empty() {
         println!("No .sqlc files found in {}", source_dir.display());
         return Ok(());
     }
+
+    let manifest = manifest_text(&manifest(&flags, &standings))?;
 
     if args.verify {
         for (rel_path, standing) in &standings {
@@ -249,7 +176,9 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("{}", line(source_dir, rel_path, standing));
             }
         }
-        return run_verify(&files(&standings), target_dir);
+        let mut expected = files(&standings);
+        expected.insert(PathBuf::from(MANIFEST), manifest);
+        return run_verify(&expected, target_dir);
     }
 
     // Write to a temp directory first, then swap into place.
@@ -258,18 +187,19 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let tmp_dir = tempfile::tempdir_in(parent)?;
 
     for (rel_path, standing) in &standings {
-        if let Standing::Written(sql) = standing {
+        if let Standing::Written(composed) = standing {
             let out_path = tmp_dir.path().join(rel_path.with_extension("sql"));
             if let Some(dir) = out_path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
-            std::fs::write(&out_path, sql)?;
+            std::fs::write(&out_path, &composed.sql)?;
         }
         match standing {
             Standing::Skipped { .. } => eprintln!("{}", line(source_dir, rel_path, standing)),
             _ => println!("{}", line(source_dir, rel_path, standing)),
         }
     }
+    std::fs::write(tmp_dir.path().join(MANIFEST), manifest)?;
 
     // All writes succeeded — swap into place.
     if target_dir.exists() {
@@ -289,12 +219,129 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The flags as given, each left out at its default.
+fn given_flags(args: &ComposeArgs) -> Flags {
+    let mut flags = Flags::new(
+        args.dialect
+            .clone()
+            .map_or(Dialect::Postgres, Dialect::from),
+    );
+    flags.with = args.with;
+    flags.views = args.views.clone();
+    flags.search_paths = args.search_path.clone();
+    flags
+}
+
+/// The flags `--verify` composes with: each one given, and for each left out the one the
+/// target's manifest records. A flag given that the manifest records otherwise is refused, with
+/// both. Without a manifest, the flags as given.
+fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error>> {
+    let path = args.target.join(MANIFEST);
+    let manifest: Manifest = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(given_flags(args)),
+        Err(e) => return Err(e.into()),
+    };
+    let at = path.display();
+
+    let recorded: Dialect = manifest.dialect.parse()?;
+    let dialect = match args.dialect.clone().map(Dialect::from) {
+        Some(given) if given != recorded => {
+            return Err(format!(
+                "--dialect {} is given, and {at} records --dialect {}",
+                given.name(),
+                recorded.name()
+            )
+            .into())
+        }
+        _ => recorded,
+    };
+    if args.with && !manifest.with {
+        return Err(
+            format!("--with is given, and {at} records the files composed without it").into(),
+        );
+    }
+    if let Some(given) = &args.views {
+        if manifest.views.as_ref() != Some(given) {
+            let recorded = match &manifest.views {
+                Some(views) => format!("--views {}", views.display()),
+                None => "no --views".to_string(),
+            };
+            return Err(format!(
+                "--views {} is given, and {at} records {recorded}",
+                given.display()
+            )
+            .into());
+        }
+    }
+    if !args.search_path.is_empty() && args.search_path != manifest.search_path {
+        let listed = |paths: &[PathBuf]| match paths {
+            [] => "no --search-path".to_string(),
+            paths => paths
+                .iter()
+                .map(|path| format!("--search-path {}", path.display()))
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        return Err(format!(
+            "{} is given, and {at} records {}",
+            listed(&args.search_path),
+            listed(&manifest.search_path)
+        )
+        .into());
+    }
+
+    let mut flags = Flags::new(dialect);
+    flags.with = manifest.with;
+    flags.views = manifest.views;
+    flags.search_paths = manifest.search_path;
+    Ok(flags)
+}
+
+/// The manifest of a compose with `flags`: one entry for each template written.
+fn manifest(flags: &Flags, standings: &BTreeMap<PathBuf, Standing>) -> Manifest {
+    Manifest {
+        dialect: flags.dialect.name().to_string(),
+        with: flags.with,
+        views: flags.views.clone(),
+        search_path: flags.search_paths.clone(),
+        files: standings
+            .iter()
+            .filter_map(|(rel_path, standing)| match standing {
+                Standing::Written(composed) => Some((
+                    slashed(&rel_path.with_extension("sql")),
+                    Names {
+                        bind_params: composed.bind_params.clone(),
+                        statement_starts: composed.statement_starts.clone(),
+                    },
+                )),
+                _ => None,
+            })
+            .collect(),
+    }
+}
+
+/// The manifest as its file holds it.
+fn manifest_text(manifest: &Manifest) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(serde_json::to_string_pretty(manifest)? + "\n")
+}
+
+/// A path under the target as the manifest names it, its parts joined by `/`.
+fn slashed(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The composed files, by their path under the target: one for each template written.
 fn files(standings: &BTreeMap<PathBuf, Standing>) -> BTreeMap<PathBuf, String> {
     standings
         .iter()
         .filter_map(|(rel_path, standing)| match standing {
-            Standing::Written(sql) => Some((rel_path.with_extension("sql"), sql.clone())),
+            Standing::Written(composed) => {
+                Some((rel_path.with_extension("sql"), composed.sql.clone()))
+            }
             _ => None,
         })
         .collect()
@@ -312,6 +359,7 @@ fn line(source_dir: &Path, rel_path: &Path, standing: &Standing) -> String {
         Standing::Skipped { slot, template } => {
             format!("Skipped {path}: @{slot} of {template} left open")
         }
+        other => format!("{path}: {other:?}"),
     }
 }
 
@@ -426,6 +474,15 @@ fn run_sqlx_prepare() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sql_composer::source::compose_all;
+
+    /// Composing for PostgreSQL, `--with` or not, after the source in `search_paths`.
+    fn postgres(with: bool, search_paths: &[PathBuf]) -> Flags {
+        let mut flags = Flags::new(Dialect::Postgres);
+        flags.with = with;
+        flags.search_paths = search_paths.to_vec();
+        flags
+    }
 
     #[test]
     fn test_only_sqlc_files_are_composed() {
@@ -434,7 +491,7 @@ mod tests {
         std::fs::write(source.path().join("notes"), "SELECT 2").unwrap();
         std::fs::write(source.path().join("notes.txt"), "SELECT 3").unwrap();
 
-        let composed = compose_all(source.path(), &[], Dialect::Postgres, None, false).unwrap();
+        let composed = compose_all(source.path(), &postgres(false, &[])).unwrap();
 
         assert_eq!(
             composed.keys().collect::<Vec<_>>(),
@@ -465,7 +522,7 @@ mod tests {
         );
 
         for with in [false, true] {
-            let composed = compose_all(source.path(), &[], Dialect::Postgres, None, with).unwrap();
+            let composed = compose_all(source.path(), &postgres(with, &[])).unwrap();
             let standing = |name: &str| &composed[Path::new(name)];
             assert!(matches!(standing("parts.sqlc"), Standing::Written(_)));
             assert!(matches!(standing("filled.sqlc"), Standing::Written(_)));
@@ -518,7 +575,7 @@ mod tests {
             .map(|path| path.display().to_string())
             .collect();
         for with in [false, true] {
-            let composed = compose_all(&source, &[], Dialect::Postgres, None, with).unwrap();
+            let composed = compose_all(&source, &postgres(with, &[])).unwrap();
             let lines: Vec<String> = composed
                 .iter()
                 .map(|(rel_path, standing)| line(&source, rel_path, standing))
@@ -544,6 +601,47 @@ mod tests {
                     template: "shared/filtered_set_parts.sqlc".into()
                 }
             );
+
+            let target = source.with_file_name(if with { "with" } else { "plain" });
+            let (from, to) = (source.display().to_string(), target.display().to_string());
+            let flags = ["--source", &from, "--target", &to];
+            run_compose(&compose_args(
+                &[&flags[..], if with { &["--with"] } else { &[] }].concat(),
+            ))
+            .unwrap();
+            let manifest: Manifest =
+                serde_json::from_str(&std::fs::read_to_string(target.join(MANIFEST)).unwrap())
+                    .unwrap();
+            let listed = |file: &String| manifest.files.keys().filter(|key| *key == file).count();
+            let on_disk: Vec<String> = WalkDir::new(&target)
+                .into_iter()
+                .map(|entry| entry.unwrap().into_path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+                .map(|path| slashed(path.strip_prefix(&target).unwrap()))
+                .collect();
+            let written: Vec<String> = composed
+                .iter()
+                .filter(|(_, standing)| matches!(standing, Standing::Written(_)))
+                .map(|(rel_path, _)| slashed(&rel_path.with_extension("sql")))
+                .collect();
+            let unlisted: Vec<_> = written.iter().filter(|f| listed(f) == 0).collect();
+            let doubled: Vec<_> = written.iter().filter(|f| listed(f) > 1).collect();
+            let unwritten: Vec<_> = manifest
+                .files
+                .keys()
+                .filter(|f| !written.contains(f))
+                .collect();
+            assert!(
+                unlisted.is_empty(),
+                "written, not in the manifest: {unlisted:?}"
+            );
+            assert!(doubled.is_empty(), "in the manifest twice: {doubled:?}");
+            assert!(
+                unwritten.is_empty(),
+                "in the manifest, not written: {unwritten:?}"
+            );
+            assert_eq!(on_disk.len(), manifest.files.len());
+            assert!(on_disk.iter().all(|f| listed(f) == 1), "{on_disk:?}");
         }
     }
 
@@ -559,7 +657,7 @@ mod tests {
             let Cli::Sqlc(args) =
                 Cli::try_parse_from(["cargo", "sqlc", "compose", "--dialect", value]).unwrap();
             let SqlcCommand::Compose(compose) = args.command;
-            assert_eq!(Dialect::from(compose.dialect), dialect, "{value}");
+            assert_eq!(Dialect::from(compose.dialect.unwrap()), dialect, "{value}");
         }
     }
 
@@ -603,20 +701,170 @@ mod tests {
     #[test]
     fn test_a_template_composes_a_relation_found_on_another_search_path() {
         let (_dir, source, shared) = trees();
-        let composed = compose_all(&source, &[shared], Dialect::Postgres, None, true).unwrap();
+        let composed = compose_all(&source, &postgres(true, &[shared])).unwrap();
         let keys: Vec<_> = composed.keys().cloned().collect();
         assert_eq!(keys, vec![PathBuf::from("walk/step.sqlc")]);
-        let Standing::Written(sql) = &composed[&PathBuf::from("walk/step.sqlc")] else {
+        let Standing::Written(written) = &composed[&PathBuf::from("walk/step.sqlc")] else {
             panic!("{composed:?}");
         };
+        let sql = &written.sql;
         assert!(sql.contains("WITH layers_figures AS ("), "{sql}");
         assert!(sql.contains("SELECT * FROM layers_figures"), "{sql}");
+    }
+
+    /// `cargo sqlc compose` parsed from `flags`.
+    fn compose_args(flags: &[&str]) -> ComposeArgs {
+        let args = ["cargo", "sqlc", "compose", "--skip-prepare"]
+            .into_iter()
+            .chain(flags.iter().copied());
+        let Cli::Sqlc(args) = Cli::try_parse_from(args).unwrap();
+        let SqlcCommand::Compose(compose) = args.command;
+        compose
+    }
+
+    /// A source of two templates, one a script of two statements that bind, and a target
+    /// beside it.
+    fn binding() -> (tempfile::TempDir, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("sqlc");
+        std::fs::create_dir_all(source.join("sets")).unwrap();
+        std::fs::write(
+            source.join("sets/by_year.sqlc"),
+            "SELECT set_num FROM sets WHERE year = :bind(year) AND theme_id = :bind(theme_id);\n\
+             SELECT name FROM themes WHERE id = :bind(theme_id);\n",
+        )
+        .unwrap();
+        std::fs::write(source.join("themes.sqlc"), "SELECT id, name FROM themes\n").unwrap();
+        let target = dir.path().join(".sql");
+        let (source, target) = (source.display().to_string(), target.display().to_string());
+        (dir, source, target)
+    }
+
+    #[test]
+    fn test_the_manifest_holds_each_composed_files_names_and_its_flags() {
+        let (_dir, source, target) = binding();
+        let args = compose_args(&["--source", &source, "--target", &target]);
+        run_compose(&args).unwrap();
+        let text = std::fs::read_to_string(Path::new(&target).join("manifest.json")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            manifest,
+            serde_json::json!({
+                "dialect": "postgres",
+                "with": false,
+                "views": null,
+                "search_path": [],
+                "files": {
+                    "sets/by_year.sql": {
+                        "bind_params": ["theme_id", "year", "theme_id"],
+                        "statement_starts": [0, 2]
+                    },
+                    "themes.sql": { "bind_params": [], "statement_starts": [0] }
+                }
+            })
+        );
+
+        let args = compose_args(&[
+            "--source",
+            &source,
+            "--target",
+            &target,
+            "--dialect",
+            "mysql",
+        ]);
+        run_compose(&args).unwrap();
+        let text = std::fs::read_to_string(Path::new(&target).join("manifest.json")).unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(manifest["dialect"], "mysql");
+        assert_eq!(
+            manifest["files"]["sets/by_year.sql"]["bind_params"],
+            serde_json::json!(["year", "theme_id", "theme_id"])
+        );
+    }
+
+    #[test]
+    fn test_verify_reads_the_flags_from_the_manifest() {
+        let (_dir, source, target) = binding();
+        let composed = [
+            "--source",
+            &source,
+            "--target",
+            &target,
+            "--dialect",
+            "mysql",
+            "--with",
+        ];
+        run_compose(&compose_args(&composed)).unwrap();
+
+        let verify = compose_args(&["--source", &source, "--target", &target, "--verify"]);
+        run_compose(&verify).unwrap();
+        let verify = compose_args(&[
+            "--source",
+            &source,
+            "--target",
+            &target,
+            "--verify",
+            "--dialect",
+            "mysql",
+            "--with",
+        ]);
+        run_compose(&verify).unwrap();
+    }
+
+    #[test]
+    fn test_verify_refuses_a_flag_the_manifest_disagrees_with() {
+        let (_dir, source, target) = binding();
+        let composed = [
+            "--source",
+            &source,
+            "--target",
+            &target,
+            "--dialect",
+            "mysql",
+        ];
+        run_compose(&compose_args(&composed)).unwrap();
+
+        let verify = ["--source", &source, "--target", &target, "--verify"];
+        let err = run_compose(&compose_args(
+            &[&verify[..], &["--dialect", "sqlite"]].concat(),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("sqlite") && err.contains("mysql"), "{err}");
+        let err = run_compose(&compose_args(&[&verify[..], &["--with"]].concat()))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--with"), "{err}");
+        let err = run_compose(&compose_args(
+            &[&verify[..], &["--search-path", "elsewhere"]].concat(),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("elsewhere"), "{err}");
+    }
+
+    #[test]
+    fn test_verify_compares_the_manifest() {
+        let (_dir, source, target) = binding();
+        run_compose(&compose_args(&["--source", &source, "--target", &target])).unwrap();
+        let verify = compose_args(&["--source", &source, "--target", &target, "--verify"]);
+        run_compose(&verify).unwrap();
+
+        let path = Path::new(&target).join("manifest.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let changed = text.replace("\"year\"", "\"years\"");
+        assert_ne!(changed, text);
+        std::fs::write(&path, changed).unwrap();
+        assert!(run_compose(&verify).is_err());
+
+        std::fs::remove_file(&path).unwrap();
+        assert!(run_compose(&verify).is_err());
     }
 
     #[test]
     fn test_without_that_search_path_the_relation_is_not_found() {
         let (_dir, source, _shared) = trees();
-        let err = compose_all(&source, &[], Dialect::Postgres, None, true).unwrap_err();
+        let err = compose_all(&source, &postgres(true, &[])).unwrap_err();
         assert!(err.to_string().contains("layers/figures.sqlc"), "{err}");
     }
 }

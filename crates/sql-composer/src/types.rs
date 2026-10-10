@@ -169,6 +169,7 @@ pub enum Dialect {
 
 /// How a dialect writes a statement's placeholders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum Placeholders {
     /// Numbered from 1 after a sign: `$1` on PostgreSQL and DuckDB, `?1` on SQLite. A name used
@@ -190,7 +191,7 @@ impl Placeholders {
 
 impl Dialect {
     /// Every dialect, in the order `--dialect` lists them.
-    pub(crate) const ALL: [Dialect; 5] = [
+    pub const ALL: &'static [Dialect] = &[
         Dialect::Postgres,
         Dialect::Mysql,
         Dialect::Mariadb,
@@ -198,8 +199,18 @@ impl Dialect {
         Dialect::Duckdb,
     ];
 
-    /// The name `--dialect` takes for this dialect.
-    pub(crate) fn name(&self) -> &'static str {
+    /// The name `--dialect` and `:dialect(…)` take for this dialect, which [`str::parse`] reads
+    /// back.
+    ///
+    /// ```
+    /// use sql_composer::Dialect;
+    ///
+    /// for &dialect in Dialect::ALL {
+    ///     assert_eq!(dialect.name().parse::<Dialect>().unwrap(), dialect);
+    /// }
+    /// assert!("postgresql".parse::<Dialect>().is_err());
+    /// ```
+    pub fn name(&self) -> &'static str {
         match self {
             Dialect::Postgres => "postgres",
             Dialect::Mysql => "mysql",
@@ -251,6 +262,22 @@ impl Dialect {
             Dialect::Mariadb => &crate::scan::MARIADB,
             Dialect::Sqlite => &crate::scan::SQLITE,
         }
+    }
+}
+
+impl std::str::FromStr for Dialect {
+    type Err = crate::error::Error;
+
+    /// The dialect `--dialect` and `:dialect(…)` name: `postgres`, `mysql`, `mariadb`, `sqlite` or
+    /// `duckdb`.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Dialect::ALL
+            .iter()
+            .find(|dialect| dialect.name() == name)
+            .copied()
+            .ok_or_else(|| crate::error::Error::UnknownDialect {
+                name: name.to_string(),
+            })
     }
 }
 

@@ -217,7 +217,8 @@ names, and a name used twice is one placeholder. For MySQL, each use is a `?` of
 order the statement uses them. The composed statement's `bind_params` lists the names in
 placeholder order, and `query_file!()` takes its arguments in that same order. In a template of
 several statements, each numbers its placeholders from the first, and `statement_starts` gives
-where each statement's names begin in `bind_params`.
+where each statement's names begin in `bind_params`. `cargo sqlc compose` writes both lists for
+each composed file into the target's `manifest.json` (*Reference*).
 
 A name given a list of values gets one placeholder per value. Composed with three values for
 `color_ids` (`compose_with_values`),
@@ -513,7 +514,8 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
   `.sql/sets/select_set_parts.sql`. Composition writes to a temporary directory first and puts it in
   the target's place only once every template has composed. The target is replaced whole, so a
   template removed or moved leaves no file behind, and a file written into the target by hand is
-  gone after the next compose. Point `--target` at a directory that holds nothing else.
+  gone after the next compose. Point `--target` at a directory that holds nothing else. Beside the
+  files goes `manifest.json` (below).
 - **`--search-path`** is one more directory `:compose` paths are read under, after `--source`, so a
   template can compose a relation another tree holds. Nothing is composed for the templates there
   themselves, and under `--with` a relation found there is named after its path there. Repeat it to
@@ -522,10 +524,11 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
   `duckdb`. It decides the placeholders, and the names the dialect reserves.
 - **`--skip-prepare`** leaves out `cargo sqlx prepare`, which otherwise runs once the files are
   written. If it fails, the command exits 1, and the files are written all the same.
-- **`--verify`** composes in memory and compares with the target. It reports each file `CHANGED`,
-  `MISSING` or `STALE`, exits 1 on any, and writes nothing, as `cargo fmt --check` does. Run it with
-  the same flags the files were composed with, since different flags compose different text. A
-  skipped template is reported as a compose reports it.
+- **`--verify`** composes in memory and compares with the target, its `manifest.json` included. It
+  reports each file `CHANGED`, `MISSING` or `STALE`, exits 1 on any, and writes nothing, as
+  `cargo fmt --check` does. It composes with the flags the manifest records: a flag left out is
+  read from the manifest, and one given that the manifest records otherwise is refused, with both.
+  A skipped template is reported as a compose reports it.
 - **`--with`** names each relation a statement reads once, at the head of the statement. It cannot
   be combined with `--views`.
 - **`--views`** loads a view registry, and every template the registry names is read as its view.
@@ -533,6 +536,22 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
 Every template under `--source` gets a line: `Composed`; `Shape`, with the slots it leaves open; or
 `Skipped`, on standard error, with the slot left open and the template it stands in. The last line
 counts them: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`.
+
+`manifest.json`, at the root of the target, records how its files were composed: the flags
+(`dialect`, `with`, `views`, `search_path`), and for each composed file its bind names in
+placeholder order (`bind_params`) and where each statement's names begin (`statement_starts`). The
+brick example's says of one of its files:
+
+```json
+"sets/select_colored_parts.sql": {
+  "bind_params": ["color_name", "set_num"],
+  "statement_starts": [0]
+}
+```
+
+So a program in any language runs a composed file by its names: `$1` is `color_name` and `$2` is
+`set_num`. On MySQL and MariaDB each `?` takes the name in its place in `bind_params`, where a name
+used twice is listed twice.
 
 ### Directives
 
@@ -574,6 +593,10 @@ assert_eq!(result.bind_params, vec!["theme_id", "year"]);
 `:compose` paths are read under. `compose_with_values` takes each binding's values and writes one
 placeholder for each value. `load_view_registry` loads a view registry, `add_mock_table` gives a
 table rows of your own, and `name_relations = true` composes as `--with` does.
+`source::compose_all` composes every template under a directory as `cargo sqlc compose` does, with
+the flags a `source::Flags` holds, and says what it made of each: `Standing::Written`, with its
+`ComposedSql`; `Standing::Shape`; or `Standing::Skipped`. `Dialect::ALL` lists the dialects, and
+`"mysql".parse::<Dialect>()` reads one by the name `--dialect` takes.
 
 | type | what it is |
 |---|---|
@@ -587,6 +610,8 @@ table rows of your own, and `name_relations = true` composes as `--with` does.
 | `CommandKind` | `Count`, `Union`, `Intersect` or `Except` |
 | `Composer` | composes templates into SQL for one dialect |
 | `ComposedSql` | the composed SQL, and its bind names in placeholder order |
+| `source::Flags` | the dialect, `--with`, `--views` and `--search-path` a directory is composed with |
+| `source::Standing` | what composing made of one template: written, a shape, or skipped |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` or `Duckdb` |
 | `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
 | `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |

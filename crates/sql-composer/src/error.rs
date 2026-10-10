@@ -139,6 +139,13 @@ pub enum Error {
         dialect: Dialect,
     },
 
+    /// A name that is no dialect's.
+    #[error("{name} is not a dialect: postgres, mysql, mariadb, sqlite or duckdb")]
+    UnknownDialect {
+        /// The name given.
+        name: String,
+    },
+
     /// A `:bind` composed into a dollar quote, where no value reaches it.
     #[error("binding '{name}' would stand inside a dollar quote, where no value reaches it")]
     BindInDollarQuote {

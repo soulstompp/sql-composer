@@ -223,7 +223,8 @@ nomes da instrução, e um nome usado duas vezes fica um só marcador; no MySQL,
 parte, pela ordem em que a instrução os usa. O `bind_params` da instrução composta lista os nomes
 pela ordem dos marcadores, que é também a ordem em que o `query_file!()` recebe os argumentos. Num
 modelo com várias instruções, cada uma numera os seus marcadores a partir do primeiro, e o
-`statement_starts` diz onde começam, no `bind_params`, os nomes de cada uma.
+`statement_starts` diz onde começam, no `bind_params`, os nomes de cada uma. O `cargo sqlc compose`
+escreve as duas listas de cada ficheiro composto no `manifest.json` do destino (*Referência*).
 
 Um nome que recebe uma lista de valores dá um marcador por valor. Composta com três valores em
 `color_ids` (`compose_with_values`), a consulta
@@ -532,7 +533,7 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   o lugar do destino depois de todos os modelos se terem composto; o destino é substituído por
   inteiro, pelo que um modelo apagado ou mudado de sítio não deixa ficheiro para trás, e um ficheiro
   escrito à mão no destino desaparece na composição seguinte. O `--target` deve, portanto, apontar
-  para uma pasta que não tenha mais nada.
+  para uma pasta que não tenha mais nada. Ao lado dos ficheiros fica o `manifest.json` (mais abaixo).
 - **`--search-path`** é mais uma pasta a partir da qual se leem os caminhos do `:compose`, depois do
   `--source`, pelo que um modelo pode compor uma relação que está noutra árvore. Os modelos que lá
   estão não dão ficheiro nenhum, e, com `--with`, uma relação encontrada lá toma o nome do seu
@@ -542,11 +543,11 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
 - **`--skip-prepare`** deixa de fora o `cargo sqlx prepare`, que de outro modo corre assim que os
   ficheiros estão escritos. Se este falhar, o comando sai com 1, e os ficheiros ficam escritos na
   mesma.
-- **`--verify`** compõe em memória e compara com o destino: dá cada ficheiro como `CHANGED`,
-  `MISSING` ou `STALE`, sai com 1 se houver algum e não escreve nada, como faz o
-  `cargo fmt --check`.
-  Corre-se com as mesmas opções com que os ficheiros foram compostos, já que opções diferentes
-  compõem textos diferentes. Um modelo saltado, dá-o tal como o dá uma composição.
+- **`--verify`** compõe em memória e compara com o destino, `manifest.json` incluído: dá cada
+  ficheiro como `CHANGED`, `MISSING` ou `STALE`, sai com 1 se houver algum e não escreve nada, como
+  faz o `cargo fmt --check`. Compõe com as opções que o manifesto regista, de modo que uma opção que
+  não seja dada se lê do manifesto, e uma que seja dada com outro valor é recusada, com os dois. Um
+  modelo saltado, dá-o tal como o dá uma composição.
 - **`--with`** nomeia uma só vez cada relação que uma instrução lê, à cabeça da instrução, e não se
   combina com `--views`.
 - **`--views`** carrega um registo de vistas, e cada modelo que o registo nomeia passa a ler-se como
@@ -555,6 +556,22 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
 Cada modelo que esteja no `--source` tem uma linha sua: `Composed`; `Shape`, com as vagas que deixa
 abertas; ou `Skipped`, na saída de erro, com a vaga por preencher e o modelo onde ela está. A última
 linha conta-os a todos: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`.
+
+O `manifest.json`, na raiz do destino, regista como foram compostos os ficheiros: as opções
+(`dialect`, `with`, `views`, `search_path`) e, de cada ficheiro composto, os nomes dos parâmetros
+pela ordem dos marcadores (`bind_params`) e onde começam os nomes de cada instrução
+(`statement_starts`). O do exemplo brick diz isto de um dos seus ficheiros:
+
+```json
+"sets/select_colored_parts.sql": {
+  "bind_params": ["color_name", "set_num"],
+  "statement_starts": [0]
+}
+```
+
+Um programa em qualquer linguagem corre, assim, um ficheiro composto pelos nomes: o `$1` é o
+`color_name`, e o `$2` o `set_num`. No MySQL e no MariaDB, cada `?` toma o nome que ocupa o seu
+lugar no `bind_params`, onde um nome usado duas vezes aparece duas vezes.
 
 ### Diretivas
 
@@ -597,6 +614,10 @@ pasta a partir da qual se leem os caminhos do `:compose`, o `compose_with_values
 de cada parâmetro e escreve um marcador por valor, o `load_view_registry` carrega um registo de
 vistas, o `add_mock_table` dá a uma tabela linhas à escolha, e com `name_relations = true`
 compõe-se como com o `--with`.
+O `source::compose_all` compõe todos os modelos de uma pasta como o `cargo sqlc compose` os compõe,
+com as opções que um `source::Flags` guarda, e diz o que fez de cada um: `Standing::Written`, com o
+seu `ComposedSql`; `Standing::Shape`; ou `Standing::Skipped`. O `Dialect::ALL` lista os dialetos, e
+o `"mysql".parse::<Dialect>()` lê um deles pelo nome que o `--dialect` lhe dá.
 
 | tipo | o que é |
 |---|---|
@@ -610,6 +631,8 @@ compõe-se como com o `--with`.
 | `CommandKind` | `Count`, `Union`, `Intersect` ou `Except` |
 | `Composer` | compõe modelos em SQL para um dialeto |
 | `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
+| `source::Flags` | o dialeto, o `--with`, o `--views` e o `--search-path` com que uma pasta se compõe |
+| `source::Standing` | o que a composição fez de um modelo: escrito, forma ou saltado |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` ou `Duckdb` |
 | `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
 | `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |

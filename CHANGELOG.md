@@ -26,6 +26,9 @@
 - **`:dialect(…)`** — A template names the dialects it is written for at its head, `:dialect(postgres)` or `:dialect(postgres, duckdb)`, in `--dialect`'s words. Their databases alone read it, and composing it for another dialect is refused (`Error::NotWrittenFor`), whether it is the template composed or one it composes. A template that names none is written for every dialect. `Template::dialects` holds the names.
 - **Dollar quotes in a template written for the databases that read them** — In a template written for PostgreSQL, DuckDB or MySQL, a dollar quote holds SQL as a string does, `#variable_conflict` and the jsonb operators with it, and a directive inside it composes. A `:bind` inside one is refused, written there (`Error::Parse`) or composed into it (`Error::BindInDollarQuote`): a function's body took its placeholder as the function's own first argument.
 - **A missing slot names its template** — `Error::MissingSlot` holds `template`, the template the open slot stands in, and its message says it. It named the slot alone, which a caller composing two shapes could leave open in either.
+- **`source::compose_all`** — Composes every `.sqlc` file under a directory, at any depth, as `cargo sqlc compose` does, with the flags a `source::Flags` holds: the dialect, `with`, `views` and `search_paths`. Each template takes one `source::Standing`: `Written`, with its `ComposedSql`; `Shape`, with the slots it leaves open; or `Skipped`, with the slot a template it composes leaves open and that template.
+- **Dialects by name** — `Dialect::ALL` lists every dialect, `Dialect::name` gives the name `--dialect` and `:dialect(…)` take, and `str::parse` reads it back. A name that is no dialect's is `Error::UnknownDialect`.
+- **`ComposedSql` and `Placeholders` under `serde`** — The feature derives `Serialize` and `Deserialize` for both.
 
 ### sql-composer-mysql
 
@@ -56,6 +59,7 @@
 - **Only `.sqlc` files are composed** — `cargo sqlc compose` skips a file with no extension, as it skips one with another, and `--verify` reads only the target's `.sql` files. A stray `notes` was composed to `notes.sql`, and a target's `README` was reported stale.
 - **`--dialect mariadb` and `--dialect duckdb`** — `cargo sqlc compose` composes for MariaDB and DuckDB, each with its own placeholders and reserved words.
 - **Every template is reported** — `cargo sqlc compose` gives each template under `--source` a line: `Composed`; `Shape`, with the slots it leaves open; or `Skipped`, on standard error, with the slot a template it composes leaves open and that template. `--verify` reports the skipped ones too, and the exit code is unchanged. The last line counts each: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`. A caller that left a slot open was skipped without a message, and a source holding only shapes was reported as holding no `.sqlc` file.
+- **`manifest.json`** — `cargo sqlc compose` writes `manifest.json` at the root of `--target`: the flags it composed with (`dialect`, `with`, `views`, `search_path`), and for each composed file its bind names in placeholder order (`bind_params`) and where each statement's names begin (`statement_starts`), so a program in any language runs a composed file by its names. `--verify` compares the manifest as it compares the files, and composes with the flags it records: a flag left out is read from it, and one given that it records otherwise is refused, with both. `--verify` had to be given the flags the files were composed with.
 
 ### examples
 

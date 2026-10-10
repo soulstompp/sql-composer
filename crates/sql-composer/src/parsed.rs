@@ -4,10 +4,13 @@
 
 use std::any::TypeId;
 
-use sqlparser::ast::{Ident, Spanned, TableFactor};
+use sqlparser::ast::Ident;
+#[cfg(feature = "respell")]
+use sqlparser::ast::{Spanned, TableFactor};
 use sqlparser::dialect::{Dialect, PostgreSqlDialect, Precedence};
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
+#[cfg(feature = "respell")]
 use sqlparser::tokenizer::{Location, Span};
 
 use crate::scan::{Scanner, POSTGRES};
@@ -297,6 +300,7 @@ pub(crate) fn masked(text: &str) -> String {
 }
 
 /// A statement's text, read by line and column.
+#[cfg(feature = "respell")]
 pub(crate) struct Source<'t> {
     /// The text as written.
     pub(crate) text: &'t str,
@@ -307,6 +311,7 @@ pub(crate) struct Source<'t> {
     pub(crate) tokens: Vec<(usize, usize)>,
 }
 
+#[cfg(feature = "respell")]
 impl<'t> Source<'t> {
     pub(crate) fn new(text: &'t str, parsed: &'t str) -> Self {
         let mut lines = vec![0];
@@ -370,9 +375,11 @@ impl<'t> Source<'t> {
 }
 
 /// Replacements in a statement's text, none overlapping another.
+#[cfg(feature = "respell")]
 #[derive(Clone, Default)]
 pub(crate) struct Edits(pub(crate) Vec<(usize, usize, String)>);
 
+#[cfg(feature = "respell")]
 impl Edits {
     /// The text from `start` to `end` with the replacements inside it made; none where one
     /// crosses either end.

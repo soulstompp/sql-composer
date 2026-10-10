@@ -26,7 +26,7 @@ use sqlparser::tokenizer::Token;
 use super::columns::Resolve;
 use super::extent::{spaced_from, spaced_to};
 use super::place::{enough, passed, wants, Choice, Edits, Place, Want};
-use super::read::{plain_space, reparse, Read, Stmt, Stood};
+use super::read::{plain_space, reparse, Read, Stmt};
 use crate::parsed::normal;
 use crate::parser::{marked, Mark};
 use crate::types::{ComposeRef, ComposeTarget, Element};
@@ -202,7 +202,7 @@ pub(crate) fn places(read: &Read, resolve: Resolve, want: Option<Want>) -> Vec<P
             let free_name = !head.iter().any(|c| normal(&c.alias.name) == name)
                 && !form.reads.contains_key(&name);
             if factor.free && free_name && wants(want, WITH) {
-                if let Some(choice) = names.hoisted(query, &head, factor, alias, subquery) {
+                if let Some(choice) = names.hoisted(&head, factor, alias, subquery) {
                     choices.push(choice);
                 }
             }
@@ -399,7 +399,6 @@ impl<'r> Names<'r> {
     /// The subquery `factor`, read once, written as a WITH query at the head.
     fn hoisted(
         &self,
-        query: &Query,
         head: &[&Cte],
         factor: &Factor,
         alias: &TableAlias,
@@ -464,7 +463,6 @@ impl<'r> Names<'r> {
                 })
             }
         }
-        let _ = query;
         Some(Choice {
             name: "a WITH query at the head".into(),
             picks: vec![WITH],
@@ -653,9 +651,7 @@ impl<'r> Names<'r> {
     /// The template the derived table `factor` composes, written inline from its own text.
     fn inlined(&self, factor: &Factor, compose: &ComposeRef, resolve: Resolve) -> Option<Choice> {
         let TableFactor::Derived {
-            subquery,
-            alias: Some(alias),
-            ..
+            alias: Some(alias), ..
         } = &factor.factor
         else {
             return None;
@@ -665,7 +661,6 @@ impl<'r> Names<'r> {
         let first = self.statement.after(open)?;
         let last = self.statement.before(close)?;
         let (start, end) = self.bytes(first, last);
-        let _ = subquery;
         let mut expected = self.statement.ast.clone();
         let mut inlined = factor.factor.clone();
         if let TableFactor::Derived { subquery, .. } = &mut inlined {
@@ -726,7 +721,6 @@ fn inline_text(compose: &ComposeRef, resolve: Resolve) -> Option<(String, Query)
     let Statement::Query(query) = &statement.ast else {
         return None;
     };
-    let _: &Stood = &read.stood;
     Some((out, (**query).clone()))
 }
 

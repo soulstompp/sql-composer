@@ -6,7 +6,7 @@ use std::ops::ControlFlow;
 
 use sqlparser::ast::{
     BinaryOperator, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName, ObjectNamePart,
-    Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Visit, Visitor,
+    Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Visit, Visitor,
 };
 use sqlparser::tokenizer::{Token, Whitespace};
 
@@ -16,15 +16,11 @@ use super::place::{change_select, enough, passed, Choice, Place, Want};
 use super::read::{Read, Stmt};
 use crate::parsed::normal;
 
-/// A join list of a statement: the relations a `FROM` item joins, two or more.
+/// A join list of a statement, as the census counts it: the relations a `FROM` item joins, two
+/// or more.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct JoinList {
-    /// The select it is in, by its place among the statement's selects from 0.
-    pub(crate) select: usize,
-    /// The `FROM` item it is, by its place in the select's `FROM` from 0.
-    pub(crate) item: usize,
-    /// How many relations it joins.
-    pub(crate) relations: usize,
     /// Whether a join of it joins by `USING`.
     pub(crate) using: bool,
     /// Each relation whose columns are not read from the text, with why, where a join of it
@@ -33,7 +29,12 @@ pub(crate) struct JoinList {
 }
 
 /// Every join list of `statement`.
-pub(crate) fn join_lists(read: &Read, statement: &Statement, resolve: Resolve) -> Vec<JoinList> {
+#[cfg(test)]
+pub(crate) fn join_lists(
+    read: &Read,
+    statement: &sqlparser::ast::Statement,
+    resolve: Resolve,
+) -> Vec<JoinList> {
     let withs = Withs::of(statement);
     let reader = Reader {
         stood: &read.stood,
@@ -44,8 +45,8 @@ pub(crate) fn join_lists(read: &Read, statement: &Statement, resolve: Resolve) -
     let mut selects = Selects::default();
     let _ = statement.visit(&mut selects);
     let mut lists = Vec::new();
-    for (at, select) in selects.0.iter().enumerate() {
-        for (item, from) in select.from.iter().enumerate() {
+    for select in &selects.0 {
+        for from in &select.from {
             if from.joins.is_empty() {
                 continue;
             }
@@ -65,13 +66,7 @@ pub(crate) fn join_lists(read: &Read, statement: &Statement, resolve: Resolve) -
                     }
                 }
             }
-            lists.push(JoinList {
-                select: at,
-                item,
-                relations: from.joins.len() + 1,
-                using,
-                unread,
-            });
+            lists.push(JoinList { using, unread });
         }
     }
     lists
@@ -150,8 +145,6 @@ pub(crate) struct Model {
     conditions: Vec<Condition>,
     /// What stands between the first relation and the first join.
     separator: String,
-    /// Whether the list joins by `USING`.
-    using: bool,
 }
 
 impl Model {
@@ -173,7 +166,7 @@ impl Model {
 
 /// What a join of an order is joined by.
 #[derive(Debug, Clone)]
-enum By {
+pub(crate) enum By {
     Using(Vec<usize>),
     On(Vec<usize>),
     Cross,
@@ -385,13 +378,12 @@ pub(crate) fn model(
         classes,
         conditions,
         separator,
-        using,
     })
 }
 
 /// How each relation of `order` after the first is joined, where the order returns the rows the
 /// written one does; why not, where it does not.
-fn joined(model: &Model, order: &[usize]) -> Result<Vec<By>, String> {
+pub(crate) fn joined(model: &Model, order: &[usize]) -> Result<Vec<By>, String> {
     let mut done: BTreeSet<usize> = BTreeSet::new();
     let mut held: Vec<(String, BTreeSet<usize>)> = Vec::new();
     let mut by = Vec::new();
@@ -475,12 +467,7 @@ fn joined(model: &Model, order: &[usize]) -> Result<Vec<By>, String> {
 }
 
 /// The list's text in `order`, and the `FROM` item it reads as.
-fn written(
-    model: &Model,
-    order: &[usize],
-    by: &[By],
-    item: &TableWithJoins,
-) -> (String, TableWithJoins) {
+fn written(model: &Model, order: &[usize], by: &[By]) -> (String, TableWithJoins) {
     let mut text = model.rels[order[0]].text.clone();
     let mut joins = Vec::new();
     for (p, &r) in order.iter().enumerate().skip(1) {
@@ -527,7 +514,6 @@ fn written(
             join_operator: operator,
         });
     }
-    let _ = item;
     (
         text,
         TableWithJoins {
@@ -778,7 +764,7 @@ fn list_place(
         let Ok(by) = joined(model, &order) else {
             continue;
         };
-        let (text, written_item) = written(model, &order, &by, from);
+        let (text, written_item) = written(model, &order, &by);
         let mut expected = statement.ast.clone();
         change_select(&mut expected, k, |select| select.from[item] = written_item);
         choices.push(Choice {

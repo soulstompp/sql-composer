@@ -163,11 +163,6 @@ pub(crate) fn spaced_from(statement: &Stmt, at: usize) -> usize {
     first
 }
 
-/// Whether token `at` is `token`.
-pub(crate) fn is_token(statement: &Stmt, at: usize, token: &Token) -> bool {
-    statement.tokens[at].token == *token
-}
-
 /// The edits that take conjunct `n` out of the condition `chain`, the clause's keyword with it
 /// where it is the only one: the conjunct, the `AND` or keyword that joins it, and the plain
 /// spaces between them and before the `AND`. A comment among them stays where it stands.

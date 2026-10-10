@@ -9,12 +9,12 @@
 //! back and compared with the statement it must be before it is offered.
 //!
 //! [`lay_out`] counts a template's spellings at each place an axis applies, and writes each of
-//! them with every other place as written: an axis at a time, and never as the product. Nothing reads a catalog: each condition is read
+//! them with every other place as written: an axis at a time, and never as the product. The
+//! picks are kept in `spellings.toml` at the root of the source ([`Picks`]), and [`spell`] writes
+//! a template in them. Join order's pick is one template's join list in the order picked, and it
+//! takes effect only where outermost first gives that order ([`confirm`]). Nothing reads a catalog: each condition is read
 //! from the template's own text. A template, or a statement of it, that the parser cannot read is
 //! left as written, and so is every template when no spelling is picked.
-
-// The identities are read by their tests until the picks write templates in them.
-#![allow(dead_code)]
 
 mod columns;
 mod conditions;
@@ -24,11 +24,13 @@ mod join_order;
 mod laws;
 mod naming;
 mod negation;
+mod picks;
 mod place;
 mod read;
 mod semi_join;
 
 pub use columns::Resolve;
+pub use picks::{confirm, outermost_first, spell, JoinOrderPick, JoinRule, Picks, FILE};
 use place::{apply, checked, made, Place, Want};
 use read::Read;
 
@@ -485,7 +487,9 @@ mod census {
                 census.not_read_back.push(entry.path().to_path_buf());
             }
             let read = Read::new(&text).unwrap();
-            if read.write_back() != text {
+            if read.write_back() != text
+                || super::spell(&text, &super::Picks::default(), &resolve) != text
+            {
                 census.not_written_back.push(entry.path().to_path_buf());
             }
             for (_, statement) in read.parsed() {

@@ -216,11 +216,6 @@ impl Read {
         let (start, end) = self.written(statement, first, last);
         &self.stood.text[start..end]
     }
-
-    /// Where a statement's byte `at` stands in the template.
-    pub(crate) fn written_at(&self, statement: &Stmt, at: usize, end: bool) -> usize {
-        self.stood.written(statement.base + at, end)
-    }
 }
 
 /// One statement of a template, as the parser reads it.

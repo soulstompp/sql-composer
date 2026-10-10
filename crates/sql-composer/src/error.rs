@@ -152,6 +152,16 @@ pub enum Error {
         dialect: Dialect,
     },
 
+    /// A `spellings.toml` that does not read as picks.
+    #[cfg(feature = "spellings")]
+    #[error("{path}: {message}")]
+    Picks {
+        /// The file.
+        path: String,
+        /// What is wrong in it.
+        message: String,
+    },
+
     /// A name that is no dialect's.
     #[error("{name} is not a dialect: postgres, mysql, mariadb, sqlite or duckdb")]
     UnknownDialect {

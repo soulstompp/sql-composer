@@ -139,6 +139,11 @@ pub enum Error {
         dialect: Dialect,
     },
 
+    /// A manifest that could not be written or read as JSON.
+    #[cfg(feature = "serde")]
+    #[error("manifest: {0}")]
+    Manifest(#[from] serde_json::Error),
+
     /// A name that is no dialect's.
     #[error("{name} is not a dialect: postgres, mysql, mariadb, sqlite or duckdb")]
     UnknownDialect {

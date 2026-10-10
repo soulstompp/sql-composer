@@ -612,6 +612,7 @@ the flags a `source::Flags` holds, and says what it made of each: `Standing::Wri
 | `ComposedSql` | the composed SQL, and its bind names in placeholder order |
 | `source::Flags` | the dialect, `--with`, `--views` and `--search-path` a directory is composed with |
 | `source::Standing` | what composing made of one template: written, a shape, or skipped |
+| `source::Manifest` | what `manifest.json` holds, under the feature `serde` |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` or `Duckdb` |
 | `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
 | `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |

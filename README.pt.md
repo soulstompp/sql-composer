@@ -633,6 +633,7 @@ o `"mysql".parse::<Dialect>()` lê um deles pelo nome que o `--dialect` lhe dá.
 | `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
 | `source::Flags` | o dialeto, o `--with`, o `--views` e o `--search-path` com que uma pasta se compõe |
 | `source::Standing` | o que a composição fez de um modelo: escrito, forma ou saltado |
+| `source::Manifest` | o que o `manifest.json` guarda, com a funcionalidade `serde` |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` ou `Duckdb` |
 | `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
 | `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |

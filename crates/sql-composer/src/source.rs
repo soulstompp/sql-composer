@@ -110,6 +110,87 @@ pub fn compose_all(source_dir: &Path, flags: &Flags) -> Result<BTreeMap<PathBuf,
     Ok(results)
 }
 
+/// The file at the root of a target that records how its files were composed.
+#[cfg(feature = "serde")]
+pub const MANIFEST: &str = "manifest.json";
+
+/// What `manifest.json` holds: the flags a target's files were composed with, and each composed
+/// file's names.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct Manifest {
+    /// The dialect, by the name `--dialect` takes.
+    pub dialect: String,
+    /// `--with`.
+    pub with: bool,
+    /// `--views`, as it was given.
+    pub views: Option<PathBuf>,
+    /// Each `--search-path`, as it was given, in order.
+    pub search_path: Vec<PathBuf>,
+    /// Each composed file, by its path under the target, its parts joined by `/`.
+    pub files: BTreeMap<String, Names>,
+}
+
+/// The names a composed file's placeholders stand for.
+#[cfg(feature = "serde")]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct Names {
+    /// The bind names, in placeholder order.
+    pub bind_params: Vec<String>,
+    /// Where each statement's names begin in `bind_params`, one entry per statement.
+    pub statement_starts: Vec<usize>,
+}
+
+#[cfg(feature = "serde")]
+impl Manifest {
+    /// The manifest of composing with `flags`: an entry for each template written, its file
+    /// named by its path under the target.
+    pub fn new(flags: &Flags, standings: &BTreeMap<PathBuf, Standing>) -> Self {
+        Manifest {
+            dialect: flags.dialect.name().to_string(),
+            with: flags.with,
+            views: flags.views.clone(),
+            search_path: flags.search_paths.clone(),
+            files: standings
+                .iter()
+                .filter_map(|(rel_path, standing)| match standing {
+                    Standing::Written(composed) => Some((
+                        composed_file(rel_path),
+                        Names {
+                            bind_params: composed.bind_params.clone(),
+                            statement_starts: composed.statement_starts.clone(),
+                        },
+                    )),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// The manifest as its file holds it.
+    pub fn to_json(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)? + "\n")
+    }
+
+    /// The manifest a file holds.
+    pub fn from_json(text: &str) -> Result<Self> {
+        Ok(serde_json::from_str(text)?)
+    }
+}
+
+/// The composed file of the template at `rel_path` under the source, by its path under the
+/// target, its parts joined by `/`.
+pub fn composed_file(rel_path: &Path) -> String {
+    rel_path
+        .with_extension("sql")
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The slots a template leaves for its caller to fill, each named once, in order.
 fn open_slots(template: &Template) -> Vec<String> {
     let mut slots = BTreeSet::new();

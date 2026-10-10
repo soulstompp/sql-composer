@@ -5,8 +5,7 @@
 //! mirroring the source directory structure, with `manifest.json` beside them.
 
 use clap::{Parser, ValueEnum};
-use serde::{Deserialize, Serialize};
-use sql_composer::source::{self, Flags, Standing};
+use sql_composer::source::{self, Flags, Manifest, Standing, MANIFEST};
 use sql_composer::types::Dialect;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -107,34 +106,6 @@ struct ComposeArgs {
     search_path: Vec<PathBuf>,
 }
 
-/// The file at the root of the target that records how its files were composed.
-const MANIFEST: &str = "manifest.json";
-
-/// What `manifest.json` holds: the flags the target's files were composed with, and each
-/// composed file's names.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct Manifest {
-    /// `--dialect`, as it is named.
-    dialect: String,
-    /// `--with`.
-    with: bool,
-    /// `--views`, as it was given.
-    views: Option<PathBuf>,
-    /// Each `--search-path`, as it was given, in order.
-    search_path: Vec<PathBuf>,
-    /// Each composed file, by its path under the target.
-    files: BTreeMap<String, Names>,
-}
-
-/// The names a composed file's placeholders stand for.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-struct Names {
-    /// The bind names, in placeholder order.
-    bind_params: Vec<String>,
-    /// Where each statement's names begin in `bind_params`, one entry per statement.
-    statement_starts: Vec<usize>,
-}
-
 fn main() {
     let Cli::Sqlc(args) = Cli::parse();
 
@@ -168,7 +139,7 @@ fn run_compose(args: &ComposeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let manifest = manifest_text(&manifest(&flags, &standings))?;
+    let manifest = Manifest::new(&flags, &standings).to_json()?;
 
     if args.verify {
         for (rel_path, standing) in &standings {
@@ -238,7 +209,7 @@ fn given_flags(args: &ComposeArgs) -> Flags {
 fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error>> {
     let path = args.target.join(MANIFEST);
     let manifest: Manifest = match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+        Ok(text) => Manifest::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(given_flags(args)),
         Err(e) => return Err(e.into()),
     };
@@ -296,42 +267,6 @@ fn recorded_flags(args: &ComposeArgs) -> Result<Flags, Box<dyn std::error::Error
     flags.views = manifest.views;
     flags.search_paths = manifest.search_path;
     Ok(flags)
-}
-
-/// The manifest of a compose with `flags`: one entry for each template written.
-fn manifest(flags: &Flags, standings: &BTreeMap<PathBuf, Standing>) -> Manifest {
-    Manifest {
-        dialect: flags.dialect.name().to_string(),
-        with: flags.with,
-        views: flags.views.clone(),
-        search_path: flags.search_paths.clone(),
-        files: standings
-            .iter()
-            .filter_map(|(rel_path, standing)| match standing {
-                Standing::Written(composed) => Some((
-                    slashed(&rel_path.with_extension("sql")),
-                    Names {
-                        bind_params: composed.bind_params.clone(),
-                        statement_starts: composed.statement_starts.clone(),
-                    },
-                )),
-                _ => None,
-            })
-            .collect(),
-    }
-}
-
-/// The manifest as its file holds it.
-fn manifest_text(manifest: &Manifest) -> Result<String, Box<dyn std::error::Error>> {
-    Ok(serde_json::to_string_pretty(manifest)? + "\n")
-}
-
-/// A path under the target as the manifest names it, its parts joined by `/`.
-fn slashed(path: &Path) -> String {
-    path.components()
-        .map(|part| part.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 /// The composed files, by their path under the target: one for each template written.
@@ -476,6 +411,14 @@ mod tests {
     use super::*;
     use sql_composer::source::compose_all;
 
+    /// `path` with its parts joined by `/`.
+    fn slashed(path: &Path) -> String {
+        path.components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
     /// Composing for PostgreSQL, `--with` or not, after the source in `search_paths`.
     fn postgres(with: bool, search_paths: &[PathBuf]) -> Flags {
         let mut flags = Flags::new(Dialect::Postgres);
@@ -609,8 +552,8 @@ mod tests {
                 &[&flags[..], if with { &["--with"] } else { &[] }].concat(),
             ))
             .unwrap();
-            let manifest: Manifest =
-                serde_json::from_str(&std::fs::read_to_string(target.join(MANIFEST)).unwrap())
+            let manifest =
+                Manifest::from_json(&std::fs::read_to_string(target.join(MANIFEST)).unwrap())
                     .unwrap();
             let listed = |file: &String| manifest.files.keys().filter(|key| *key == file).count();
             let on_disk: Vec<String> = WalkDir::new(&target)

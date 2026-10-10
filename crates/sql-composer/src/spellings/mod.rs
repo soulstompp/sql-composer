@@ -12,9 +12,10 @@
 //! them with every other place as written: an axis at a time, and never as the product. The
 //! picks are kept in `spellings.toml` at the root of the source ([`Picks`]), and [`spell`] writes
 //! a template in them. Join order's pick is one template's join list in the order picked, and it
-//! takes effect only where outermost first gives that order ([`confirm`]). Nothing reads a catalog: each condition is read
-//! from the template's own text. A template, or a statement of it, that the parser cannot read is
-//! left as written, and so is every template when no spelling is picked.
+//! takes effect only where outermost first gives that order ([`confirm`]). Nothing reads a
+//! catalog: each condition is read from the template's own text. A template, or a statement of
+//! it, that the parser cannot read is left as written, and so is every template when no spelling
+//! is picked.
 
 mod columns;
 mod conditions;

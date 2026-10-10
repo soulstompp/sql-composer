@@ -1,7 +1,7 @@
-//! The laws: each identity's spelling of a template returns the rows the template as written
-//! returns, as many times each, on tables holding the rows its near-identity fails on, and the
-//! near-identity returns other rows there. Each runs on a PostgreSQL server, on tables of those
-//! rows and again on the same rows given as mock tables, with the server's URL in
+//! The laws: each spelling of a template returns the rows the template as written returns, as
+//! many times each, on tables holding the rows the nearest rewrite that is not a spelling fails
+//! on, and that rewrite returns other rows there. Each runs on a PostgreSQL server, on tables of
+//! those rows and again on the same rows given as mock tables, with the server's URL in
 //! `SQLC_TEST_POSTGRES_URL`: `cargo test --all-features -- --ignored`.
 
 use postgres::types::ToSql;
@@ -111,11 +111,11 @@ fn run<const N: usize>(texts: [&str; N], trap: &Trap) -> Vec<[Vec<String>; N]> {
     found
 }
 
-/// The law of an identity: `spelled`, the identity's spelling of `written`, returns its rows on
-/// the trap's tables and on its mocks, as many times each and some rows at least; and the
-/// near-identity's spelling of `near.0`, `near.1`, returns other rows than it on both.
+/// The law of a spelling: `spelled`, `written` in another spelling, returns its rows on the
+/// trap's tables and on its mocks, as many times each and some rows at least; and `near.1`, the
+/// nearest rewrite of `near.0` that is not a spelling, returns other rows than it on both.
 pub(crate) fn holds(written: &str, spelled: &str, near: (&str, &str), trap: &Trap) -> Found {
-    assert_ne!(written, spelled, "the identity wrote nothing");
+    assert_ne!(written, spelled, "the spelling wrote nothing");
     let mut counted = 0;
     for [as_written, as_spelled, near_written, near_spelled] in
         run([written, spelled, near.0, near.1], trap)
@@ -127,7 +127,7 @@ pub(crate) fn holds(written: &str, spelled: &str, near: (&str, &str), trap: &Tra
         assert_eq!(as_spelled, as_written, "{spelled}\nagainst\n{written}");
         assert_ne!(
             near_spelled, near_written,
-            "the near-identity kept the rows: {}\nagainst\n{}",
+            "the rewrite that is no spelling kept the rows: {}\nagainst\n{}",
             near.1, near.0
         );
         counted = as_written.len();

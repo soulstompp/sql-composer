@@ -698,9 +698,9 @@ mod tests {
 
     #[test]
     #[ignore = "needs a PostgreSQL server: set SQLC_TEST_POSTGRES_URL"]
-    fn law_de_morgan_and_a_not_over_a_not_return_the_same_rows_on_every_pair_of_truths() {
+    fn law_each_spelling_of_a_not_returns_the_same_rows_on_every_pair_of_truths() {
         let trap = pairs();
-        let wrong_de_morgan = (
+        let pushed_without_the_flip = (
             "SELECT b.p, b.q FROM pairs b WHERE NOT (b.p AND b.q)",
             "SELECT b.p, b.q FROM pairs b WHERE NOT b.p AND NOT b.q",
         );
@@ -708,7 +708,7 @@ mod tests {
             "SELECT s.set_num FROM sets s WHERE NOT (s.set_num IN (SELECT o.set_num FROM bought o))",
             "SELECT s.set_num FROM sets s WHERE NOT EXISTS (SELECT 1 FROM bought o WHERE o.set_num = s.set_num)",
         );
-        for near in [wrong_de_morgan, not_in_as_not_exists] {
+        for near in [pushed_without_the_flip, not_in_as_not_exists] {
             for pick in [PUSHED, OVER] {
                 assert_ne!(written(near.0, pick), near.1);
             }

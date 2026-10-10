@@ -10,6 +10,29 @@ use super::read::{canonical, Read};
 /// Edits of a template's text: each byte range replaced, and what is written there.
 pub(crate) type Edits = Vec<(usize, usize, String)>;
 
+/// What a writer of one pick wants of an axis's places: the spelling of `pick` alone, at the
+/// places not yet in it, until `enough` such places are found.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Want<'p> {
+    pub(crate) pick: &'p str,
+    pub(crate) enough: usize,
+}
+
+/// Whether a spelling that is `pick` is wanted: every one is where nothing is asked.
+pub(crate) fn wants(want: Option<Want>, pick: &str) -> bool {
+    want.is_none_or(|w| w.pick == pick)
+}
+
+/// Whether a place written in `picks` is passed over: it is in the wanted pick already.
+pub(crate) fn passed(want: Option<Want>, picks: &[&str]) -> bool {
+    want.is_some_and(|w| picks.contains(&w.pick))
+}
+
+/// Whether enough places are found for what is wanted.
+pub(crate) fn enough(want: Option<Want>, places: &[Place]) -> bool {
+    want.is_some_and(|w| places.len() >= w.enough)
+}
+
 /// One place in a template where an axis applies.
 #[derive(Debug, Clone)]
 pub(crate) struct Place {

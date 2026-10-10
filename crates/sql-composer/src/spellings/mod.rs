@@ -19,12 +19,14 @@ mod extent;
 mod join_order;
 #[cfg(test)]
 mod laws;
+mod naming;
 mod negation;
 mod place;
 mod read;
 mod semi_join;
 
-use place::{made, Place};
+use columns::Resolve;
+use place::{made, Place, Want};
 use read::Read;
 
 /// How many places a template is written in one axis's pick at, at most, before it is left as
@@ -41,19 +43,28 @@ pub enum Axis {
     /// Negation: `NOT` over an `AND` or an `OR`, or pushed onto each operand, and `NOT NOT p` as
     /// `p`.
     Negation,
+    /// How a relation read once is named: inline, as a WITH query at the statement's head, or as
+    /// a template of its own.
+    Naming,
     /// A semi-join's form: `x IN (SELECT y …)`, or `EXISTS (SELECT … WHERE x = y)`.
     SemiJoin,
 }
 
 impl Axis {
     /// Each axis, in the order a template is written in their picks.
-    pub const ALL: &'static [Axis] = &[Axis::Conditions, Axis::Negation, Axis::SemiJoin];
+    pub const ALL: &'static [Axis] = &[
+        Axis::Naming,
+        Axis::Conditions,
+        Axis::Negation,
+        Axis::SemiJoin,
+    ];
 
     /// The axis's key in `spellings.toml`.
     pub fn key(&self) -> &'static str {
         match self {
             Axis::Conditions => "conditions",
             Axis::Negation => "negation",
+            Axis::Naming => "naming",
             Axis::SemiJoin => "semi_join",
         }
     }
@@ -63,38 +74,54 @@ impl Axis {
         match self {
             Axis::Conditions => "where a condition sits",
             Axis::Negation => "negation",
+            Axis::Naming => "how a relation read once is named",
             Axis::SemiJoin => "a semi-join's form",
         }
     }
 
-    /// The places in `read` this axis applies at, each spelling unchecked.
-    fn places(&self, read: &Read) -> Vec<Place> {
+    /// The places in `read` this axis applies at, each spelling unchecked, or those `want` asks
+    /// for; `resolve` reads the templates it composes.
+    fn places(&self, read: &Read, resolve: Resolve, want: Option<Want>) -> Vec<Place> {
         match self {
-            Axis::Conditions => conditions::places(read),
-            Axis::Negation => negation::places(read),
-            Axis::SemiJoin => semi_join::places(read),
+            Axis::Naming => naming::places(read, resolve, want),
+            Axis::Conditions => conditions::places(read, want),
+            Axis::Negation => negation::places(read, want),
+            Axis::SemiJoin => semi_join::places(read, want),
         }
     }
 }
 
 /// `text` written in `pick` on `axis` wherever the axis applies and a spelling of the pick reads
-/// back as it must; everywhere else as written.
-fn written_in(text: &str, axis: Axis, pick: &str) -> String {
+/// back as it must; everywhere else as written. `resolve` reads the templates it composes.
+fn written_in(text: &str, axis: Axis, pick: &str, resolve: Resolve) -> String {
     let mut text = text.to_string();
+    let mut refused = 0;
     for _ in 0..MOVES {
         let Ok(read) = Read::new(&text) else {
             break;
         };
-        let next = axis.places(&read).into_iter().find_map(|place| {
-            if place.choices[0].picks.contains(&pick) {
-                return None;
+        let want = Want {
+            pick,
+            enough: refused + 1,
+        };
+        let Some(place) = axis
+            .places(&read, resolve, Some(want))
+            .into_iter()
+            .nth(refused)
+        else {
+            break;
+        };
+        let spelled = place
+            .choices
+            .iter()
+            .find(|c| c.picks.contains(&pick))
+            .and_then(|choice| made(&read, place.statement, choice));
+        match spelled {
+            Some(spelled) => {
+                text = spelled;
+                refused = 0;
             }
-            let choice = place.choices.iter().find(|c| c.picks.contains(&pick))?;
-            made(&read, place.statement, choice)
-        });
-        match next {
-            Some(spelled) => text = spelled,
-            None => break,
+            None => refused += 1,
         }
     }
     text

@@ -297,6 +297,11 @@ impl Stmt {
         self.token_at(span.start)
     }
 
+    /// The token of `ident`.
+    pub(crate) fn ident_token(&self, ident: &sqlparser::ast::Ident) -> Option<usize> {
+        self.token_at(ident.span.start)
+    }
+
     /// The token before `at` that is neither whitespace nor a comment.
     pub(crate) fn before(&self, at: usize) -> Option<usize> {
         (0..at).rev().find(|&i| !blank(&self.tokens[i].token))

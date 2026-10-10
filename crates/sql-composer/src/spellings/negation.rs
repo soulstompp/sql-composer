@@ -18,7 +18,7 @@ use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::Token;
 
 use super::extent::spaced_from;
-use super::place::{apply, one_line, Choice, Edits, Place};
+use super::place::{apply, enough, one_line, passed, wants, Choice, Edits, Place, Want};
 use super::read::{plain_space, Read, Stmt};
 use super::MOVES;
 
@@ -28,7 +28,7 @@ pub(crate) const PUSHED: &str = "pushed";
 pub(crate) const OVER: &str = "over";
 
 /// Each condition of `read` some spelling of negation writes otherwise, with each spelling.
-pub(crate) fn places(read: &Read) -> Vec<Place> {
+pub(crate) fn places(read: &Read, want: Option<Want>) -> Vec<Place> {
     let mut places = Vec::new();
     for (at, statement) in read.parsed() {
         for (k, root) in roots(&statement.ast).iter().enumerate() {
@@ -44,6 +44,9 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
                     picks.push(pick);
                     continue;
                 }
+                if !wants(want, pick) {
+                    continue;
+                }
                 let Some(edits) = spelled(read, at, k, pick) else {
                     continue;
                 };
@@ -56,7 +59,7 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
                     expected,
                 });
             }
-            if choices.is_empty() {
+            if choices.is_empty() || passed(want, &picks) {
                 continue;
             }
             let Some((first, last)) = extent(statement, root) else {
@@ -71,6 +74,9 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
                 ),
                 choices,
             });
+            if enough(want, &places) {
+                return places;
+            }
         }
     }
     places
@@ -555,7 +561,7 @@ mod tests {
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Negation, pick)
+        written_in(text, Axis::Negation, pick, &|_| None)
     }
 
     #[test]
@@ -614,7 +620,7 @@ mod tests {
             for pick in [PUSHED, OVER] {
                 assert_eq!(written(text, pick), text, "{pick}");
             }
-            assert!(places(&Read::new(text).unwrap()).is_empty(), "{text}");
+            assert!(places(&Read::new(text).unwrap(), None).is_empty(), "{text}");
         }
     }
 
@@ -634,7 +640,7 @@ mod tests {
             "SELECT CASE WHEN NOT (t.a OR t.b) THEN 1 END FROM t WHERE NOT t.a AND NOT t.b",
         )
         .unwrap();
-        let found: Vec<(String, Vec<String>)> = places(&read)
+        let found: Vec<(String, Vec<String>)> = places(&read, None)
             .iter()
             .map(|p| {
                 (

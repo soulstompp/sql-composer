@@ -14,7 +14,10 @@ use sqlparser::keywords::Keyword;
 
 use super::extent::{self, Chain, ItemAt};
 use super::join_order::Selects;
-use super::place::{change_select, conjoined, conjuncts, one_line, Choice, Edits, Place};
+use super::place::{
+    change_select, conjoined, conjuncts, enough, one_line, passed, wants, Choice, Edits, Place,
+    Want,
+};
 use super::read::{Read, Stmt};
 use crate::parsed::normal;
 
@@ -35,13 +38,16 @@ enum Spot {
 }
 
 /// Each condition of `read` that can sit in more than one place, with each place.
-pub(crate) fn places(read: &Read) -> Vec<Place> {
+pub(crate) fn places(read: &Read, want: Option<Want>) -> Vec<Place> {
     let mut places = Vec::new();
     for (at, statement) in read.parsed() {
         let mut selects = Selects::default();
         let _ = statement.ast.visit(&mut selects);
         for (k, select) in selects.0.iter().enumerate() {
-            places.extend(select_places(read, at, statement, k, select));
+            places.extend(select_places(read, at, statement, k, select, want));
+            if enough(want, &places) {
+                return places;
+            }
         }
     }
     places.retain(|place| place.choices.len() > 1);
@@ -55,6 +61,7 @@ fn select_places(
     statement: &Stmt,
     k: usize,
     select: &Select,
+    want: Option<Want>,
 ) -> Vec<Place> {
     let Some(form) = Form::new(statement, select) else {
         return vec![];
@@ -91,12 +98,18 @@ fn select_places(
                 _ => vec![],
             }
         };
+        if passed(want, &picks_of(spot)) {
+            continue;
+        }
         let mut choices = vec![Choice::written(
             form.name(spot),
             picks_of(spot),
             &statement.ast,
         )];
         for &to in spots.iter().filter(|s| **s != spot) {
+            if want.is_some() && !picks_of(to).iter().any(|p| wants(want, p)) {
+                continue;
+            }
             let Some(edits) = form.moved(read, statement, spot, n, to) else {
                 continue;
             };
@@ -109,11 +122,17 @@ fn select_places(
                 expected,
             });
         }
+        if choices.len() < 2 {
+            continue;
+        }
         places.push(Place {
             statement: at,
             what: format!("the condition {}", one_line(&text)),
             choices,
         });
+        if enough(want, &places) {
+            break;
+        }
     }
     places
 }
@@ -441,7 +460,7 @@ mod tests {
     use super::*;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::Conditions, pick)
+        written_in(text, Axis::Conditions, pick, &|_| None)
     }
 
     const SETS: &str = "SELECT s.set_num, t.name\nFROM lego_sets s\nJOIN lego_themes t ON t.id = s.theme_id\nWHERE s.year >= :bind(min_year)\n  AND t.name = 'City'";
@@ -470,7 +489,7 @@ mod tests {
     #[test]
     fn the_places_are_counted_with_each_spelling() {
         let read = Read::new(SETS).unwrap();
-        let places = places(&read);
+        let places = places(&read, None);
         let found: Vec<(String, Vec<String>)> = places
             .iter()
             .map(|p| {
@@ -555,7 +574,7 @@ mod tests {
             ),
         ] {
             let read = Read::new(text).unwrap();
-            let found: Vec<String> = places(&read).into_iter().map(|p| p.what).collect();
+            let found: Vec<String> = places(&read, None).into_iter().map(|p| p.what).collect();
             assert!(
                 !found.contains(&format!("the condition {conjunct}")),
                 "{condition}: {found:?}"
@@ -633,9 +652,9 @@ mod tests {
             "SELECT s.set_num, t.name\nFROM sets s\nLEFT JOIN themes t ON t.id = s.theme_id\nWHERE t.name = 'City'\n  AND s.year >= :bind(min_year)",
             "SELECT s.set_num, t.name\nFROM sets s\nLEFT JOIN themes t ON t.id = s.theme_id AND t.name = 'City'\nWHERE s.year >= :bind(min_year)",
         );
-        assert_eq!(written_in(near.0, Axis::Conditions, ON), near.0);
+        assert_eq!(written_in(near.0, Axis::Conditions, ON, &|_| None), near.0);
         for pick in [ON, WHERE] {
-            let spelled = written_in(written, Axis::Conditions, pick);
+            let spelled = written_in(written, Axis::Conditions, pick, &|_| None);
             let found = super::super::laws::holds(written, &spelled, near, &trap);
             assert_eq!(found.written, 2, "{spelled}");
         }

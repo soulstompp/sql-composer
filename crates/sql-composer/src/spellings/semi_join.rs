@@ -19,7 +19,9 @@ use sqlparser::keywords::Keyword;
 use super::conditions::range_name;
 use super::extent::{self, Chain};
 use super::join_order::Selects;
-use super::place::{change_select, conjoined, conjuncts, one_line, Choice, Edits, Place};
+use super::place::{
+    change_select, conjoined, conjuncts, enough, one_line, passed, Choice, Edits, Place, Want,
+};
 use super::read::{Read, Stmt};
 use crate::parsed::normal;
 
@@ -29,7 +31,7 @@ pub(crate) const IN: &str = "in";
 pub(crate) const EXISTS: &str = "exists";
 
 /// Each semi-join of `read` that reads back in its other form, with both.
-pub(crate) fn places(read: &Read) -> Vec<Place> {
+pub(crate) fn places(read: &Read, want: Option<Want>) -> Vec<Place> {
     let mut places = Vec::new();
     for (at, statement) in read.parsed() {
         let mut selects = Selects::default();
@@ -50,6 +52,13 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
                 .filter_map(range_name)
                 .collect();
             for (n, conjunct) in conjuncts(selection).into_iter().enumerate() {
+                let written_as = match conjunct {
+                    Expr::InSubquery { .. } => IN,
+                    _ => EXISTS,
+                };
+                if passed(want, &[written_as]) {
+                    continue;
+                }
                 let found = match conjunct {
                     Expr::InSubquery {
                         expr,
@@ -116,6 +125,9 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
                         },
                     ],
                 });
+                if enough(want, &places) {
+                    return places;
+                }
             }
         }
     }
@@ -408,7 +420,7 @@ mod tests {
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {
-        written_in(text, Axis::SemiJoin, pick)
+        written_in(text, Axis::SemiJoin, pick, &|_| None)
     }
 
     const IN_FORM: &str =
@@ -457,7 +469,7 @@ mod tests {
             for pick in [IN, EXISTS] {
                 assert_eq!(written(text, pick), text, "{condition}");
             }
-            assert!(places(&Read::new(text).unwrap()).is_empty(), "{condition}");
+            assert!(places(&Read::new(text).unwrap(), None).is_empty(), "{condition}");
         }
     }
 

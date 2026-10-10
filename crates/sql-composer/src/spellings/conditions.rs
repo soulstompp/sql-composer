@@ -127,6 +127,7 @@ fn select_places(
         }
         places.push(Place {
             statement: at,
+            relations: None,
             what: format!("the condition {}", one_line(&text)),
             choices,
         });

@@ -227,6 +227,7 @@ pub(crate) fn places(read: &Read, resolve: Resolve, want: Option<Want>) -> Vec<P
                 };
                 places.push(Place {
                     statement: at,
+                    relations: None,
                     what: format!(
                         "the relation {} ({body})",
                         read.text(statement, first, first)
@@ -298,6 +299,7 @@ pub(crate) fn places(read: &Read, resolve: Resolve, want: Option<Want>) -> Vec<P
                 };
                 places.push(Place {
                     statement: at,
+                    relations: None,
                     what: format!(
                         "the relation {} (a WITH query)",
                         read.text(statement, first, first)

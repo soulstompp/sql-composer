@@ -793,6 +793,7 @@ fn list_place(
     }
     Some(Place {
         statement: at,
+        relations: Some(model.len()),
         what: format!("the join of {}", model.names(&written_order).join(", ")),
         choices,
     })

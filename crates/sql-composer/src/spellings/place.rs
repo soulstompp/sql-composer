@@ -40,6 +40,8 @@ pub(crate) struct Place {
     pub(crate) statement: usize,
     /// What stands there, in words and the template's own text.
     pub(crate) what: String,
+    /// For a join list, how many relations it joins.
+    pub(crate) relations: Option<usize>,
     /// Each spelling it can take there, the first as written.
     pub(crate) choices: Vec<Choice>,
 }

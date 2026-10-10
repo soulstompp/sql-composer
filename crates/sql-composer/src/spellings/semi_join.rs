@@ -111,6 +111,7 @@ pub(crate) fn places(read: &Read, want: Option<Want>) -> Vec<Place> {
                 let (first, last) = chain.conjuncts[n];
                 places.push(Place {
                     statement: at,
+                    relations: None,
                     what: format!(
                         "the semi-join {}",
                         one_line(read.text(statement, first, last))

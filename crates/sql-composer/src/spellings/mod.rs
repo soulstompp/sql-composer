@@ -4,9 +4,12 @@
 //! A template is read for PostgreSQL as sqlparser reads it, each directive standing in as SQL of
 //! its own kind: a `:compose`, a slot, a `:define` or a command as a query reading a relation
 //! named after the directive, a `:bind` as a parameter. Each `#` comment reaches the parser as a
-//! `--` comment, and the `:dialect(…)` declaration as blanks. A spelling is written by moving the template's own text,
-//! every byte outside what moves left as written, and each spelling is read back and compared with
-//! the statement it must be before it is offered. Nothing reads a catalog: each condition is read
+//! `--` comment, and the `:dialect(…)` declaration as blanks. A spelling is written by moving the
+//! template's own text, every byte outside what moves left as written, and each spelling is read
+//! back and compared with the statement it must be before it is offered.
+//!
+//! [`lay_out`] counts a template's spellings at each place an axis applies, and writes each of
+//! them with every other place as written: an axis at a time, and never as the product. Nothing reads a catalog: each condition is read
 //! from the template's own text. A template, or a statement of it, that the parser cannot read is
 //! left as written, and so is every template when no spelling is picked.
 
@@ -25,8 +28,8 @@ mod place;
 mod read;
 mod semi_join;
 
-use columns::Resolve;
-use place::{made, Place, Want};
+pub use columns::Resolve;
+use place::{apply, checked, made, Place, Want};
 use read::Read;
 
 /// How many places a template is written in one axis's pick at, at most, before it is left as
@@ -71,6 +74,17 @@ impl Axis {
             Axis::JoinOrder => "join_order",
             Axis::Naming => "naming",
             Axis::SemiJoin => "semi_join",
+        }
+    }
+
+    /// The axis's picks, by their value in `spellings.toml`.
+    pub fn picks(&self) -> &'static [&'static str] {
+        match self {
+            Axis::Conditions => &[conditions::ON, conditions::WHERE],
+            Axis::Negation => &[negation::PUSHED, negation::OVER],
+            Axis::JoinOrder => &[join_order::OUTERMOST],
+            Axis::Naming => &[naming::INLINE, naming::WITH, naming::TEMPLATE],
+            Axis::SemiJoin => &[semi_join::IN, semi_join::EXISTS],
         }
     }
 
@@ -134,6 +148,114 @@ fn written_in(text: &str, axis: Axis, pick: &str, resolve: Resolve) -> String {
     text
 }
 
+/// A template's spellings laid out: at each place each axis applies, each spelling there, the
+/// template written with that one place changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Layout {
+    /// What reading the template found.
+    pub reading: Reading,
+    /// Each axis, in the order [`Axis::ALL`] lists them, with its places.
+    pub axes: Vec<AxisLayout>,
+}
+
+/// One axis of a [`Layout`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AxisLayout {
+    /// The axis.
+    pub axis: Axis,
+    /// Each place it applies at where the template has more than one spelling, in the order the
+    /// template holds them.
+    pub places: Vec<PlaceLayout>,
+}
+
+/// One place of an axis, with its spellings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PlaceLayout {
+    /// The statement it is in, by its place among the template's statements from 0.
+    pub statement: usize,
+    /// What stands there, in words and the template's own text.
+    pub what: String,
+    /// For a join list, how many relations it joins: its orders are at most the permutations of
+    /// that many.
+    pub relations: Option<usize>,
+    /// Each spelling, the first as written.
+    pub spellings: Vec<Spelling>,
+}
+
+/// One spelling of a place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Spelling {
+    /// The spelling, in words.
+    pub name: String,
+    /// The picks of `spellings.toml` it is.
+    pub picks: Vec<String>,
+    /// The template written in it, every other place as written.
+    pub text: String,
+}
+
+impl AxisLayout {
+    /// How many spellings the axis has: the product of how many each place has.
+    pub fn count(&self) -> u128 {
+        self.places
+            .iter()
+            .map(|place| place.spellings.len() as u128)
+            .fold(1, u128::saturating_mul)
+    }
+}
+
+impl Layout {
+    /// How many spellings the template has: the product of how many each axis has.
+    pub fn count(&self) -> u128 {
+        self.axes
+            .iter()
+            .map(AxisLayout::count)
+            .fold(1, u128::saturating_mul)
+    }
+}
+
+/// `text`, a template, with its spellings laid out and counted; `resolve` reads the templates it
+/// composes, by their path as `:compose` names them.
+pub fn lay_out(text: &str, resolve: Resolve) -> Layout {
+    let reading = read(text);
+    let Ok(read) = Read::new(text) else {
+        return Layout {
+            reading,
+            axes: vec![],
+        };
+    };
+    let axes = Axis::ALL
+        .iter()
+        .map(|&axis| AxisLayout {
+            axis,
+            places: axis
+                .places(&read, resolve, None)
+                .into_iter()
+                .map(|place| checked(&read, place))
+                .filter(|place| place.choices.len() > 1)
+                .map(|place| PlaceLayout {
+                    statement: place.statement,
+                    what: place.what,
+                    relations: place.relations,
+                    spellings: place
+                        .choices
+                        .into_iter()
+                        .map(|choice| Spelling {
+                            text: apply(text, &choice.edits).expect("a checked spelling applies"),
+                            name: choice.name,
+                            picks: choice.picks.iter().map(|p| p.to_string()).collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect();
+    Layout { reading, axes }
+}
+
 /// What reading a template for its spellings finds, before any spelling of it is laid out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -194,6 +316,96 @@ pub fn read(text: &str) -> Reading {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The brick example's templates, by their path under its source.
+    fn brick(path: &std::path::Path) -> Option<String> {
+        let source =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
+        std::fs::read_to_string(source.join(path)).ok()
+    }
+
+    #[test]
+    fn each_place_is_counted_and_its_count_is_the_spellings_written() {
+        let text = brick(std::path::Path::new("shared/scope_sets.sqlc")).unwrap();
+        let layout = lay_out(&text, &brick);
+        let counts: Vec<(Axis, Vec<usize>)> = layout
+            .axes
+            .iter()
+            .map(|a| (a.axis, a.places.iter().map(|p| p.spellings.len()).collect()))
+            .collect();
+        assert_eq!(
+            counts,
+            vec![
+                (Axis::JoinOrder, vec![6]),
+                (Axis::Naming, vec![2]),
+                (Axis::Conditions, vec![3, 3, 2]),
+                (Axis::Negation, vec![]),
+                (Axis::SemiJoin, vec![]),
+            ]
+        );
+        assert_eq!(layout.count(), 6 * 2 * 18);
+        assert_eq!(layout.axes[0].places[0].relations, Some(3));
+        for axis in &layout.axes {
+            for place in &axis.places {
+                assert_eq!(place.spellings[0].text, text, "{}", place.what);
+                let mut texts: Vec<&str> =
+                    place.spellings.iter().map(|s| s.text.as_str()).collect();
+                texts.sort();
+                texts.dedup();
+                assert_eq!(texts.len(), place.spellings.len(), "{}", place.what);
+                for spelling in &place.spellings {
+                    let again = read(&spelling.text);
+                    assert!(
+                        again.unparsed.is_empty() && again.read_back,
+                        "{}",
+                        spelling.text
+                    );
+                    assert!(
+                        spelling.text.contains(":compose(@scope)"),
+                        "{}",
+                        spelling.text
+                    );
+                    assert!(
+                        spelling.text.contains(":bind(min_year)"),
+                        "{}",
+                        spelling.text
+                    );
+                    for line in text.lines().filter(|l| l.starts_with('#')) {
+                        assert!(spelling.text.contains(line), "{line}: {}", spelling.text);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn join_orders_are_the_permutations_fewer_where_a_lateral_relation_follows_what_it_reads() {
+        let laid = |text: &str| {
+            lay_out(text, &|_| None).axes[0]
+                .places
+                .iter()
+                .map(|p| (p.relations, p.spellings.len()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            laid("SELECT a.x FROM a JOIN b ON b.x = a.x JOIN c ON c.x = b.x JOIN d ON d.x = c.x"),
+            [(Some(4), 24)]
+        );
+        assert_eq!(
+            laid("SELECT a.x FROM a JOIN b ON b.x = a.x CROSS JOIN LATERAL (SELECT u.y FROM u WHERE u.x = b.x) l JOIN c ON c.x = a.x"),
+            [(Some(4), 12)]
+        );
+        let nearest = brick(std::path::Path::new("builders/nearest.sqlc")).unwrap();
+        assert!(lay_out(&nearest, &brick).axes[0].places.is_empty());
+    }
+
+    #[test]
+    fn a_template_with_nothing_to_spell_lays_out_nothing() {
+        let layout = lay_out("SELECT 1;\nSELEC 2;\n", &|_| None);
+        assert_eq!(layout.count(), 1);
+        assert_eq!(layout.reading.unparsed.len(), 1);
+        assert!(layout.axes.iter().all(|a| a.places.is_empty()));
+    }
 
     #[test]
     fn each_directive_stands_in_as_sql_of_its_own_kind() {

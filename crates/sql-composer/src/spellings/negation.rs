@@ -68,6 +68,7 @@ pub(crate) fn places(read: &Read, want: Option<Want>) -> Vec<Place> {
             choices.insert(0, Choice::written("as written", picks, &statement.ast));
             places.push(Place {
                 statement: at,
+                relations: None,
                 what: format!(
                     "the condition {}",
                     one_line(read.text(statement, first, last))

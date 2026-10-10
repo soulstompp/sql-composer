@@ -304,10 +304,16 @@ regular (`filters/by_pattern.sqlc`), e a base continua a ser um único ficheiro.
 Na instrução composta, o corpo do filtro fica onde estava o `:compose(@filter)`.
 
 Um modelo com uma vaga por preencher é uma forma, e não uma consulta: a biblioteca recusa-se a
-compô-lo sozinho (`MissingSlot`), e o `cargo sqlc compose` não escreve ficheiro nenhum para ele. Do
-mesmo modo, e sem mensagem nenhuma, salta um modelo que componha outro e lhe deixe uma vaga por
-preencher; quem dá por isso é só o `--verify`, e só se o ficheiro composto desse modelo já estiver
-no repositório, que é o ficheiro que ele dá como `STALE`.
+compô-lo sozinho (`MissingSlot`, que nomeia a vaga e o modelo onde ela está), e o
+`cargo sqlc compose` não escreve ficheiro nenhum para ele, mas di-lo, com as vagas que a forma deixa
+abertas: `Shape sqlc/shared/filtered_set_parts.sqlc: @filter open`.
+
+Também fica sem ficheiro um modelo que componha outro e lhe deixe uma vaga por preencher, e esse já
+nada o pode compor, uma vez que uma vaga só a preenche o `:compose` que a nomeia. O
+`cargo sqlc compose` dá-o como saltado, na saída de erro, com a vaga e o modelo onde ela está:
+`Skipped sqlc/sets/select_colored_parts.sqlc: @filter of shared/filtered_set_parts.sqlc left open`.
+O `--verify` dá-o da mesma maneira, ao lado do `STALE` que o ficheiro dele recebe se já estiver no
+repositório, e nada disto muda aquilo com que o comando sai.
 
 ### União, interseção e diferença
 
@@ -540,11 +546,15 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   `MISSING` ou `STALE`, sai com 1 se houver algum e não escreve nada, como faz o
   `cargo fmt --check`.
   Corre-se com as mesmas opções com que os ficheiros foram compostos, já que opções diferentes
-  compõem textos diferentes.
+  compõem textos diferentes. Um modelo saltado, dá-o tal como o dá uma composição.
 - **`--with`** nomeia uma só vez cada relação que uma instrução lê, à cabeça da instrução, e não se
   combina com `--views`.
 - **`--views`** carrega um registo de vistas, e cada modelo que o registo nomeia passa a ler-se como
   a sua vista.
+
+Cada modelo que esteja no `--source` tem uma linha sua: `Composed`; `Shape`, com as vagas que deixa
+abertas; ou `Skipped`, na saída de erro, com a vaga por preencher e o modelo onde ela está. A última
+linha conta-os a todos: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`.
 
 ### Diretivas
 

@@ -296,9 +296,16 @@ expression (`filters/by_pattern.sqlc`), and the base stays one file.
 In the composed statement, the filter's body stands where `:compose(@filter)` was.
 
 A template with a slot left open is a shape, not a query. The library refuses to compose it alone
-(`MissingSlot`), and `cargo sqlc compose` writes no file for it. A caller that leaves a slot
-unfilled is skipped in the same way, without a message. Only `--verify` notices, once the caller's
-composed file has been committed: it reports that file `STALE`.
+(`MissingSlot`, naming the slot and the template it stands in), and `cargo sqlc compose` writes no
+file for it. It says so, with the slots the shape leaves open:
+`Shape sqlc/shared/filtered_set_parts.sqlc: @filter open`.
+
+A caller that leaves a slot unfilled gets no file either, and nothing can compose it, since a slot
+is filled only by the `:compose` that names it. `cargo sqlc compose` reports it skipped, on standard
+error, with the slot and the template it stands in:
+`Skipped sqlc/sets/select_colored_parts.sqlc: @filter of shared/filtered_set_parts.sqlc left open`.
+`--verify` reports it the same way, beside the `STALE` its file gets once committed. Neither
+changes the exit code.
 
 ### Union, intersection and difference
 
@@ -517,10 +524,15 @@ cargo sqlc compose --views sqlc/views.sqlc          # a view registry
   written. If it fails, the command exits 1, and the files are written all the same.
 - **`--verify`** composes in memory and compares with the target. It reports each file `CHANGED`,
   `MISSING` or `STALE`, exits 1 on any, and writes nothing, as `cargo fmt --check` does. Run it with
-  the same flags the files were composed with, since different flags compose different text.
+  the same flags the files were composed with, since different flags compose different text. A
+  skipped template is reported as a compose reports it.
 - **`--with`** names each relation a statement reads once, at the head of the statement. It cannot
   be combined with `--views`.
 - **`--views`** loads a view registry, and every template the registry names is read as its view.
+
+Every template under `--source` gets a line: `Composed`; `Shape`, with the slots it leaves open; or
+`Skipped`, on standard error, with the slot left open and the template it stands in. The last line
+counts them: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`.
 
 ### Directives
 

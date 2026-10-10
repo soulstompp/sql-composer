@@ -82,10 +82,12 @@ pub enum Error {
     },
 
     /// A slot referenced in a template was not provided by the caller.
-    #[error("missing slot '@{name}' — not provided by caller")]
+    #[error("missing slot '@{name}' in {template} — not provided by caller")]
     MissingSlot {
         /// The name of the missing slot.
         name: String,
+        /// The template the slot stands in: its path, or the name a literal template was given.
+        template: String,
     },
 
     /// A template registered as a view takes an argument, which a view cannot.

@@ -133,7 +133,7 @@ impl Composer {
                         reason: format!("binds {}", composed.bind_params.join(", ")),
                     })
                 }
-                Err(Error::MissingSlot { name }) => {
+                Err(Error::MissingSlot { name, .. }) => {
                     return Err(Error::ViewTakesArguments {
                         path,
                         view,
@@ -425,7 +425,13 @@ impl Composer {
                     gathered.open.insert(root);
                 }
             }
-            self.gather(&elements, &HashMap::new(), &mut gathered, &mut closed)?;
+            self.gather(
+                &elements,
+                &template.source,
+                &HashMap::new(),
+                &mut gathered,
+                &mut closed,
+            )?;
 
             let mut named = self.clone();
             let mut taken: HashMap<&str, &PathBuf> = HashMap::new();
@@ -463,11 +469,12 @@ impl Composer {
         })
     }
 
-    /// Walk `elements` as emitting them walks them, and gather every relation they read that can
-    /// be named, each after the relations it reads.
+    /// Walk `elements`, the elements of the template `within`, as emitting them walks them, and
+    /// gather every relation they read that can be named, each after the relations it reads.
     fn gather(
         &self,
         elements: &[Element],
+        within: &TemplateSource,
         slots: &HashMap<String, PathBuf>,
         gathered: &mut Gathered,
         closed: &mut HashMap<PathBuf, bool>,
@@ -479,7 +486,7 @@ impl Composer {
                     if let ComposeTarget::Definition(path) = &compose_ref.target {
                         return Err(Error::DefinitionWhileNaming { path: path.clone() });
                     }
-                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots, within)?;
                     let child_slots = Self::build_child_slots(compose_ref);
                     self.gather_relation(&path, &child_slots, gathered, closed)?;
                 }
@@ -516,7 +523,13 @@ impl Composer {
             });
         }
         let template = self.parse_file(&resolved)?;
-        self.gather(&template.elements, slots, gathered, closed)?;
+        self.gather(
+            &template.elements,
+            &template.source,
+            slots,
+            gathered,
+            closed,
+        )?;
         gathered.open.remove(&resolved);
         if slots.is_empty() && self.closed(&resolved, closed)? {
             let name = self.relation_name(&resolved, path)?;
@@ -534,7 +547,12 @@ impl Composer {
         }
         closed.insert(resolved.to_path_buf(), true);
         let template = self.parse_file(resolved)?;
-        let answer = self.closed_elements(&template.elements, &HashMap::new(), closed)?;
+        let answer = self.closed_elements(
+            &template.elements,
+            &template.source,
+            &HashMap::new(),
+            closed,
+        )?;
         closed.insert(resolved.to_path_buf(), answer);
         Ok(answer)
     }
@@ -542,6 +560,7 @@ impl Composer {
     fn closed_elements(
         &self,
         elements: &[Element],
+        within: &TemplateSource,
         slots: &HashMap<String, PathBuf>,
         closed: &mut HashMap<PathBuf, bool>,
     ) -> Result<bool> {
@@ -550,7 +569,7 @@ impl Composer {
                 Element::Sql(_) => true,
                 Element::Bind(_) => false,
                 Element::Compose(compose_ref) => {
-                    match Self::resolve_compose_target(compose_ref, slots) {
+                    match Self::resolve_compose_target(compose_ref, slots, within) {
                         Err(Error::MissingSlot { .. }) => false,
                         Err(e) => return Err(e),
                         Ok(path) if self.view_reference(&path)?.is_some() => true,
@@ -561,7 +580,12 @@ impl Composer {
                                 self.closed(&resolved, closed)?
                             } else {
                                 let template = self.parse_file(&resolved)?;
-                                self.closed_elements(&template.elements, &child_slots, closed)?
+                                self.closed_elements(
+                                    &template.elements,
+                                    &template.source,
+                                    &child_slots,
+                                    closed,
+                                )?
                             }
                         }
                     }
@@ -627,17 +651,21 @@ impl Composer {
     /// `ComposeTarget::Path` and `ComposeTarget::Definition` both return the path directly: a
     /// definition resolves to the very template its name stands for, which is what makes a name
     /// and its definition one relation rather than two.
-    /// `ComposeTarget::Slot` looks up the slot name in the provided slots map.
+    /// `ComposeTarget::Slot` looks up the slot name in the provided slots map, and a slot the map
+    /// has no path for is refused, naming `within`, the template the reference stands in.
     fn resolve_compose_target(
         compose_ref: &ComposeRef,
         slots: &HashMap<String, PathBuf>,
+        within: &TemplateSource,
     ) -> Result<PathBuf> {
         match &compose_ref.target {
             ComposeTarget::Path(p) | ComposeTarget::Definition(p) => Ok(p.clone()),
-            ComposeTarget::Slot(name) => slots
-                .get(name)
-                .cloned()
-                .ok_or_else(|| Error::MissingSlot { name: name.clone() }),
+            ComposeTarget::Slot(name) => {
+                slots.get(name).cloned().ok_or_else(|| Error::MissingSlot {
+                    name: name.clone(),
+                    template: source_name(within),
+                })
+            }
         }
     }
 
@@ -720,7 +748,7 @@ impl Composer {
                     bindings.push(binding.clone());
                 }
                 Element::Compose(compose_ref) => {
-                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
                     if self.reference(compose_ref, &path)?.is_some() {
                         continue;
                     }
@@ -898,7 +926,7 @@ impl Composer {
                     }
                 }
                 Element::Compose(compose_ref) => {
-                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
                     if let Some(view) = self.reference(compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
@@ -1078,7 +1106,7 @@ impl Composer {
                     bind_params.push(binding.name.clone());
                 }
                 Element::Compose(compose_ref) => {
-                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
                     if let Some(view) = self.reference(compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
@@ -1140,7 +1168,7 @@ impl Composer {
                     }
                 }
                 Element::Compose(compose_ref) => {
-                    let path = Self::resolve_compose_target(compose_ref, slots)?;
+                    let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
                     if let Some(view) = self.reference(compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
@@ -1392,10 +1420,7 @@ impl Composer {
             return Ok(());
         }
         Err(Error::NotWrittenFor {
-            template: match &template.source {
-                TemplateSource::File(path) => path.display().to_string(),
-                TemplateSource::Literal(name) => name.clone(),
-            },
+            template: source_name(&template.source),
             declared: template.dialects.clone(),
             dialect: self.dialect,
         })
@@ -1460,6 +1485,14 @@ impl Composer {
         Err(Error::TemplateNotFound {
             path: path.to_path_buf(),
         })
+    }
+}
+
+/// A template as a refusal names it: its path, or the name a literal template was given.
+fn source_name(source: &TemplateSource) -> String {
+    match source {
+        TemplateSource::File(path) => path.display().to_string(),
+        TemplateSource::Literal(name) => name.clone(),
     }
 }
 
@@ -2344,8 +2377,9 @@ mod tests {
         };
 
         let err = composer.compose(&template).unwrap_err();
+        assert!(err.to_string().contains("base.sqlc"), "{err}");
         match err {
-            Error::MissingSlot { name } => assert_eq!(name, "filter"),
+            Error::MissingSlot { name, .. } => assert_eq!(name, "filter"),
             other => panic!("expected MissingSlot, got {:?}", other),
         }
     }
@@ -2378,8 +2412,13 @@ mod tests {
         };
 
         let err = composer.compose(&template).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("c.sqlc") && !message.contains("b.sqlc"),
+            "{message}"
+        );
         match err {
-            Error::MissingSlot { name } => assert_eq!(name, "deep"),
+            Error::MissingSlot { name, .. } => assert_eq!(name, "deep"),
             other => panic!("expected MissingSlot, got {:?}", other),
         }
     }
@@ -3409,6 +3448,26 @@ mod tests {
             named(&dir, &composer, "shape.sqlc").unwrap_err(),
             Error::MissingSlot { .. }
         ));
+    }
+
+    #[test]
+    fn test_a_slot_left_open_names_the_template_it_stands_in() {
+        let (dir, composer) = named_fixture(Dialect::Postgres);
+        write_temp_file(&dir, "shape.sqlc", "SELECT * FROM (\n:compose(@part)\n) x");
+        write_temp_file(
+            &dir,
+            "caller.sqlc",
+            "SELECT * FROM (\n:compose(shape.sqlc)\n) c",
+        );
+        for name in ["shape.sqlc", "caller.sqlc"] {
+            let err = named(&dir, &composer, name).unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains("@part") && message.contains("shape.sqlc"),
+                "{message}"
+            );
+            assert!(!message.contains("caller.sqlc"), "{message}");
+        }
     }
 
     #[test]

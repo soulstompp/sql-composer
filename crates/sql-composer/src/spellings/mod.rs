@@ -19,6 +19,7 @@ mod extent;
 mod join_order;
 #[cfg(test)]
 mod laws;
+mod negation;
 mod place;
 mod read;
 
@@ -36,16 +37,20 @@ const MOVES: usize = 10_000;
 pub enum Axis {
     /// Where a condition sits: in an inner join's `ON`, or in the `WHERE`.
     Conditions,
+    /// Negation: `NOT` over an `AND` or an `OR`, or pushed onto each operand, and `NOT NOT p` as
+    /// `p`.
+    Negation,
 }
 
 impl Axis {
     /// Each axis, in the order a template is written in their picks.
-    pub const ALL: &'static [Axis] = &[Axis::Conditions];
+    pub const ALL: &'static [Axis] = &[Axis::Conditions, Axis::Negation];
 
     /// The axis's key in `spellings.toml`.
     pub fn key(&self) -> &'static str {
         match self {
             Axis::Conditions => "conditions",
+            Axis::Negation => "negation",
         }
     }
 
@@ -53,6 +58,7 @@ impl Axis {
     pub fn words(&self) -> &'static str {
         match self {
             Axis::Conditions => "where a condition sits",
+            Axis::Negation => "negation",
         }
     }
 
@@ -60,6 +66,7 @@ impl Axis {
     fn places(&self, read: &Read) -> Vec<Place> {
         match self {
             Axis::Conditions => conditions::places(read),
+            Axis::Negation => negation::places(read),
         }
     }
 }

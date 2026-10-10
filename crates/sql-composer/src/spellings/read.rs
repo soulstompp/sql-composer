@@ -2,7 +2,7 @@
 //! comment and the `:dialect(…)` declaration blanked, and each statement parsed, with where every
 //! token of it stands in the template as written.
 
-use sqlparser::ast::{Expr, Spanned, Statement, TableFactor, VisitMut, VisitorMut};
+use sqlparser::ast::{BinaryOperator, Expr, Spanned, Statement, TableFactor, VisitMut, VisitorMut};
 use sqlparser::dialect::{Dialect as _, Precedence};
 use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
@@ -411,8 +411,8 @@ fn tokens(text: &str) -> Result<Vec<TokenWithSpan>, String> {
         .map_err(|error| error.to_string())
 }
 
-/// `statement` with every parenthesis that groups an expression left out, so two statements that
-/// differ only there compare equal.
+/// `statement` with every parenthesis that groups an expression left out and every chain of `AND`s
+/// and of `OR`s grouped from the left, so two statements that differ only there compare equal.
 pub(crate) fn canonical(statement: &Statement) -> Statement {
     let mut statement = statement.clone();
     let _ = statement.visit(&mut Ungrouped);
@@ -426,6 +426,19 @@ pub(crate) fn canonical_expr(expr: &Expr) -> Expr {
     expr
 }
 
+/// The operands of the chain of `op`s `expr` is, left to right, pushed onto `operands`.
+fn chain(expr: Expr, op: &BinaryOperator, operands: &mut Vec<Expr>) {
+    match expr {
+        Expr::BinaryOp { left, op: o, right } if o == *op => {
+            chain(*left, op, operands);
+            chain(*right, op, operands);
+        }
+        other => operands.push(other),
+    }
+}
+
+/// Leaves out every parenthesis that groups an expression, and groups every chain of `AND`s and
+/// every chain of `OR`s from the left.
 struct Ungrouped;
 
 impl VisitorMut for Ungrouped {
@@ -434,6 +447,27 @@ impl VisitorMut for Ungrouped {
     fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<()> {
         if let Expr::Nested(inner) = expr {
             *expr = std::mem::replace(inner.as_mut(), Expr::value(sqlparser::ast::Value::Null));
+        }
+        if let Expr::BinaryOp {
+            op: op @ (BinaryOperator::And | BinaryOperator::Or),
+            ..
+        } = expr
+        {
+            let op = op.clone();
+            let mut operands = Vec::new();
+            chain(
+                std::mem::replace(expr, Expr::value(sqlparser::ast::Value::Null)),
+                &op,
+                &mut operands,
+            );
+            *expr = operands
+                .into_iter()
+                .reduce(|left, right| Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: op.clone(),
+                    right: Box::new(right),
+                })
+                .expect("a chain has operands");
         }
         ControlFlow::Continue(())
     }

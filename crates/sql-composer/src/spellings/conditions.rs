@@ -9,14 +9,12 @@
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{
-    BinaryOperator, Expr, JoinConstraint, JoinOperator, Select, TableFactor, Visit, Visitor,
-};
+use sqlparser::ast::{Expr, JoinConstraint, JoinOperator, Select, TableFactor, Visit, Visitor};
 use sqlparser::keywords::Keyword;
 
 use super::extent::{self, Chain, ItemAt};
 use super::join_order::Selects;
-use super::place::{change_select, conjoined, conjuncts, one_line, Choice, Place};
+use super::place::{change_select, conjoined, conjuncts, one_line, Choice, Edits, Place};
 use super::read::{Read, Stmt};
 use crate::parsed::normal;
 
@@ -304,53 +302,51 @@ impl<'s> Form<'s> {
         from: Spot,
         n: usize,
         to: Spot,
-    ) -> Option<Vec<(usize, usize, String)>> {
+    ) -> Option<Edits> {
         let chain = self.chain(from)?;
         let (first, last) = chain.conjuncts[n];
         let conjunct = conjuncts(self.condition(from)?)[n];
         let mut text = read.text(statement, first, last).to_string();
-        if is_or(conjunct) {
+        if extent::or(conjunct) {
             text = format!("({text})");
         }
-        let mut edits = Vec::new();
         // Take it out where it is.
+        let mut edits = extent::without(read, statement, chain, n)?;
         if chain.conjuncts.len() == 1 {
-            let start = extent::spaced_from(statement, chain.keyword);
-            let (from_byte, _) = read.written(statement, start, start);
-            let (_, to_byte) = read.written(statement, last, last);
-            edits.push((from_byte, to_byte, String::new()));
             if let Spot::On { item, join } = from {
                 let (op_first, op_join) = self.items[item].joins[join].operator;
                 let (a, b) = read.written(statement, op_first, op_join);
                 edits.push((a, b, "CROSS JOIN".into()));
             }
-        } else if n == 0 {
-            let (a, _) = read.written(statement, first, first);
-            let (b, _) = read.written(statement, chain.conjuncts[1].0, chain.conjuncts[1].0);
-            edits.push((a, b, String::new()));
-        } else {
-            let and = statement.before(first)?;
-            let start = extent::spaced_from(statement, and);
-            let (a, _) = read.written(statement, start, start);
-            let (_, b) = read.written(statement, last, last);
-            edits.push((a, b, String::new()));
         }
         // Put it where it goes.
         match to {
             Spot::Where => match &self.selection {
-                Some(selection) => {
-                    edits.extend(self.appended(read, statement, selection, Spot::Where, &text)?)
-                }
+                Some(selection) => edits.extend(extent::appended(
+                    read,
+                    statement,
+                    selection,
+                    self.condition(Spot::Where)?,
+                    &text,
+                )),
                 None => {
                     let last = self.items.last()?.last();
+                    let select = statement.first_token(&self.select.select_token.0)?;
+                    let lead = extent::lead(read, statement, select, last);
                     let (_, at) = read.written(statement, last, last);
-                    edits.push((at, at, format!("\nWHERE {text}")));
+                    edits.push((at, at, format!("{lead}WHERE {text}")));
                 }
             },
             Spot::On { item, join } => {
                 let at = &self.items[item].joins[join];
                 match &at.on {
-                    Some(on) => edits.extend(self.appended(read, statement, on, to, &text)?),
+                    Some(on) => edits.extend(extent::appended(
+                        read,
+                        statement,
+                        on,
+                        self.condition(to)?,
+                        &text,
+                    )),
                     None => {
                         let (a, b) = read.written(statement, at.operator.0, at.operator.1);
                         edits.push((a, b, "JOIN".into()));
@@ -359,28 +355,6 @@ impl<'s> Form<'s> {
                     }
                 }
             }
-        }
-        Some(edits)
-    }
-
-    /// The edits that add `text` as a last conjunct to the condition `chain` at `spot`.
-    fn appended(
-        &self,
-        read: &Read,
-        statement: &Stmt,
-        chain: &Chain,
-        spot: Spot,
-        text: &str,
-    ) -> Option<Vec<(usize, usize, String)>> {
-        let mut edits = Vec::new();
-        let (_, end) = read.written(statement, chain.last(), chain.last());
-        let whole = self.condition(spot)?;
-        if chain.conjuncts.len() == 1 && is_or(whole) {
-            let (start, _) = read.written(statement, chain.conjuncts[0].0, chain.conjuncts[0].0);
-            edits.push((start, start, "(".into()));
-            edits.push((end, end, format!(") AND {text}")));
-        } else {
-            edits.push((end, end, format!(" AND {text}")));
         }
         Some(edits)
     }
@@ -397,17 +371,6 @@ impl<'s> Form<'s> {
             }
         }
     }
-}
-
-/// Whether `expr` is an `OR` no parenthesis holds.
-fn is_or(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::BinaryOp {
-            op: BinaryOperator::Or,
-            ..
-        }
-    )
 }
 
 /// The name a relation of a `FROM` is read by: its alias, or a table's own name.

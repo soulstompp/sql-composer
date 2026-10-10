@@ -22,6 +22,7 @@ mod laws;
 mod negation;
 mod place;
 mod read;
+mod semi_join;
 
 use place::{made, Place};
 use read::Read;
@@ -40,17 +41,20 @@ pub enum Axis {
     /// Negation: `NOT` over an `AND` or an `OR`, or pushed onto each operand, and `NOT NOT p` as
     /// `p`.
     Negation,
+    /// A semi-join's form: `x IN (SELECT y …)`, or `EXISTS (SELECT … WHERE x = y)`.
+    SemiJoin,
 }
 
 impl Axis {
     /// Each axis, in the order a template is written in their picks.
-    pub const ALL: &'static [Axis] = &[Axis::Conditions, Axis::Negation];
+    pub const ALL: &'static [Axis] = &[Axis::Conditions, Axis::Negation, Axis::SemiJoin];
 
     /// The axis's key in `spellings.toml`.
     pub fn key(&self) -> &'static str {
         match self {
             Axis::Conditions => "conditions",
             Axis::Negation => "negation",
+            Axis::SemiJoin => "semi_join",
         }
     }
 
@@ -59,6 +63,7 @@ impl Axis {
         match self {
             Axis::Conditions => "where a condition sits",
             Axis::Negation => "negation",
+            Axis::SemiJoin => "a semi-join's form",
         }
     }
 
@@ -67,6 +72,7 @@ impl Axis {
         match self {
             Axis::Conditions => conditions::places(read),
             Axis::Negation => negation::places(read),
+            Axis::SemiJoin => semi_join::places(read),
         }
     }
 }

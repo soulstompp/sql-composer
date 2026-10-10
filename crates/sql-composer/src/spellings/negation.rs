@@ -18,7 +18,7 @@ use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::Token;
 
 use super::extent::spaced_from;
-use super::place::{apply, one_line, Choice, Place};
+use super::place::{apply, one_line, Choice, Edits, Place};
 use super::read::{plain_space, Read, Stmt};
 use super::MOVES;
 
@@ -78,7 +78,7 @@ pub(crate) fn places(read: &Read) -> Vec<Place> {
 
 /// The edits that write root `k` of statement `at` in `pick`, one step at a time, each step read
 /// back before the next is found.
-fn spelled(read: &Read, at: usize, k: usize, pick: &str) -> Option<Vec<(usize, usize, String)>> {
+fn spelled(read: &Read, at: usize, k: usize, pick: &str) -> Option<Edits> {
     let statement = read.statements[at].as_ref().ok()?;
     let root = roots(&statement.ast).get(k)?.clone();
     let (first, last) = extent(statement, &root)?;
@@ -380,9 +380,6 @@ struct Steps<'r> {
     read: &'r Read,
     statement: &'r Stmt,
 }
-
-/// Edits of a template.
-type Edits = Vec<(usize, usize, String)>;
 
 impl Steps<'_> {
     /// The template's bytes of tokens `first` to `last`.

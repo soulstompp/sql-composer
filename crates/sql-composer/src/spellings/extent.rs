@@ -3,12 +3,13 @@
 //! with its node, and a part that does not read back is not found.
 
 use sqlparser::ast::{Expr, Join, JoinConstraint, TableWithJoins};
+use sqlparser::dialect::Precedence;
 use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::Token;
 
 use super::join_order::constraint;
-use super::place::conjuncts;
-use super::read::{plain_space, Stmt};
+use super::place::{conjuncts, Edits};
+use super::read::{plain_space, Read, Stmt};
 
 /// A condition after its keyword: `WHERE`, `ON`, `HAVING`.
 #[derive(Debug, Clone)]
@@ -34,7 +35,8 @@ pub(crate) fn chain(statement: &Stmt, expr: &Expr, keyword: Keyword) -> Option<C
     let mut at = first;
     let mut found = Vec::new();
     for (k, conjunct) in all.iter().enumerate() {
-        let last = statement.expr_from(at, conjunct, all.len() > 1)?;
+        let stop = (all.len() > 1).then_some(Precedence::And);
+        let last = statement.expr_from(at, conjunct, stop)?;
         found.push((at, last));
         if k + 1 < all.len() {
             let and = statement.after(last)?;
@@ -152,4 +154,80 @@ pub(crate) fn spaced_from(statement: &Stmt, at: usize) -> usize {
 /// Whether token `at` is `token`.
 pub(crate) fn is_token(statement: &Stmt, at: usize, token: &Token) -> bool {
     statement.tokens[at].token == *token
+}
+
+/// The edits that take conjunct `n` out of the condition `chain`, the clause with it where it is
+/// the only one: the conjunct and the `AND` that joins it, and the plain spaces before that.
+pub(crate) fn without(read: &Read, statement: &Stmt, chain: &Chain, n: usize) -> Option<Edits> {
+    let (first, last) = chain.conjuncts[n];
+    let (start, end) = if chain.conjuncts.len() == 1 {
+        let from = spaced_from(statement, chain.keyword);
+        (
+            read.written(statement, from, from).0,
+            read.written(statement, last, last).1,
+        )
+    } else if n == 0 {
+        let next = chain.conjuncts[1].0;
+        (
+            read.written(statement, first, first).0,
+            read.written(statement, next, next).0,
+        )
+    } else {
+        let and = statement.before(first)?;
+        let from = spaced_from(statement, and);
+        (
+            read.written(statement, from, from).0,
+            read.written(statement, last, last).1,
+        )
+    };
+    Some(vec![(start, end, String::new())])
+}
+
+/// The edits that add `text` as the last conjunct of the condition `chain`, which is `whole`: an
+/// `OR` no parenthesis holds is held in one first.
+pub(crate) fn appended(
+    read: &Read,
+    statement: &Stmt,
+    chain: &Chain,
+    whole: &Expr,
+    text: &str,
+) -> Edits {
+    let (_, end) = read.written(statement, chain.last(), chain.last());
+    if chain.conjuncts.len() == 1 && or(whole) {
+        let (start, _) = read.written(statement, chain.conjuncts[0].0, chain.conjuncts[0].0);
+        vec![
+            (start, start, "(".into()),
+            (end, end, format!(") AND {text}")),
+        ]
+    } else {
+        vec![(end, end, format!(" AND {text}"))]
+    }
+}
+
+/// Whether `expr` is an `OR` no parenthesis holds.
+pub(crate) fn or(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BinaryOp {
+            op: sqlparser::ast::BinaryOperator::Or,
+            ..
+        }
+    )
+}
+
+/// What opens a clause added after token `last` of a select whose `SELECT` is token `select`: a
+/// space where the select is on one line, else a new line indented as the `SELECT` is.
+pub(crate) fn lead(read: &Read, statement: &Stmt, select: usize, last: usize) -> String {
+    let text = &read.stood.text;
+    let (at, _) = read.written(statement, select, select);
+    let (_, end) = read.written(statement, last, last);
+    if !text[at..end].contains('\n') {
+        return " ".into();
+    }
+    let line = text[..at].rfind('\n').map_or(0, |n| n + 1);
+    let indent: String = text[line..at]
+        .chars()
+        .map(|c| if c == '\t' { '\t' } else { ' ' })
+        .collect();
+    format!("\n{indent}")
 }

@@ -325,15 +325,18 @@ impl Stmt {
         Some((parsed, last))
     }
 
-    /// The tokens `expr` stands on, read from `first`, its first token, where they read back as
-    /// `expr`; `and` stops the read at an `AND` or an `OR`, as a conjunct of a chain is read.
-    pub(crate) fn expr_from(&self, first: usize, expr: &Expr, and: bool) -> Option<usize> {
-        let (parsed, last) = self.parse_at(first, |p| {
-            if and {
-                p.parse_subexpr(Postgres::default().prec_value(Precedence::And))
-            } else {
-                p.parse_expr()
-            }
+    /// The last token of `expr`, read from `first`, its first token, where the tokens read back
+    /// as `expr`; `stop` ends the read before an operator that binds no tighter than it, as a
+    /// conjunct of a chain is read before its `AND`.
+    pub(crate) fn expr_from(
+        &self,
+        first: usize,
+        expr: &Expr,
+        stop: Option<Precedence>,
+    ) -> Option<usize> {
+        let (parsed, last) = self.parse_at(first, |p| match stop {
+            Some(stop) => p.parse_subexpr(Postgres::default().prec_value(stop)),
+            None => p.parse_expr(),
         })?;
         (canonical_expr(&parsed) == canonical_expr(expr)).then_some(last)
     }

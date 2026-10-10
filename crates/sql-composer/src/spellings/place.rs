@@ -7,6 +7,9 @@ use sqlparser::ast::{BinaryOperator, Expr, Select, Statement, VisitMut, VisitorM
 
 use super::read::{canonical, Read};
 
+/// Edits of a template's text: each byte range replaced, and what is written there.
+pub(crate) type Edits = Vec<(usize, usize, String)>;
+
 /// One place in a template where an axis applies.
 #[derive(Debug, Clone)]
 pub(crate) struct Place {
@@ -26,7 +29,7 @@ pub(crate) struct Choice {
     /// The picks this spelling is, by their value in `spellings.toml`.
     pub(crate) picks: Vec<&'static str>,
     /// The template's bytes it replaces, each with what it writes there.
-    pub(crate) edits: Vec<(usize, usize, String)>,
+    pub(crate) edits: Edits,
     /// The statement the template must read as once it is written.
     pub(crate) expected: Statement,
 }

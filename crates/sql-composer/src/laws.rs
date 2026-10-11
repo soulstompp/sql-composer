@@ -1,8 +1,8 @@
-//! The laws: each spelling of a template returns the rows the template as written returns, as
-//! many times each, on tables holding the rows the nearest rewrite that is not a spelling fails
-//! on, and that rewrite returns other rows there. Each runs on a PostgreSQL server, on tables of
-//! those rows and again on the same rows given as mock tables, with the server's URL in
-//! `SQLC_TEST_POSTGRES_URL`: `cargo test --all-features -- --ignored`.
+//! The laws: each spelling of a template, and the respelling of a composed file, returns the rows
+//! the template as written returns, as many times each, on tables holding the rows the nearest
+//! rewrite that is not a spelling fails on, and that rewrite returns other rows there. Each runs on
+//! a PostgreSQL server, on tables of those rows and again on the same rows given as mock tables,
+//! with the server's URL in `SQLC_TEST_POSTGRES_URL`: `cargo test --all-features -- --ignored`.
 
 use postgres::types::ToSql;
 use postgres::{Client, NoTls};

@@ -41,6 +41,8 @@ mod clippy;
 pub mod composer;
 pub mod driver;
 pub mod error;
+#[cfg(all(test, any(feature = "respell", feature = "spellings")))]
+mod laws;
 pub mod mock;
 #[cfg(any(feature = "respell", feature = "spellings"))]
 mod parsed;

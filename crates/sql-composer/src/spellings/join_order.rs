@@ -787,9 +787,9 @@ fn list_place(
 
 #[cfg(test)]
 mod tests {
-    use super::super::laws::{holds, Trap};
     use super::super::{written_alone, Axis};
     use super::*;
+    use crate::laws::{holds, Trap};
     use crate::mock::MockTable;
 
     /// The only join list of `text`, read.

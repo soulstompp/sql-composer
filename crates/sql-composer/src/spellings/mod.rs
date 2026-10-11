@@ -23,8 +23,6 @@ mod columns;
 mod conditions;
 mod extent;
 mod join_order;
-#[cfg(test)]
-mod laws;
 mod naming;
 mod negation;
 mod picks;

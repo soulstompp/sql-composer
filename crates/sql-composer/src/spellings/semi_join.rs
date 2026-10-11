@@ -415,9 +415,9 @@ fn as_in(
 
 #[cfg(test)]
 mod tests {
-    use super::super::laws::{holds, Trap};
     use super::super::{written_alone, Axis};
     use super::*;
+    use crate::laws::{holds, Trap};
     use crate::mock::MockTable;
 
     fn written(text: &str, pick: &str) -> String {

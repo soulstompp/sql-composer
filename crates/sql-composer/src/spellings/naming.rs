@@ -799,9 +799,9 @@ fn replace_factor(statement: &mut Statement, index: usize, with: TableFactor) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::laws::{holds, Trap};
     use super::super::{written_alone, Axis};
     use super::*;
+    use crate::laws::{holds, Trap};
     use crate::mock::MockTable;
     use std::path::Path;
 

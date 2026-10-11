@@ -132,7 +132,7 @@ writes, in `crates/sql-composer/src/respell.rs`.
 | join order, `join_order` | a join list's relations in another order, each condition at the first `ON` where every relation it names is joined | every join inner or `CROSS`, none natural; every column named with its relation; no bare `*`; at most 8 relations; a `USING` column held once by the relations joined before it, read from their select lists | `SELECT *`: the columns come back in another order; an unqualified `USING` column, which reads the relation joined first: numeric's `1.0` against `1.00` | `join_order.rs`: `law_every_order_of_inner_joins_returns_the_same_rows` |
 | how a relation read once is named, `naming` | inline, as a WITH query at the statement's head, or as a template of its own | it is read once, is not recursive, is not `MATERIALIZED` and writes nothing | a relation read twice that calls `random()`: as a WITH query it is computed once | `naming.rs`: `law_a_relation_read_once_returns_the_same_rows_under_each_name` |
 | a semi-join's form, `semi_join` | `x IN (SELECT y …)`, or `EXISTS (SELECT … WHERE x = y)` | a conjunct of a `WHERE`, under no `NOT`, over a plain select | the same under a `NOT`, with a NULL in the subquery | `semi_join.rs`: `law_a_semi_join_in_either_form_returns_the_same_rows_under_no_not` |
-| a union of a roster's arms, `--respell` | each arm reading the roster, or the roster read once and each arm's rows tagged with its number | every arm reads the same roster, joins it `ON true`, cuts it by a `WHERE` that reads the roster alone, and returns roster columns the same in every arm or plain columns of its own rows | the arms tagged by the roster's slug, which a case-insensitive collation can merge | `respell.rs`: `a_union_any_arm_of_which_breaks_a_condition_is_written_as_composed` |
+| a union of a roster's arms, `--respell` | each arm reading the roster, or the roster read once and each arm's rows tagged with its number | every arm reads the same roster, joins it `ON true`, cuts it by a `WHERE` that reads the roster alone, and returns roster columns the same in every arm or plain columns of its own rows | the arms' rows joined inner, not left: an arm that finds nothing loses its roster row | `respell.rs`: `law_a_union_of_roster_arms_respelled_returns_the_same_rows` |
 
 To add an axis:
 
@@ -184,7 +184,8 @@ cargo run -p brick-example -- fit
 
 A respelling of the composed file, as the last row is, goes in `respell.rs`, behind the feature
 `respell`. Its tests break each of its conditions in turn and see the statement written as
-composed, and see a file with nothing to respell written byte for byte.
+composed, and see a file with nothing to respell written byte for byte; its law holds the
+respelled statement to the rows the statement as composed returns, by `laws::holds`.
 
 ### Coding Style
 

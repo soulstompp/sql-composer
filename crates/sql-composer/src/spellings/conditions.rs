@@ -620,7 +620,7 @@ mod tests {
 
     /// The sets and themes a condition's law runs on: a set with no theme, and a theme that is
     /// not City, which a `LEFT JOIN` keeps when the condition is in its `ON`.
-    fn sets_and_themes() -> super::super::laws::Trap {
+    fn sets_and_themes() -> crate::laws::Trap {
         use crate::mock::MockTable;
         let sets = MockTable::new("sets")
             .column("set_num", "varchar")
@@ -637,7 +637,7 @@ mod tests {
             .row(&[Some("1"), Some("City")])
             .row(&[Some("2"), Some("Technic")])
             .row(&[Some("3"), Some("City")]);
-        super::super::laws::Trap {
+        crate::laws::Trap {
             tables: vec![sets, themes],
             binds: vec![("min_year", 2000)],
             templates: vec![],
@@ -659,7 +659,7 @@ mod tests {
         );
         for pick in [ON, WHERE] {
             let spelled = written_alone(written, Axis::Conditions, pick, &|_| None);
-            let found = super::super::laws::holds(written, &spelled, near, &trap);
+            let found = crate::laws::holds(written, &spelled, near, &trap);
             assert_eq!(found.written, 2, "{spelled}");
         }
     }

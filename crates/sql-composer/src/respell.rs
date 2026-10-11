@@ -920,4 +920,54 @@ mod tests {
         assert_eq!(respelled.statements, 2);
         assert!(respelled.unions.is_empty() && respelled.unparsed.is_empty());
     }
+
+    /// A roster of two rules, and each rule's filings: the second rule's are all good, so its
+    /// arm finds nothing and keeps its roster row alone.
+    fn roster_and_laws() -> crate::laws::Trap {
+        use crate::mock::MockTable;
+        let roster = MockTable::new("roster")
+            .column("slug", "varchar")
+            .column("rule", "varchar")
+            .row(&[Some("rule_1"), Some("the first")])
+            .row(&[Some("rule_2"), Some("the second")]);
+        let laws = [
+            ("law_1", ["true", "false", "true"]),
+            ("law_2", ["false"; 3]),
+        ];
+        let tables = std::iter::once(roster)
+            .chain(laws.into_iter().map(|(name, bad)| {
+                let mut table = MockTable::new(name)
+                    .column("filing", "integer")
+                    .column("bad", "boolean");
+                for (filing, bad) in bad.iter().enumerate() {
+                    table = table.row(&[Some(&filing.to_string()), Some(bad)]);
+                }
+                table
+            }))
+            .collect();
+        crate::laws::Trap {
+            tables,
+            binds: vec![],
+            templates: vec![],
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a PostgreSQL server: set SQLC_TEST_POSTGRES_URL"]
+    fn law_a_union_of_roster_arms_respelled_returns_the_same_rows() {
+        let trap = roster_and_laws();
+        let arm = |n: usize| {
+            format!(
+                "SELECT r.rule, p.filing, p.violates\nFROM      (\n    SELECT * FROM roster\n) r\nLEFT JOIN (\n    SELECT l.filing, l.bad AS violates FROM law_{n} l WHERE l.bad\n) p ON true\nWHERE r.slug = 'rule_{n}'"
+            )
+        };
+        let written = roster_union(2, arm);
+        let respelled = respell(&written);
+        assert_eq!(respelled.unions, vec![2], "{}", respelled.sql);
+        let tagged = "LEFT JOIN (\nSELECT * FROM (\nSELECT 1 AS arm";
+        assert!(respelled.sql.contains(tagged), "{}", respelled.sql);
+        let inner = respelled.sql.replacen(tagged, &tagged["LEFT ".len()..], 1);
+        let found = crate::laws::holds(&written, &respelled.sql, (&written, &inner), &trap);
+        assert_eq!(found.written, 3, "{}", respelled.sql);
+    }
 }

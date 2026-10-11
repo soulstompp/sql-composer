@@ -795,7 +795,14 @@ mod composed {
             )
             .unwrap(),
         };
-        let changed = withs_kept(&source, &search, &picks);
+        // A deeply nested tree's composed statements take more stack to parse in a debug build
+        // than a test thread has.
+        let changed = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(move || withs_kept(&source, &search, &picks))
+            .unwrap()
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
         println!("{changed} template(s) written in the picks");
     }
 }

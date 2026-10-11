@@ -181,8 +181,8 @@ enum SqlComposerStatus sql_composer_set_name_relations(struct SqlComposer *compo
 
 /*
  Register every `CREATE VIEW <name> AS :define(<path>)` in the registry template at `registry`:
- wherever `<path>` is composed after this, the composed SQL names the view instead. The registry
- is found on the composer's search paths.
+ wherever `<path>` is composed after this, the composed statement names the view instead. The
+ registry is found on the composer's search paths.
 
  # Safety
 
@@ -259,7 +259,7 @@ enum SqlComposerStatus sql_composer_compose_with_counts(const struct SqlComposer
 void sql_composer_free(struct SqlComposer *composer);
 
 /*
- The composed SQL, with the dialect's placeholders. `NULL` when `composed` is.
+ The composed statements, with the dialect's placeholders. `NULL` when `composed` is.
 
  # Safety
 

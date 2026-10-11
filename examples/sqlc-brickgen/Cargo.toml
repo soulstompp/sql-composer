@@ -9,7 +9,7 @@ rust-version = "1.94"
 keywords = ["postgres", "test-data", "generator", "benchmark", "partitioning"]
 categories = ["command-line-utilities", "database", "development-tools::testing"]
 include = ["src/**", "data/cities.tsv", "README.md", "CHANGELOG.md", "LICENSE"]
-description = "Generates a large LEGO-style catalogue, with builders' collections and purchase logs, and loads it into Postgres in hierarchical waves"
+description = "Generates a large catalogue of bricks and sets from a real one, with builders' collections and purchase logs, and loads it into PostgreSQL in hierarchical waves"
 
 [[bin]]
 name = "sqlc-brickgen"

@@ -1,7 +1,7 @@
 [package]
 name = "sql-composer"
 version.workspace = true
-description = "SQL template engine that composes reusable SQL fragments with parameterized bindings"
+description = "Compose SQL templates: each query written once, in plain SQL, and composed into every statement that needs it"
 keywords = ["sql", "template", "composer", "parser", "winnow"]
 categories = ["parser-implementations", "database"]
 repository.workspace = true

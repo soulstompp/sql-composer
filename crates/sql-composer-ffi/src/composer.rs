@@ -39,7 +39,7 @@ impl SqlComposerComposed {
             .map(|name| c_string(name, "a bind name"))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(SqlComposerComposed {
-            sql: c_string(composed.sql, "the composed SQL")?,
+            sql: c_string(composed.sql, "the composed statements")?,
             bind_param_ptrs: bind_params.iter().map(|name| name.as_ptr()).collect(),
             bind_params,
             statement_starts: composed.statement_starts,
@@ -120,8 +120,8 @@ pub unsafe extern "C" fn sql_composer_set_name_relations(
 }
 
 /// Register every `CREATE VIEW <name> AS :define(<path>)` in the registry template at `registry`:
-/// wherever `<path>` is composed after this, the composed SQL names the view instead. The registry
-/// is found on the composer's search paths.
+/// wherever `<path>` is composed after this, the composed statement names the view instead. The
+/// registry is found on the composer's search paths.
 ///
 /// # Safety
 ///
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn sql_composer_free(composer: *mut SqlComposer) {
     unsafe { free_handle(composer) }
 }
 
-/// The composed SQL, with the dialect's placeholders. `NULL` when `composed` is.
+/// The composed statements, with the dialect's placeholders. `NULL` when `composed` is.
 ///
 /// # Safety
 ///

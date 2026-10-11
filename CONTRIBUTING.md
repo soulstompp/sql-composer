@@ -1,18 +1,16 @@
 # Contributing
 
-Thanks for your interest in contributing to sql-composer! We very much look forward to
-your suggestions, bug reports, and pull requests.
+Suggestions, bug reports and pull requests to sql-composer are welcome.
 
 ## Submitting bug reports
 
-Have a look at our [issue tracker]. If you can't find an issue (open or closed)
-describing your problem (or a very similar one) there, please open a new issue with
-the following details:
+Look in the [issue tracker] first. If no issue there, open or closed, describes your problem or
+one very like it, open a new issue with the following details:
 
 - Which versions of Rust and sql-composer are you using?
 - What are you trying to accomplish?
 - What is the full error you are seeing?
-- How can we reproduce this?
+- How can it be reproduced?
   - Please quote as much of your code as needed to reproduce (best link to a
     public repository or [Gist])
   - Please post as much of your database schema as is relevant to your error
@@ -20,21 +18,20 @@ the following details:
 [issue tracker]: https://github.com/soulstompp/sql-composer/issues
 [Gist]: https://gist.github.com
 
-Thank you! We'll try to respond as quickly as possible.
+Thank you.
 
 
 ## Submitting feature requests
 
-If you can't find an issue (open or closed) describing your idea on our [issue
-tracker], open an issue. Adding answers to the following
-questions in your description is +1:
+If no issue, open or closed, describes your idea in the [issue tracker], open one. Answers to
+these questions in its description help:
 
 - What do you want to do, and how do you expect sql-composer to support you with that?
 - How might this be added to sql-composer?
 - What are possible alternatives?
 - Are there any disadvantages?
 
-Thank you! We'll try to respond as quickly as possible.
+Thank you.
 
 
 ## Contribute code to sql-composer
@@ -42,7 +39,8 @@ Thank you! We'll try to respond as quickly as possible.
 ### Setting up sql-composer locally
 
 1. Install Rust using [rustup], which allows you to easily switch between Rust
-   versions. sql-composer currently supports Rust Stable.
+   versions. sql-composer builds on stable Rust, and each crate's `rust-version` names the oldest
+   release it builds with.
 
 2. Install the system libraries needed to interface with the database systems
    you wish to use (e.g. `libpq-dev` for PostgreSQL, `libmysqlclient-dev` for MySQL).
@@ -189,7 +187,8 @@ respelled statement to the rows the statement as composed returns, by `laws::hol
 
 ### Coding Style
 
-We follow the [Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md), enforced using [rustfmt](https://github.com/rust-lang/rustfmt).
+The code follows the [Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md),
+enforced by [rustfmt](https://github.com/rust-lang/rustfmt).
 To run rustfmt tests locally:
 
 1. Install rustfmt and clippy:

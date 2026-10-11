@@ -12,17 +12,18 @@ import sqlite3
 import sql_composer
 
 template = sql_composer.parse(
-    "SELECT id FROM parts WHERE id IN (:bind(ids)) AND kind = :bind(kind)", name="parts"
+    "SELECT set_num, name FROM lego_sets WHERE theme_id IN (:bind(theme_ids)) AND year = :bind(year)",
+    name="sets",
 )
 composer = sql_composer.Composer("sqlite")
-composed = composer.compose(template, counts={"ids": 3})
+composed = composer.compose(template, counts={"theme_ids": 3})
 
-composed.sql               # 'SELECT id FROM parts WHERE id IN (?1, ?2, ?3) AND kind = ?4'
-composed.bind_params       # ['ids', 'ids', 'ids', 'kind']
+composed.sql  # 'SELECT set_num, name FROM lego_sets WHERE theme_id IN (?1, ?2, ?3) AND year = ?4'
+composed.bind_params       # ['theme_ids', 'theme_ids', 'theme_ids', 'year']
 composed.statement_starts  # [0]
 
-values = {"ids": iter([1, 3, 4]), "kind": iter(["brick"])}
-db = sqlite3.connect("parts.db")
+values = {"theme_ids": iter([50, 126, 186]), "year": iter([1990])}
+db = sqlite3.connect("sets.db")
 rows = db.execute(composed.sql, [next(values[name]) for name in composed.bind_params]).fetchall()
 ```
 
@@ -61,8 +62,8 @@ tree = sql_composer.compose_all(
     search_paths=(),         # --search-path, each looked in after the source
     respell=False,           # --respell
 )
-tree.files           # {"parts/by_kind.sql": Composed, ...}: one for each template written
-tree.standings       # {"parts/by_kind.sqlc": Standing, ...}: every template under the source
+tree.files           # {"sets/select_set_parts.sql": Composed, ...}: one for each template written
+tree.standings       # {"sets/select_set_parts.sqlc": Standing, ...}: every template under the source
 tree.manifest_json   # the text of the manifest.json cargo sqlc writes beside the files
 ```
 
@@ -95,4 +96,6 @@ feature, and `cargo test -p sql-composer-py` embeds Python and links to libpytho
 
 ## License
 
-MIT, as [LICENSE](LICENSE) says.
+MIT, as [LICENSE][LICENSE] says.
+
+[LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-py/LICENSE

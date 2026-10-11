@@ -1,7 +1,7 @@
 [package]
 name = "sql-composer-sqlx"
 version.workspace = true
-description = "sqlx integration for sql-composer: verify composed SQL against a database"
+description = "sqlx integration for sql-composer: verify composed statements against a database"
 keywords = ["sql", "sqlx", "composer", "verification"]
 categories = ["database"]
 repository.workspace = true

@@ -16,7 +16,7 @@ cargo build --release -p sql-composer-ffi
 
 This builds the shared library `sql_composer_ffi` (`libsql_composer_ffi.so`, or as the platform
 names its shared libraries) and the static `libsql_composer_ffi.a` under `target/release/`. The
-header is [`sql_composer.h`](sql_composer.h), beside this file. cbindgen writes it from the
+header is [`sql_composer.h`][header], beside this file. cbindgen writes it from the
 crate's source into the build's `OUT_DIR` on every build, and `cargo test -p sql-composer-ffi`
 fails, saying what to copy, when the copy here differs from it. A program linking the static
 library also links the system libraries Rust's standard library needs, which this lists:
@@ -48,11 +48,12 @@ int main(void) {
     SqlComposerTemplate *template = NULL;
     SqlComposer *composer = NULL;
     SqlComposerComposed *composed = NULL;
-    const char *names[] = {"ids"};
+    const char *names[] = {"theme_ids"};
     size_t counts[] = {3};
 
-    if (sql_composer_template_parse("SELECT * FROM parts WHERE id IN (:bind(ids))",
-                                    "parts", &template, &error) != SQL_COMPOSER_STATUS_OK
+    if (sql_composer_template_parse(
+            "SELECT set_num, name FROM lego_sets WHERE theme_id IN (:bind(theme_ids))",
+            "sets", &template, &error) != SQL_COMPOSER_STATUS_OK
         || sql_composer_new("postgres", &composer, &error) != SQL_COMPOSER_STATUS_OK
         || sql_composer_compose_with_counts(composer, template, names, counts, 1, &composed,
                                             &error) != SQL_COMPOSER_STATUS_OK) {
@@ -61,10 +62,10 @@ int main(void) {
     } else {
         size_t count = 0;
         const char *const *params = sql_composer_composed_bind_params(composed, &count);
-        /* SELECT * FROM parts WHERE id IN ($1, $2, $3) */
+        /* SELECT set_num, name FROM lego_sets WHERE theme_id IN ($1, $2, $3) */
         printf("%s\n", sql_composer_composed_sql(composed));
         for (size_t i = 0; i < count; i++) {
-            printf("$%zu is %s\n", i + 1, params[i]); /* ids, ids, ids */
+            printf("$%zu is %s\n", i + 1, params[i]); /* theme_ids, three times */
         }
     }
     sql_composer_composed_free(composed);
@@ -82,11 +83,10 @@ int main(void) {
 
 `sql_composer_compose_all` composes every `.sqlc` file under a directory with the flags
 `cargo sqlc compose` takes (`sql_composer_flags_new`, `_set_with`, `_set_views`,
-`_add_search_path`, `_set_respell`). Each template of the tree it gives
-(`sql_composer_tree_entry`) is written, with its file's path and its composed SQL, or is a shape
-or skipped, with no file. `sql_composer_tree_manifest_json` is the text of the `manifest.json`
-cargo sqlc writes beside the files. [`tests/c/compose_tree.c`](tests/c/compose_tree.c) writes a
-whole target with them.
+`_add_search_path`, `_set_respell`). Each template of the tree it gives (`sql_composer_tree_entry`)
+is written, with its file's path and its composed statements, or is a shape or skipped, with no
+file. `sql_composer_tree_manifest_json` is the text of the `manifest.json` cargo sqlc writes
+beside the files. [`tests/c/compose_tree.c`][compose_tree] writes a whole target with them.
 
 `sql_composer_flags_set_respell` respells each composed file as `cargo sqlc compose --respell`
 does: a union whose arms each read one roster, cut to their own rows of it and left joined
@@ -96,4 +96,8 @@ refused with sql-composer's message.
 
 ## License
 
-MIT, as [LICENSE](LICENSE) says.
+MIT, as [LICENSE][LICENSE] says.
+
+[header]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/sql_composer.h
+[compose_tree]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/tests/c/compose_tree.c
+[LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/LICENSE

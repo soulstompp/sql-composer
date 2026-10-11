@@ -39,7 +39,7 @@ pub enum Error {
 /// A specialized `Result` type for sqlx integration operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Verify composed SQL statements against a PostgreSQL database.
+/// Verify composed statements against a PostgreSQL database.
 ///
 /// Connects to the database and attempts to `PREPARE` each statement.
 /// This validates that the SQL syntax is correct and that referenced
@@ -71,7 +71,7 @@ pub async fn verify_postgres(database_url: &str, statements: &[&ComposedSql]) ->
     Ok(())
 }
 
-/// Verify composed SQL statements against a MySQL database.
+/// Verify composed statements against a MySQL database.
 ///
 /// Connects to the database and prepares each statement on the server, which checks its
 /// syntax and that the tables and columns it names exist.
@@ -96,7 +96,7 @@ pub async fn verify_mysql(database_url: &str, statements: &[&ComposedSql]) -> Re
 
 /// Validate SQL syntax without a database connection.
 ///
-/// Uses sqlparser to check that the composed SQL is syntactically valid.
+/// Uses sqlparser to check that a composed statement is syntactically valid.
 /// This does not check table/column existence.
 #[cfg(feature = "validate")]
 pub fn validate_syntax(sql: &str, dialect: sql_composer::Dialect) -> Result<()> {

@@ -65,7 +65,7 @@ pub fn parse_file(path: PathBuf) -> PyResult<Template> {
 #[pyclass(module = "sql_composer", frozen, eq, skip_from_py_object)]
 #[derive(Clone, PartialEq)]
 pub struct Composed {
-    /// The composed SQL, with the dialect's placeholders.
+    /// The composed statements, with the dialect's placeholders.
     #[pyo3(get)]
     sql: String,
     /// The bind names, one for each placeholder, in order. On PostgreSQL, SQLite and DuckDB a
@@ -106,8 +106,8 @@ impl Composed {
 /// `search_paths` are the directories a `:compose` is looked for in, in order. `name_relations`
 /// writes every relation a statement reads once, named, at the head of that statement, as
 /// `cargo sqlc compose --with` does. `views` is a view registry, found on the search paths: every
-/// `CREATE VIEW <name> AS :define(<path>)` in it makes the composed SQL name the view wherever
-/// `<path>` is composed.
+/// `CREATE VIEW <name> AS :define(<path>)` in it makes the composed statement name the view
+/// wherever `<path>` is composed.
 #[pyclass(module = "sql_composer")]
 pub struct Composer {
     inner: sql_composer::Composer,

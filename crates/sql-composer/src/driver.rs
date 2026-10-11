@@ -28,7 +28,7 @@ pub trait ComposerConnection {
     /// e.g. `Box<dyn rusqlite::types::ToSql>` or `Box<dyn duckdb::ToSql>`
     type Value;
 
-    /// The composed SQL string (callers use this to prepare statements).
+    /// The composed statements, as text (callers use this to prepare statements).
     type Statement;
 
     /// The error type for this driver.
@@ -54,7 +54,7 @@ pub trait ComposerConnectionAsync {
     /// The database-specific value type for bind parameters.
     type Value;
 
-    /// The composed SQL string.
+    /// The composed statements, as text.
     type Statement;
 
     /// The error type for this driver.
@@ -76,7 +76,7 @@ pub trait ComposerConnectionAsync {
 /// produce the ordered value vector matching placeholder order.
 ///
 /// For single-value bindings, each name maps to one value.
-/// For multi-value bindings (e.g. IN clauses), the composed SQL already has
+/// For multi-value bindings (e.g. IN clauses), the composed statement already has
 /// the correct number of placeholders per binding name, so we flatten all
 /// values for each occurrence.
 pub fn resolve_values<V>(

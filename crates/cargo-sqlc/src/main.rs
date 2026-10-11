@@ -1,8 +1,11 @@
-//! `cargo sqlc` — cargo subcommand for composing SQL templates.
+//! `cargo sqlc`, the cargo subcommand that composes SQL templates.
 //!
-//! Scans a directory tree of `.sqlc` template files, composes them into final
-//! SQL with dialect-specific placeholders, and writes `.sql` output files
-//! mirroring the source directory structure, with `manifest.json` beside them.
+//! - `cargo sqlc compose` composes the templates under a directory into `.sql` files at the same
+//!   paths under the target, with `manifest.json` beside them, and `--verify` compares the files
+//!   with what the templates compose to, writing nothing.
+//! - `cargo sqlc tree` prints each composed file's templates, one for every path to each.
+//! - `cargo sqlc spellings` lays out a template's other spellings, and `cargo sqlc spell` writes
+//!   the templates in the spellings picked in `spellings.toml`.
 
 use clap::{Parser, ValueEnum};
 use sql_composer::composer::{Held, Reach};
@@ -83,24 +86,24 @@ struct Composition {
     #[arg(long, env = "SQLC_SOURCE_DIR", default_value = "sqlc")]
     source: PathBuf,
 
-    /// The database to compose for: its placeholders, and the words it refuses as a name.
-    /// `postgres` when it is left out.
+    /// The database to compose for: its placeholders, the words it refuses as a name, and where
+    /// its quotes, comments and statements end. `postgres` when it is left out.
     #[arg(long)]
     dialect: Option<DialectArg>,
 
     /// A view registry: every `CREATE VIEW <name> AS :define(<path>)` in this template makes
-    /// the composed SQL say `SELECT * FROM <name>` wherever `<path>` is composed, instead of
-    /// inlining it. `:define` is what puts a body where the name would otherwise go, so the
-    /// registry needs no exemption of its own, and a statement can give a relation a name for
-    /// its own duration by defining it in a `WITH` clause. Without this, everything inlines.
+    /// the composed statements say `SELECT * FROM <name>` wherever `<path>` is composed,
+    /// instead of inlining it. `:define` is what puts a body where the name would otherwise go,
+    /// so the registry needs no exemption of its own, and a statement can give a relation a name
+    /// for its own duration by defining it in a `WITH` clause. Without this, everything inlines.
     #[arg(long, conflicts_with = "with")]
     views: Option<PathBuf>,
 
     /// Write every relation a statement reads once, named, at the head of that statement: one
     /// `WITH`, each relation after the relations it reads, the statement last. A relation is
-    /// named after its file and directories (`layers/figures.sqlc` is `layers_figures`). A
-    /// template that binds a parameter, or is composed with its slots filled, is written where
-    /// it is composed.
+    /// named after its file and directories (`shared/theme_closure.sqlc` is
+    /// `shared_theme_closure`). A template that binds a parameter, or is composed with its slots
+    /// filled, is written where it is composed.
     #[arg(long)]
     with: bool,
 
@@ -131,10 +134,10 @@ struct ComposeArgs {
     #[arg(long)]
     verify: bool,
 
-    /// Respell each composed statement for PostgreSQL where its own text proves the same rows: a
-    /// union of arms that each read one roster, cut to their own rows of it and left joined ON
-    /// true to what they read, is read as one join, the roster read once. Every other byte is
-    /// written as composed, and so is a statement that does not parse. PostgreSQL only.
+    /// Respell each composed statement for PostgreSQL where its own text says the rows stay the
+    /// same: a union of arms that each read one roster, cut to their own rows of it and left
+    /// joined ON true to what they read, is read as one join, the roster read once. Every other
+    /// byte is written as composed, and so is a statement that does not parse. PostgreSQL only.
     #[arg(long)]
     respell: bool,
 }

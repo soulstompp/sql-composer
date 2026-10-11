@@ -4,14 +4,16 @@
 //! ```text
 //! import sql_composer
 //!
-//! template = sql_composer.parse("SELECT * FROM parts WHERE id IN (:bind(ids)) AND kind = :bind(kind)")
-//! composed = sql_composer.Composer("postgres").compose(template, counts={"ids": 3})
-//! composed.sql               # 'SELECT * FROM parts WHERE id IN ($1, $2, $3) AND kind = $4'
-//! composed.bind_params       # ['ids', 'ids', 'ids', 'kind']
+//! template = sql_composer.parse(
+//!     "SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids)) AND is_trans = :bind(is_trans)"
+//! )
+//! composed = sql_composer.Composer("postgres").compose(template, counts={"color_ids": 3})
+//! composed.sql               # ... WHERE id IN ($1, $2, $3) AND is_trans = $4
+//! composed.bind_params       # ['color_ids', 'color_ids', 'color_ids', 'is_trans']
 //! composed.statement_starts  # [0]
 //!
 //! tree = sql_composer.compose_all("sqlc", "postgres")
-//! tree.files                 # {'parts/by_kind.sql': Composed(...), ...}
+//! tree.files                 # {'sets/select_set_parts.sql': Composed(...), ...}
 //! tree.manifest_json         # the text of the manifest.json cargo sqlc writes
 //! ```
 //!

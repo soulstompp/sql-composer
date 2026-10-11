@@ -1,7 +1,20 @@
-//! sqlx integration for sql-composer.
+//! Checks, from Rust, the statements sql-composer composes: on a live database, or offline for
+//! their syntax. The composer never checks the SQL it splices; these do.
 //!
-//! Provides verification of composed SQL against a live database connection
-//! and optional syntax validation via sqlparser.
+//! - `verify_postgres`, under the feature `postgres` (on by default), prepares each statement on a
+//!   live PostgreSQL and deallocates it again. That checks its syntax, and that the tables and
+//!   columns it names exist.
+//! - `verify_mysql`, under the feature `mysql`, prepares each statement on a live MySQL, and
+//!   checks the same.
+//! - `validate_syntax`, under the feature `validate`, parses a statement offline with sqlparser,
+//!   in its grammar for the dialect (MySQL's for MariaDB), every placeholder read as `1`. It
+//!   checks syntax only.
+//!
+//! ```ignore
+//! use sql_composer_sqlx::verify_postgres;
+//!
+//! verify_postgres("postgres://localhost/sqlc_brick", &[&composed]).await?;
+//! ```
 
 pub use sql_composer;
 

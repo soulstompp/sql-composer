@@ -33,8 +33,9 @@
 //!     SqlComposer *composer = NULL;
 //!     SqlComposerComposed *composed = NULL;
 //!
-//!     if (sql_composer_template_parse("SELECT * FROM users WHERE id = :bind(user_id);",
-//!                                     "users", &template, &error) != SQL_COMPOSER_STATUS_OK
+//!     if (sql_composer_template_parse(
+//!             "SELECT set_num, name FROM lego_sets WHERE theme_id = :bind(theme_id);", "sets",
+//!             &template, &error) != SQL_COMPOSER_STATUS_OK
 //!         || sql_composer_new("postgres", &composer, &error) != SQL_COMPOSER_STATUS_OK
 //!         || sql_composer_compose(composer, template, &composed, &error)
 //!                != SQL_COMPOSER_STATUS_OK) {
@@ -43,7 +44,7 @@
 //!     } else {
 //!         size_t count = 0;
 //!         const char *const *names = sql_composer_composed_bind_params(composed, &count);
-//!         printf("%s\n", sql_composer_composed_sql(composed)); /* ... WHERE id = $1; */
+//!         printf("%s\n", sql_composer_composed_sql(composed)); /* ... WHERE theme_id = $1; */
 //!         for (size_t i = 0; i < count; i++) printf("$%zu is %s\n", i + 1, names[i]);
 //!     }
 //!     sql_composer_composed_free(composed);

@@ -15,13 +15,13 @@
 //! use sql_composer_duckdb::DuckDbConnection;
 //!
 //! let conn = DuckDbConnection::open_in_memory().unwrap();
-//! conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", []).unwrap();
+//! conn.execute("CREATE TABLE lego_sets (set_num TEXT, name TEXT, year INTEGER)", []).unwrap();
 //!
-//! let input = "SELECT * FROM users WHERE id = :bind(user_id)";
+//! let input = "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)";
 //! let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
 //! let composer = Composer::new(Dialect::Duckdb);
 //!
-//! let values = bind_values!("user_id" => [Box::new(1i32) as Box<dyn duckdb::ToSql>]);
+//! let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn duckdb::ToSql>]);
 //! let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 //!
 //! let refs: Vec<&dyn duckdb::ToSql> = params.iter().map(|v| v.as_ref()).collect();

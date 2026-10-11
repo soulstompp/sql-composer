@@ -1,17 +1,23 @@
-//! sql-composer: A SQL template engine that composes reusable SQL fragments
-//! with parameterized bindings.
+//! sql-composer composes SQL templates: each query written once, in a file of plain SQL, and put
+//! into every statement that needs it, for PostgreSQL, MySQL, MariaDB, SQLite or DuckDB.
 //!
-//! Templates use a simple macro syntax embedded in SQL:
-//! - `:bind(name)` — parameter placeholder
-//! - `:compose(path)` — include another template
-//! - `:count(sources...)` — count aggregate
-//! - `:union(sources...)` — union combinator
-//! - `:intersect(sources...)` — the rows every source holds
-//! - `:except(first, rest...)` — the rows of the first source that no other source holds
-//! - `:dialect(names...)` — the dialects the template is written for, at its head
+//! A template is SQL with directives in it:
+//! - `:compose(path)`: the relation in `path`, where the directive stands;
+//! - `:compose(path, @slot = other)`: the same, with its slot filled by `other`, and
+//!   `:compose(@slot)`: the relation a caller fills the slot with;
+//! - `:define(path)`: the relation's body, the name in front of its `AS` standing for it below;
+//! - `:bind(name)`: the dialect's placeholder, one for each value of a name bound to a list;
+//! - `:union(a, b, …)`, `:intersect(a, b, …)` and `:except(a, b, …)`: the sources combined as
+//!   sets, each a derived table of its own;
+//! - `:count(a)` and `:count(DISTINCT col OF a)`: a relation's rows counted;
+//! - `:dialect(postgres, duckdb)`: at a template's head, the dialects it is written for;
+//! - `# …`: a template comment, to the end of the line, which never reaches the database.
 //!
 //! SQL text is passed through unchanged. The composer reads where its quotes and comments begin
-//! and end, as each dialect's database does, so a `#` or a directive inside one is SQL.
+//! and end, as each dialect's database does, so a `#` or a directive inside one is SQL. Under
+//! the feature `respell`, `respell::respell` reads a file composed for PostgreSQL with
+//! sqlparser and writes a union of a roster's arms as one join. Under `spellings`, the
+//! `spellings` module lays out the other spellings of a template and writes it in the picks.
 //!
 //! # Example
 //!
@@ -20,15 +26,15 @@
 //! use sql_composer::composer::Composer;
 //! use sql_composer::types::{Dialect, TemplateSource};
 //!
-//! let input = "SELECT * FROM users WHERE id = :bind(user_id) AND active = :bind(active);";
+//! let input = "SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id = :bind(theme_id)";
 //! let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
 //!
 //! let composer = Composer::new(Dialect::Postgres);
 //! let result = composer.compose(&template).unwrap();
 //!
-//! // Alphabetical ordering: active=$1, user_id=$2
-//! assert_eq!(result.sql, "SELECT * FROM users WHERE id = $2 AND active = $1;");
-//! assert_eq!(result.bind_params, vec!["active", "user_id"]);
+//! // Numbered by each name's alphabetical place: theme_id is $1, year is $2.
+//! assert_eq!(result.sql, "SELECT set_num, name, year FROM lego_sets WHERE year = $2 AND theme_id = $1");
+//! assert_eq!(result.bind_params, vec!["theme_id", "year"]);
 //! ```
 
 mod clippy;

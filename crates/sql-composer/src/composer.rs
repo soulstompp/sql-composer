@@ -104,16 +104,17 @@ pub struct Composer {
     /// in its `WITH`, and reads them instead of the table's.
     pub mock_tables: BTreeMap<String, MockTable>,
     /// Templates registered as views, by canonical path: wherever one is composed, the composed
-    /// SQL names the view instead of inlining the template.
+    /// statement names the view instead of inlining the template.
     pub views: HashMap<PathBuf, String>,
     /// The registry template that defines the views. Its own composes inline one level, since
     /// they are the views' definitions.
     pub view_registry: Option<PathBuf>,
     /// Write every relation a statement reads once, named, at the head of that statement: one
     /// `WITH`, each relation after the relations it reads, and the statement last. A relation is
-    /// named after its file and directories (`layers/figures.sqlc` is `layers_figures`), and every
-    /// place that composes it says `SELECT * FROM` that name. A template that binds a parameter,
-    /// or is composed with its slots filled, is written where it is composed, as without this.
+    /// named after its file and directories (`shared/theme_closure.sqlc` is
+    /// `shared_theme_closure`), and every place that composes it says `SELECT * FROM` that name.
+    /// A template that binds a parameter, or is composed with its slots filled, is written where
+    /// it is composed, as without this.
     pub name_relations: bool,
 }
 

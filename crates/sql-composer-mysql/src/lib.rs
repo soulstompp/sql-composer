@@ -15,16 +15,16 @@
 //! use sql_composer::bind_values;
 //! use sql_composer_mysql::MysqlConn;
 //!
-//! let pool = mysql_async::Pool::new("mysql://root@localhost/test");
+//! let pool = mysql_async::Pool::new("mysql://root@localhost/sqlc_brick");
 //! let conn = pool.get_conn().await?;
 //! let conn = MysqlConn::from_conn(conn);
 //!
 //! let template = sql_composer::parser::parse_template(
-//!     "SELECT * FROM users WHERE id = :bind(user_id)",
+//!     "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)",
 //!     TemplateSource::Literal("example".into()),
 //! )?;
 //! let composer = Composer::new(Dialect::Mysql);
-//! let values = bind_values!("user_id" => [mysql_async::Value::from(1i32)]);
+//! let values = bind_values!("year" => [mysql_async::Value::from(2017i32)]);
 //! let (sql, params) = conn.compose(&composer, &template, values).await?;
 //! ```
 //!
@@ -37,15 +37,15 @@
 //! use sql_composer::bind_values;
 //! use sql_composer_mysql::MysqlConnection;
 //!
-//! let conn = mysql::Conn::new("mysql://root@localhost/test")?;
+//! let conn = mysql::Conn::new("mysql://root@localhost/sqlc_brick")?;
 //! let conn = MysqlConnection::from_conn(conn);
 //!
 //! let template = sql_composer::parser::parse_template(
-//!     "SELECT * FROM users WHERE id = :bind(user_id)",
+//!     "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)",
 //!     TemplateSource::Literal("example".into()),
 //! )?;
 //! let composer = Composer::new(Dialect::Mysql);
-//! let values = bind_values!("user_id" => [mysql::Value::from(1i32)]);
+//! let values = bind_values!("year" => [mysql::Value::from(2017i32)]);
 //! let (sql, params) = conn.compose(&composer, &template, values)?;
 //! ```
 

@@ -1,7 +1,7 @@
 //! A seeded SplitMix64 generator, and independent streams keyed by (seed, purpose, index).
 //!
 //! Every generated row draws from a stream keyed by the row's own index, so the rows are a
-//! function of the seed and the wiring alone: neither the chunk a row is written in nor the
+//! function of the seed and the configuration alone: neither the chunk a row is written in nor the
 //! number of concurrent writers changes what is generated.
 
 /// SplitMix64: a 64-bit state advanced by the golden-ratio increment and finalised.
@@ -20,11 +20,11 @@ pub fn mix(mut z: u64) -> u64 {
 #[repr(u64)]
 pub enum Purpose {
     SetKind = 1,
-    SetSocket,
+    SetRootDecade,
     SetTemplate,
     SetName,
     SetLines,
-    SetCord,
+    SetRelationship,
     SetNumber,
     TrapPick,
     Builder,

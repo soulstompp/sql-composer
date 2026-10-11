@@ -1,5 +1,5 @@
 //! Tests over a small real-shaped catalogue built in memory: the generation is a function of the
-//! wiring, and the manifest names exactly the rows that carry each trap.
+//! configuration, and the manifest names exactly the rows that carry each trap.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -12,9 +12,9 @@ use crate::catalogue::{
 use crate::encode::{Enc, Format};
 use crate::load::{index_name, KeyPart, COMPOSITE_INDEXES, NAME_BYTES};
 use crate::paired;
-use crate::switchboard::{Dials, Switchboard};
+use crate::placement::{PatternSettings, Placement};
 use crate::traps::{Trap, DECLS};
-use crate::world::{self, BuilderWave, SetWave, Stamp, Wiring, World};
+use crate::world::{self, BuilderWave, SetWave, Stamp, Synthesis, World};
 
 /// Themes, colours and parts of the real catalogue, and sets shaped like it: one per theme in
 /// every year from 1953 to 2017, plus the real sets the traps name.
@@ -210,8 +210,8 @@ fn fixture() -> Catalogue {
     cat
 }
 
-fn wiring(sets: u64, chunk: u64) -> Wiring {
-    Wiring {
+fn synthesis(sets: u64, chunk: u64) -> Synthesis {
+    Synthesis {
         seed: 7,
         sets,
         chunk,
@@ -229,34 +229,34 @@ fn wiring(sets: u64, chunk: u64) -> Wiring {
     }
 }
 
-fn dials() -> Dials {
-    Dials {
+fn pattern_settings() -> PatternSettings {
+    PatternSettings {
         wavy_period: 4,
         wavy_amplitude: 0.25,
         hotspot_share: 0.9,
-        hotspot_socket: None,
+        hotspot: None,
         swing_period: 2,
         swing_a: "50,126,186@1980-2000".into(),
         swing_b: "158,482@2010-2030".into(),
     }
 }
 
-fn world(sets: u64, chunk: u64, patch: &str) -> World {
-    world_planting(sets, chunk, patch, crate::traps::all_planted()).expect("world")
+fn world(sets: u64, chunk: u64, phases: &str) -> World {
+    world_planting(sets, chunk, phases, crate::traps::all_planted()).expect("world")
 }
 
 /// A world that plants only `traps` of the traps `--traps` can leave out.
 fn world_planting(
     sets: u64,
     chunk: u64,
-    patch: &str,
+    phases: &str,
     traps: BTreeSet<Trap>,
 ) -> Result<World, String> {
     let real = Real::new(fixture());
-    let board = Switchboard::new(&real, patch, dials(), sets, chunk).expect("patch");
-    let mut wiring = wiring(sets, chunk);
-    wiring.traps = traps;
-    World::new(real, wiring, board)
+    let placement = Placement::new(&real, phases, pattern_settings(), sets, chunk).expect("phases");
+    let mut synthesis = synthesis(sets, chunk);
+    synthesis.traps = traps;
+    World::new(real, synthesis, placement)
 }
 
 struct Everything {
@@ -266,17 +266,17 @@ struct Everything {
 }
 
 fn generate(w: &World) -> Everything {
-    let chunk = w.wiring.chunk;
+    let chunk = w.synthesis.chunk;
     let mut sets: Vec<SetWave> = (0..w.real_waves).map(|k| w.real_wave(k)).collect();
-    for s in 0..w.wiring.sets.div_ceil(chunk) {
+    for s in 0..w.synthesis.sets.div_ceil(chunk) {
         sets.push(w.set_wave(
             w.real_waves + s,
             s * chunk,
-            ((s + 1) * chunk).min(w.wiring.sets),
+            ((s + 1) * chunk).min(w.synthesis.sets),
         ));
     }
-    let builders = (0..w.wiring.builders.div_ceil(chunk))
-        .map(|b| w.builder_wave(b, b * chunk, ((b + 1) * chunk).min(w.wiring.builders)))
+    let builders = (0..w.synthesis.builders.div_ceil(chunk))
+        .map(|b| w.builder_wave(b, b * chunk, ((b + 1) * chunk).min(w.synthesis.builders)))
         .collect();
     Everything {
         sets,
@@ -472,10 +472,10 @@ fn sorted<T: Ord + Clone>(v: impl Iterator<Item = T>) -> Vec<T> {
 }
 
 #[test]
-fn the_same_wiring_generates_the_same_rows() {
-    let patch = "natural:60,wavy:20,interleaved:10,paired:10";
-    let a = generate(&world(3000, 100, patch));
-    let b = generate(&world(3000, 100, patch));
+fn the_same_seed_and_flags_generate_the_same_rows() {
+    let phases = "natural:60,wavy:20,interleaved:10,paired:10";
+    let a = generate(&world(3000, 100, phases));
+    let b = generate(&world(3000, 100, phases));
     for (x, y) in a.sets.iter().zip(&b.sets) {
         assert_eq!(x.sets, y.sets);
         assert_eq!(x.inventories, y.inventories);
@@ -491,7 +491,7 @@ fn the_same_wiring_generates_the_same_rows() {
 }
 
 #[test]
-fn a_natural_patch_does_not_depend_on_the_wave_size() {
+fn a_natural_phase_does_not_depend_on_the_wave_size() {
     let a = generate(&world(1500, 100, "natural:100"));
     let b = generate(&world(1500, 37, "natural:100"));
     let key = |e: &Everything| {
@@ -517,13 +517,42 @@ fn a_natural_patch_does_not_depend_on_the_wave_size() {
 }
 
 #[test]
+fn the_phases_and_the_hotspot_are_given_by_their_own_flags() {
+    use clap::Parser;
+    let parse = |args: &[&str]| {
+        let base = [
+            "sqlc-brickgen",
+            "--database-url",
+            "postgres:///sqlc_brickgen",
+        ];
+        crate::Cli::try_parse_from(base.iter().chain(args))
+    };
+    let cli = parse(&["--phases", "natural:50,sorted:50", "--hotspot", "r50/1990s"]).unwrap();
+    assert_eq!(cli.phases, "natural:50,sorted:50");
+    assert_eq!(cli.hotspot.as_deref(), Some("r50/1990s"));
+    assert!(parse(&["--patch", "natural:100"]).is_err());
+    assert!(parse(&["--hotspot-socket", "r50/1990s"]).is_err());
+}
+
+#[test]
+fn the_manifest_names_the_root_and_decade_of_each_trapped_set() {
+    let manifest = crate::load::TABLES
+        .iter()
+        .find(|t| t.name == "trap_manifest")
+        .unwrap();
+    let columns: Vec<&str> = manifest.columns.split(", ").collect();
+    assert!(columns.contains(&"root_decade"));
+    assert!(!columns.contains(&"socket"));
+}
+
+#[test]
 fn a_different_seed_generates_different_rows() {
     let a = generate(&world(500, 100, "natural:100"));
     let real = Real::new(fixture());
-    let board = Switchboard::new(&real, "natural:100", dials(), 500, 100).unwrap();
-    let mut w = wiring(500, 100);
+    let placement = Placement::new(&real, "natural:100", pattern_settings(), 500, 100).unwrap();
+    let mut w = synthesis(500, 100);
     w.seed = 8;
-    let b = generate(&World::new(real, w, board).unwrap());
+    let b = generate(&World::new(real, w, placement).unwrap());
     assert_ne!(a.sets.last().unwrap().sets, b.sets.last().unwrap().sets);
 }
 
@@ -869,7 +898,7 @@ fn the_manifest_names_exactly_the_trapped_rows() {
     // The planted counts are the declared ones.
     for d in DECLS {
         let population = match d.population {
-            crate::traps::Population::Sets => w.wiring.sets,
+            crate::traps::Population::Sets => w.synthesis.sets,
             crate::traps::Population::CollectionRows => w.collection_rows(),
             _ => 0,
         };
@@ -1088,10 +1117,11 @@ fn no_set_is_released_in_a_gap_and_the_modelled_years_are_reached() {
 fn buying_reaches_almost_every_set_skewed_and_within_each_timeline() {
     let real = Real::new(fixture());
     let sets = 3000;
-    let board = Switchboard::new(&real, "natural:100", dials(), sets, 100).expect("patch");
-    let mut wiring = wiring(sets, 100);
-    wiring.builders = world::builders_for(sets + real.cat.sets.len() as u64);
-    let w = World::new(real, wiring, board).expect("world");
+    let placement =
+        Placement::new(&real, "natural:100", pattern_settings(), sets, 100).expect("phases");
+    let mut synthesis = synthesis(sets, 100);
+    synthesis.builders = world::builders_for(sets + real.cat.sets.len() as u64);
+    let w = World::new(real, synthesis, placement).expect("world");
     let e = generate(&w);
     let mut bought: HashMap<u64, u64> = HashMap::new();
     for (set, n) in e.builders.iter().flat_map(|x| x.bought.iter()) {
@@ -1172,10 +1202,11 @@ fn a_twin_record_is_classified_like_any_set() {
     let mut on_endpoint = 0;
     for seed in 1..200u64 {
         let real = Real::new(fixture());
-        let board = Switchboard::new(&real, "natural:100", dials(), 3000, 100).unwrap();
-        let mut wiring = wiring(3000, 100);
-        wiring.seed = seed;
-        let w = World::new(real, wiring, board).unwrap();
+        let placement =
+            Placement::new(&real, "natural:100", pattern_settings(), 3000, 100).unwrap();
+        let mut synthesis = synthesis(3000, 100);
+        synthesis.seed = seed;
+        let w = World::new(real, synthesis, placement).unwrap();
         let e = generate(&w);
         let manifest: HashSet<(Trap, String)> = e
             .sets
@@ -1646,8 +1677,9 @@ fn set_numbers_stay_distinct_past_nine_million_sets() {
 fn a_set_count_past_the_tables_integers_is_refused() {
     let sets = 1_100_000_000;
     let real = Real::new(fixture());
-    let board = Switchboard::new(&real, "natural:100", dials(), sets, 1000).expect("patch");
-    match World::new(real, wiring(sets, 1000), board) {
+    let placement =
+        Placement::new(&real, "natural:100", pattern_settings(), sets, 1000).expect("phases");
+    match World::new(real, synthesis(sets, 1000), placement) {
         Ok(_) => panic!("{sets} sets were accepted"),
         Err(e) => assert!(e.contains(&i32::MAX.to_string()), "{e}"),
     }
@@ -1682,14 +1714,14 @@ fn every_named_size_fits_the_tables_integers() {
 /// when all are. Each left out trap is planted when all are, so the run has something to leave out.
 #[test]
 fn a_trap_left_out_is_planted_nowhere_and_every_other_as_often() {
-    let patch = "natural:60,wavy:20,interleaved:10,paired:10";
+    let phases = "natural:60,wavy:20,interleaved:10,paired:10";
     let left_out = [Trap::K3, Trap::K7, Trap::B3, Trap::D3, Trap::O5];
     let mut traps = crate::traps::all_planted();
     for t in left_out {
         assert!(traps.remove(&t), "{t}");
     }
-    let all = world(3000, 100, patch);
-    let some = world_planting(3000, 100, patch, traps).expect("world");
+    let all = world(3000, 100, phases);
+    let some = world_planting(3000, 100, phases, traps).expect("world");
     let planted = |w: &World, trap: Trap| w.planted.iter().find(|p| p.0 == trap).map(|p| p.1);
     for d in DECLS {
         let (a, s) = (planted(&all, d.trap), planted(&some, d.trap));
@@ -1725,9 +1757,9 @@ fn a_trap_left_out_is_planted_nowhere_and_every_other_as_often() {
 /// real catalogue's own trapped rows are listed exactly as when every trap is planted.
 #[test]
 fn with_no_trap_planted_the_real_catalogue_keeps_its_own_trapped_rows() {
-    let patch = "natural:90,paired:10";
-    let all = world(1500, 100, patch);
-    let none = world_planting(1500, 100, patch, BTreeSet::new()).expect("world");
+    let phases = "natural:90,paired:10";
+    let all = world(1500, 100, phases);
+    let none = world_planting(1500, 100, phases, BTreeSet::new()).expect("world");
     assert!(none.set_traps.is_empty() && none.row_traps.is_empty());
     assert!(none.planted.iter().all(|p| p.1 == 0));
     let rows = |w: &World| manifest_rows(&written(w, &generate(w)));

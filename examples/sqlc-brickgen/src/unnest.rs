@@ -223,7 +223,7 @@ pub async fn insert(
             let d: Vec<&str> = m.iter().map(|r| r.row_key.as_str()).collect();
             let e: Vec<&str> = m.iter().map(|r| r.phase.as_str()).collect();
             let f: Vec<i64> = m.iter().map(|r| r.wave).collect();
-            let g: Vec<Option<&str>> = m.iter().map(|r| r.socket.as_deref()).collect();
+            let g: Vec<Option<&str>> = m.iter().map(|r| r.root_decade.as_deref()).collect();
             let h: Vec<&str> = m.iter().map(|r| r.detail.as_str()).collect();
             let bytes = d
                 .iter()

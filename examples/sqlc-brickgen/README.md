@@ -37,7 +37,7 @@ it directly and wins.
 The default is `huge`. Everything else scales with it: builders, collection rows and purchases
 (`PURCHASES_PER_SET` per set, real and synthesized), and every trap planted at a rate. The cities,
 postcodes, names, stores and calendar stay the same at every size, so a bigger size crowds them.
-The same `--sets`, `--seed` and wiring flags give the same rows. Each key, statistics and vacuum
+The same `--seed` and the same flags give the same rows. Each key, statistics and vacuum
 build may run an hour for every two million sets unless `--build-timeout` says otherwise.
 
 The database URL can also come from `SQLC_BRICKGEN_DATABASE_URL`, never from the general
@@ -143,18 +143,20 @@ copies one of them. The releases per year keep growing at the real years' own ra
 which leaves out the dump's partial last year), sped up `GROWTH_FACTOR` times, so the last years
 hold far more sets than the first.
 
-## The switchboard
+## Where each set lands
 
-A synthesized set lands in a socket: one root theme in one decade, from 1950 to 2030. A socket's
-weight is its real sets plus the releases of its modelled years. The patch
-`--patch <pattern>:<percent>,…` splits the synthesized sets into phases, each wired to a pattern:
+A synthesized set lands in a root theme and a decade, from 1950 to 2030: its root and decade. A
+root and decade's weight is its real sets plus the releases of its modelled years.
+`--phases <pattern>:<percent>,…` splits the synthesized sets into phases, each following a pattern:
 
-- `natural`: sockets drawn with the real catalogue's own weights;
-- `sorted`: one sweep through the sockets in order;
-- `interleaved`: every wave steps across the whole socket order;
-- `wavy`: a wave travelling over the sockets, forward then back (`--wavy-period`, `--wavy-amplitude`);
-- `hotspot`: one socket takes a share of the sets (`--hotspot-share`, `--hotspot-socket`);
-- `swing`: waves alternate between two groups of sockets (`--swing-a`, `--swing-b`, `--swing-period`);
+- `natural`: roots and decades drawn with the real catalogue's own weights;
+- `sorted`: one sweep through the roots and decades in order;
+- `interleaved`: every wave steps across all the roots and decades;
+- `wavy`: a wave travelling over the roots and decades, forward then back (`--wavy-period`,
+  `--wavy-amplitude`);
+- `hotspot`: one root and decade takes a share of the sets (`--hotspot-share`, `--hotspot`);
+- `swing`: waves alternate between two groups of roots and decades (`--swing-a`, `--swing-b`,
+  `--swing-period`);
 - `paired`: packs written in pairs, their child sets chosen by release year so that the two packs
   of a pair hold as many pairs of consecutive years, and a different number of runs of three
   consecutive years: counting their years two at a time cannot tell the two packs apart. The years
@@ -164,11 +166,12 @@ weight is its real sets plus the releases of its modelled years. The patch
   pair, whether it is the first or second member, its offsets, its partner's offsets, the window and
   whether it is mirrored.
 
-The relationships between sets (the cords) each have a dial for how often they cross from one socket
-to another: nesting (`--cross-nesting`), versions (`--cross-versions`), twins (`--cross-twins`) and
-collections (`--cross-collections`). The first three default to the rates measured on the real
-catalogue. `--upto-phase N` writes only the phases up to the N-th, so every prefix of a run can be
-loaded and checked on its own.
+Each relationship between sets crosses at a rate of its own: a nesting to another root theme
+(`--cross-nesting`), a version (`--cross-versions`) or a twin (`--cross-twins`) to another root and
+decade than its `-1`, and a collection row out of its builder's home root and decade
+(`--cross-collections`). The first three default to the rates measured on the real catalogue.
+`--upto-phase N` writes only the phases up to the N-th, so every prefix of a run can be loaded and
+checked on its own.
 
 ## Buying
 
@@ -179,7 +182,7 @@ of its timeline has passed by today.
   re-releases at random later dates; the spikes of its root theme, windows shared by every set of
   the theme; and a thin second-hand trickle. A set released last month has had little time to sell.
 
-A collection row draws its set by demand, from the builder's home socket unless the collection cord
+A collection row draws its set by demand, from the builder's home root and decade unless the row
 crosses, and each copy is bought on a day drawn from the set's timeline, in the store's opening
 hours, at a second and a millisecond of its minute. The builder writes the instant down as the wall
 clock of their home zone, to the millisecond, by that zone's offset history from the IANA time zone
@@ -223,8 +226,8 @@ house, and no street name is real, so no row is anybody's address.
 
 Some rows are planted on purpose: key spellings, boundary years and absences, orders that depend on
 the collation or on ties, and dates across clock changes. Every planted row is listed in
-`trap_manifest`, with the phase, wave and socket it came from. The program prints each trap, its rate
-and how many it planted when it starts.
+`trap_manifest`, with the phase, the wave, and the root and decade it came from (`root_decade`).
+The program prints each trap, its rate and how many it planted when it starts.
 
 `--traps` says which traps are planted: `all` (the default), `none`, or a list such as `K1,K3,D5`.
 Only the traps planted at a rate and O5, which the `paired` phase writes, can be left out; naming
@@ -252,16 +255,17 @@ sessions are the generator's. A progress line, with the COPY statements then run
 every `--log-progress-every` seconds.
 
 On standard output, the lines starting `SUMMARY` hold the run's figures: the resolved configuration,
-rows, bytes, batches and time per table, sets and lines per phase and per socket, the trap counts,
-the buying (the sets on sale, the share bought at least once, and the purchases per tenth of the
-sets, most bought first), the WAL written and each table's final size. The same configuration is
-written to the table `generator_run`. Each wiring flag is keyed by its own name, in underscores
-(`--hotspot-share` is `hotspot_share`, `--swing-a` is `swing_a`), with the value the run used:
-`upto_phase` is the number of the patch's phases when the flag is left out, and the hot socket is
-`hotspot`. So are the load's flags `copy_format`, `method`, `index_timing`, `indexes`, `unlogged`,
-`synchronous_commit`, `freeze` and `autovacuum_during_load`. Beside them are the definitions of the
-clock function (`function_clock`) and of each composite index, unique key and search index, keyed
-by its name (`composite_<name>`, `unique_<name>`, `search_<name>`).
+rows, bytes, batches and time per table, sets and lines per phase and per root and decade, the trap
+counts, the buying (the sets on sale, the share bought at least once, and the purchases per tenth
+of the sets, most bought first), the WAL written and each table's final size. The same
+configuration is written to the table `generator_run`. Each flag that decides the rows is keyed by
+its own name, in underscores (`--hotspot-share` is `hotspot_share`, `--swing-a` is `swing_a`),
+with the value the run used: `upto_phase` is the number of phases when the flag is left out, and
+`hotspot` the heaviest root and decade. So are the load's flags `copy_format`, `method`,
+`index_timing`, `indexes`, `unlogged`, `synchronous_commit`, `freeze` and `autovacuum_during_load`.
+Beside them are the definitions of the clock function (`function_clock`) and of each composite
+index, unique key and search index, keyed by its name (`composite_<name>`, `unique_<name>`,
+`search_<name>`).
 
 ## Object-oriented tables
 

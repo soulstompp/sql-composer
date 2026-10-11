@@ -145,7 +145,7 @@ pub const TABLES: [TableDef; 16] = [
     TableDef { name: "lego_builders", columns: "builder_id, name, street_id, house_number, latitude, longitude", typed: "builder_id integer NOT NULL, name varchar(255) NOT NULL, street_id integer NOT NULL, house_number integer NOT NULL, latitude double precision NOT NULL, longitude double precision NOT NULL", key: Some("builder_id") },
     TableDef { name: "lego_collection", columns: "builder_id, row_no, set_num, typed_set_num, typed_name", typed: "builder_id integer NOT NULL, row_no integer NOT NULL, set_num varchar(255) NOT NULL, typed_set_num varchar(255), typed_name varchar(255)", key: Some("builder_id, row_no") },
     TableDef { name: "lego_purchases", columns: "purchase_id, builder_id, row_no, store, ordered_at, ordered_local, delivered_at", typed: "purchase_id bigint NOT NULL, builder_id integer NOT NULL, row_no integer NOT NULL, store varchar(64) NOT NULL, ordered_at timestamptz NOT NULL, ordered_local varchar(32) NOT NULL, delivered_at timestamptz", key: Some("purchase_id") },
-    TableDef { name: "trap_manifest", columns: "trap, origin, tbl, row_key, phase, wave, socket, detail", typed: "trap varchar(8) NOT NULL, origin varchar(16) NOT NULL, tbl varchar(64) NOT NULL, row_key text NOT NULL, phase varchar(32) NOT NULL, wave bigint NOT NULL, socket varchar(32), detail text NOT NULL", key: None },
+    TableDef { name: "trap_manifest", columns: "trap, origin, tbl, row_key, phase, wave, root_decade, detail", typed: "trap varchar(8) NOT NULL, origin varchar(16) NOT NULL, tbl varchar(64) NOT NULL, row_key text NOT NULL, phase varchar(32) NOT NULL, wave bigint NOT NULL, root_decade varchar(32), detail text NOT NULL", key: None },
     TableDef { name: "generator_run", columns: "key, value", typed: "key text NOT NULL, value text NOT NULL", key: Some("key") },
 ];
 
@@ -498,7 +498,7 @@ pub struct LevelStat {
 #[derive(Default)]
 pub struct Metrics {
     pub levels: Mutex<BTreeMap<&'static str, LevelStat>>,
-    pub by_socket: Mutex<HashMap<String, (u64, u64)>>,
+    pub by_root_decade: Mutex<HashMap<String, (u64, u64)>>,
     pub by_phase: Mutex<BTreeMap<String, (u64, u64)>>,
     pub by_trap: Mutex<BTreeMap<String, u64>>,
     /// Purchases per set (see `World::on_sale`), over the builder waves written.
@@ -532,13 +532,13 @@ impl Metrics {
 
     pub fn absorb_counts(
         &self,
-        sockets: &HashMap<String, (u64, u64)>,
+        root_decades: &HashMap<String, (u64, u64)>,
         phases: &HashMap<String, (u64, u64)>,
         manifest: &[ManifestOut],
     ) {
         {
-            let mut m = self.by_socket.lock().expect("metrics lock");
-            for (k, v) in sockets {
+            let mut m = self.by_root_decade.lock().expect("metrics lock");
+            for (k, v) in root_decades {
                 let e = m.entry(k.clone()).or_default();
                 e.0 += v.0;
                 e.1 += v.1;

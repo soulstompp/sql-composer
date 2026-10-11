@@ -1,9 +1,9 @@
 //! The real LEGO catalogue the generator draws from: reference tables, sets, inventories, inventory lines
 //! and nesting, read once from the source schema, with the indices synthesis needs.
 //!
-//! A SOCKET is one root theme in one decade, the decades running from 1950–1959 to 2020–2029. The
-//! sockets are read from the reference tables, every root theme in every decade, whether or not a
-//! real set sits there.
+//! A ROOT AND DECADE is one root theme in one decade, the decades running from 1950–1959 to
+//! 2020–2029. They are read from the reference tables, every root theme in every decade, whether
+//! or not a real set sits there.
 //!
 //! No set is released in the years of `NO_RELEASE`: a real set of one of them is re-dated to the
 //! nearest year outside them. The years after the real catalogue (`MODELLED`) are modelled on its
@@ -366,7 +366,7 @@ pub fn intern(pool: &mut Vec<String>, index: &mut HashMap<String, u32>, s: &str)
 
 /// One root theme in one decade.
 #[derive(Clone, Debug)]
-pub struct Socket {
+pub struct RootDecade {
     pub root: i32,
     /// 0 for 1950–1959, up to `DECADES - 1` for 2020–2029.
     pub decade: u8,
@@ -376,7 +376,7 @@ pub struct Socket {
     pub modelled: Vec<(i32, u64)>,
 }
 
-impl Socket {
+impl RootDecade {
     pub fn label(&self) -> String {
         format!(
             "r{}/{}s",
@@ -385,13 +385,15 @@ impl Socket {
         )
     }
 
-    /// The socket's weight in the switchboard: its real sets and its modelled years' releases.
+    /// The root and decade's weight in placing the sets: its real sets and its modelled years'
+    /// releases.
     pub fn weight(&self) -> u64 {
         self.templates.len() as u64 + self.modelled.iter().map(|m| m.1).sum::<u64>()
     }
 }
 
-/// How often a cord joins two different sockets, counted on the real catalogue.
+/// How often a relationship joins sets of two different roots and decades, or of two different
+/// root themes, counted on the real catalogue.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Crossing {
     pub crossed: u32,
@@ -414,8 +416,8 @@ pub struct Real {
     pub root_of_theme: HashMap<i32, i32>,
     pub parent_of_theme: HashMap<i32, Option<i32>>,
     /// Every root × every decade, ordered by root theme id then decade.
-    pub sockets: Vec<Socket>,
-    pub set_socket: Vec<Option<u16>>,
+    pub root_decades: Vec<RootDecade>,
+    pub set_root_decade: Vec<Option<u16>>,
     pub set_by_num: HashMap<String, u32>,
     pub keys: HashSet<String>,
     /// Per real set, its inventories (indices into `cat.inventories`) by version.
@@ -505,12 +507,12 @@ impl Real {
             .map(|t| t.id)
             .collect();
         roots.sort_unstable();
-        let mut sockets = Vec::with_capacity(roots.len() * usize::from(DECADES));
-        let mut socket_of: HashMap<(i32, u8), u16> = HashMap::new();
+        let mut root_decades = Vec::with_capacity(roots.len() * usize::from(DECADES));
+        let mut root_decade_of: HashMap<(i32, u8), u16> = HashMap::new();
         for &root in &roots {
             for decade in 0..DECADES {
-                socket_of.insert((root, decade), sockets.len() as u16);
-                sockets.push(Socket {
+                root_decade_of.insert((root, decade), root_decades.len() as u16);
+                root_decades.push(RootDecade {
                     root,
                     decade,
                     templates: Vec::new(),
@@ -525,12 +527,12 @@ impl Real {
             .map(|(i, s)| (s.set_num.clone(), i as u32))
             .collect();
         let keys: HashSet<String> = cat.sets.iter().map(|s| s.set_num.clone()).collect();
-        let socket_for = |s: &SetRec| -> Option<u16> {
+        let root_decade_for = |s: &SetRec| -> Option<u16> {
             let root = root_of_theme.get(&s.theme_id?)?;
             let decade = decade_of(s.year?)?;
-            socket_of.get(&(*root, decade)).copied()
+            root_decade_of.get(&(*root, decade)).copied()
         };
-        let set_socket: Vec<Option<u16>> = cat.sets.iter().map(socket_for).collect();
+        let set_root_decade: Vec<Option<u16>> = cat.sets.iter().map(root_decade_for).collect();
 
         let mut inventories_of: Vec<Vec<u32>> = vec![Vec::new(); cat.sets.len()];
         for (k, inv) in cat.inventories.iter().enumerate() {
@@ -573,8 +575,8 @@ impl Real {
             let has_inventory = !inventories_of[i as usize].is_empty();
             if has_inventory {
                 templates.push(i);
-                if let Some(sock) = set_socket[i as usize] {
-                    sockets[usize::from(sock)].templates.push(i);
+                if let Some(rd) = set_root_decade[i as usize] {
+                    root_decades[usize::from(rd)].templates.push(i);
                 }
                 let first = cat.inventories[inventories_of[i as usize][0] as usize].id;
                 let has_lines = lines_of_inv.contains_key(&first);
@@ -583,7 +585,10 @@ impl Real {
                     Some(y) if y >= 2010 && has_lines => modern.push(i),
                     _ => {}
                 }
-                if text::has_non_ascii(&s.name) && has_lines && set_socket[i as usize].is_some() {
+                if text::has_non_ascii(&s.name)
+                    && has_lines
+                    && set_root_decade[i as usize].is_some()
+                {
                     non_ascii.push(i);
                 }
             }
@@ -637,13 +642,13 @@ impl Real {
             let share = pool.len() as f64 / pooled as f64;
             for &(y, releases) in &modelled {
                 let w = (releases * share).round() as u64;
-                let socket = decade_of(y).and_then(|d| socket_of.get(&(root, d)));
-                if let (true, Some(&s)) = (w > 0, socket) {
-                    sockets[usize::from(s)].modelled.push((y, w));
+                let root_decade = decade_of(y).and_then(|d| root_decade_of.get(&(root, d)));
+                if let (true, Some(&s)) = (w > 0, root_decade) {
+                    root_decades[usize::from(s)].modelled.push((y, w));
                 }
             }
         }
-        for s in &mut sockets {
+        for s in &mut root_decades {
             s.modelled.sort_unstable();
         }
 
@@ -651,7 +656,7 @@ impl Real {
         let max_inventory_id = cat.inventories.iter().map(|i| i.id).max().unwrap_or(0);
         let cafe_corner = set_by_num.get("10182-1").copied();
 
-        // Crossing rates of the three cords the catalogue files.
+        // Crossing rates of the three relationships the catalogue files.
         let mut nesting_crossing = Crossing::default();
         let mut nesting_root_crossing = Crossing::default();
         let inv_set: HashMap<i32, u32> = cat
@@ -665,12 +670,16 @@ impl Real {
             else {
                 continue;
             };
-            if let (Some(a), Some(b)) = (set_socket[pack as usize], set_socket[child as usize]) {
+            if let (Some(a), Some(b)) = (
+                set_root_decade[pack as usize],
+                set_root_decade[child as usize],
+            ) {
                 nesting_crossing.total += 1;
                 nesting_crossing.crossed += u32::from(a != b);
                 nesting_root_crossing.total += 1;
-                nesting_root_crossing.crossed +=
-                    u32::from(sockets[usize::from(a)].root != sockets[usize::from(b)].root);
+                nesting_root_crossing.crossed += u32::from(
+                    root_decades[usize::from(a)].root != root_decades[usize::from(b)].root,
+                );
             }
         }
         let mut by_base: BTreeMap<&str, Vec<(u32, u32)>> = BTreeMap::new();
@@ -684,9 +693,10 @@ impl Real {
             list.sort_unstable();
             if let Some(&(_, first)) = list.first() {
                 for &(_, other) in &list[1..] {
-                    if let (Some(a), Some(b)) =
-                        (set_socket[first as usize], set_socket[other as usize])
-                    {
+                    if let (Some(a), Some(b)) = (
+                        set_root_decade[first as usize],
+                        set_root_decade[other as usize],
+                    ) {
                         version_crossing.total += 1;
                         version_crossing.crossed += u32::from(a != b);
                     }
@@ -697,7 +707,9 @@ impl Real {
         for (i, s) in cat.sets.iter().enumerate() {
             if split_version(&s.set_num).is_none() {
                 if let Some(&dashed) = set_by_num.get(&format!("{}-1", s.set_num)) {
-                    if let (Some(a), Some(b)) = (set_socket[i], set_socket[dashed as usize]) {
+                    if let (Some(a), Some(b)) =
+                        (set_root_decade[i], set_root_decade[dashed as usize])
+                    {
                         twin_crossing.total += 1;
                         twin_crossing.crossed += u32::from(a != b);
                     }
@@ -709,8 +721,8 @@ impl Real {
             cat,
             root_of_theme,
             parent_of_theme,
-            sockets,
-            set_socket,
+            root_decades,
+            set_root_decade,
             set_by_num,
             keys,
             inventories_of,

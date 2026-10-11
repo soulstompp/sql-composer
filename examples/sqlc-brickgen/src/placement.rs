@@ -1,21 +1,23 @@
-//! The switchboard: which socket each synthesized set is plugged into.
+//! Where each synthesized set lands: the root theme and the decade it is drawn from.
 //!
-//! The sockets are the cells root theme × decade (see `catalogue`). A synthesized set takes its
-//! root theme, year and contents from a real set in its socket, or, in a modelled year, from a real
-//! set of its root theme; a socket with neither stays empty at every size.
+//! The roots and decades are every root theme in every decade (see `catalogue`). A synthesized set
+//! takes its root theme, year and contents from a real set in its root and decade, or, in a
+//! modelled year, from a real set of its root theme; a root and decade with neither stays empty at
+//! every size.
 //!
-//! The synthesized sets are split into PHASES, each wired to a PATTERN:
-//! - `natural`: the real catalogue's own weight on each socket;
-//! - `sorted`: one sweep through the sockets in key order (root theme, then decade);
-//! - `interleaved`: a walk that steps across the whole socket order within every wave;
-//! - `wavy`: a wave travelling over the ordered sockets, forward then back, over and over;
-//! - `hotspot`: one socket takes a fixed share of the sets;
-//! - `swing`: waves alternate between two groups of sockets;
+//! The synthesized sets are split into PHASES, each following a PATTERN:
+//! - `natural`: the real catalogue's own weight on each root and decade;
+//! - `sorted`: one sweep through the roots and decades in key order (root theme, then decade);
+//! - `interleaved`: a walk that steps across all the roots and decades within every wave;
+//! - `wavy`: a wave travelling over the ordered roots and decades, forward then back, over and
+//!   over;
+//! - `hotspot`: one root and decade takes a fixed share of the sets;
+//! - `swing`: waves alternate between two groups of roots and decades;
 //! - `paired`: packs written in pairs, whose child sets' release years hold as many pairs of
 //!   consecutive years and a different number of runs of three (see `paired`).
 //!
-//! Every pattern except `natural` keeps the real weights along the socket order, and changes
-//! only which wave a set arrives in. A WAVE is one chunk of the loader.
+//! Every pattern except `natural` keeps the real weights along the order of roots and decades, and
+//! changes only which wave a set arrives in. A WAVE is one chunk of the loader.
 
 use std::fmt;
 
@@ -30,7 +32,8 @@ pub enum Pattern {
     Wavy,
     Hotspot,
     Swing,
-    /// Packs in pairs (see `paired`), placed by their child sets' release years, not by a socket.
+    /// Packs in pairs (see `paired`), placed by their child sets' release years, not by a root and
+    /// decade.
     Paired,
 }
 
@@ -61,7 +64,7 @@ impl Pattern {
     }
 }
 
-/// A contiguous run of synthesized sets wired to one pattern.
+/// A contiguous run of synthesized sets following one pattern.
 #[derive(Clone, Debug)]
 pub struct Phase {
     /// From 1; phase 0 is the real catalogue.
@@ -78,41 +81,41 @@ impl Phase {
     }
 }
 
-/// The patterns' dials.
+/// The patterns' settings.
 #[derive(Clone, Debug)]
-pub struct Dials {
+pub struct PatternSettings {
     /// Waves in one sweep of the travelling wave, one way.
     pub wavy_period: u64,
-    /// Width of the travelling wave, as a share of the socket order.
+    /// Width of the travelling wave, as a share of the root and decade order.
     pub wavy_amplitude: f64,
     pub hotspot_share: f64,
-    /// The hot socket as `r<root>/<decade>s`; the heaviest socket when absent.
-    pub hotspot_socket: Option<String>,
+    /// The hot root and decade as `r<root>/<decade>s`; the heaviest root and decade when absent.
+    pub hotspot: Option<String>,
     pub swing_period: u64,
     /// Each group as `<root>,<root>,…@<from>-<to>`: root theme ids and a half-open year range.
     pub swing_a: String,
     pub swing_b: String,
 }
 
-/// A group of drawable sockets with the running total of their weights.
+/// A group of drawable roots and decades with the running total of their weights.
 #[derive(Clone, Debug)]
 struct Group {
-    sockets: Vec<u16>,
+    root_decades: Vec<u16>,
     cum: Vec<u64>,
 }
 
 impl Group {
-    fn new(real: &Real, sockets: impl Iterator<Item = u16>) -> Group {
+    fn new(real: &Real, root_decades: impl Iterator<Item = u16>) -> Group {
         let mut g = Group {
-            sockets: Vec::new(),
+            root_decades: Vec::new(),
             cum: Vec::new(),
         };
         let mut total = 0u64;
-        for s in sockets {
-            let w = real.sockets[usize::from(s)].weight();
+        for s in root_decades {
+            let w = real.root_decades[usize::from(s)].weight();
             if w > 0 {
                 total += w;
-                g.sockets.push(s);
+                g.root_decades.push(s);
                 g.cum.push(total);
             }
         }
@@ -123,25 +126,25 @@ impl Group {
         self.cum.last().copied().unwrap_or(0)
     }
 
-    /// The socket a draw `q` in `[0, 1)` lands on, by the group's weights, in socket order.
+    /// The root and decade a draw `q` in `[0, 1)` lands on, by the group's weights, in their order.
     fn at(&self, q: f64) -> u16 {
         let target = ((q.clamp(0.0, 1.0) * self.total() as f64) as u64).min(self.total() - 1);
         let k = self.cum.partition_point(|&c| c <= target);
-        self.sockets[k]
+        self.root_decades[k]
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct Switchboard {
+pub struct Placement {
     pub phases: Vec<Phase>,
-    pub dials: Dials,
+    pub pattern_settings: PatternSettings,
     pub chunk: u64,
     all: Group,
     hot: u16,
     swing: [Group; 2],
 }
 
-impl fmt::Display for Switchboard {
+impl fmt::Display for Placement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let parts: Vec<String> = self
             .phases
@@ -182,7 +185,7 @@ fn parse_group(real: &Real, spec: &str) -> Result<Vec<u16>, String> {
         })
         .collect::<Result<_, _>>()?;
     Ok(real
-        .sockets
+        .root_decades
         .iter()
         .enumerate()
         .filter(|(_, s)| {
@@ -193,29 +196,29 @@ fn parse_group(real: &Real, spec: &str) -> Result<Vec<u16>, String> {
         .collect())
 }
 
-impl Switchboard {
-    /// `patch` is `<pattern>:<percent>,…`, the percents summing to 100.
+impl Placement {
+    /// `spec` is `<pattern>:<percent>,…`, the percents summing to 100.
     pub fn new(
         real: &Real,
-        patch: &str,
-        dials: Dials,
+        spec: &str,
+        pattern_settings: PatternSettings,
         sets: u64,
         chunk: u64,
-    ) -> Result<Switchboard, String> {
+    ) -> Result<Placement, String> {
         let mut specs = Vec::new();
-        for item in patch.split(',') {
+        for item in spec.split(',') {
             let (name, pct) = item
                 .split_once(':')
-                .ok_or_else(|| format!("patch item `{item}`: want <pattern>:<percent>"))?;
+                .ok_or_else(|| format!("phase `{item}`: want <pattern>:<percent>"))?;
             let pct: u32 = pct
                 .trim()
                 .parse()
-                .map_err(|_| format!("patch item `{item}`: bad percent"))?;
+                .map_err(|_| format!("phase `{item}`: bad percent"))?;
             specs.push((Pattern::parse(name.trim())?, pct));
         }
         let sum: u32 = specs.iter().map(|s| s.1).sum();
         if sum != 100 {
-            return Err(format!("patch `{patch}`: percents sum to {sum}, not 100"));
+            return Err(format!("phases `{spec}`: percents sum to {sum}, not 100"));
         }
         let mut phases = Vec::new();
         let mut cum = 0u64;
@@ -231,41 +234,49 @@ impl Switchboard {
                 end,
             });
         }
-        let all = Group::new(real, 0..real.sockets.len() as u16);
+        let all = Group::new(real, 0..real.root_decades.len() as u16);
         if all.total() == 0 {
-            return Err("the source catalogue has no set with an inventory in any socket".into());
+            return Err(
+                "the source catalogue has no set with an inventory in any root and decade".into(),
+            );
         }
-        let hot = match &dials.hotspot_socket {
+        let hot = match &pattern_settings.hotspot {
             Some(label) => real
-                .sockets
+                .root_decades
                 .iter()
                 .position(|s| &s.label() == label)
                 .map(|i| i as u16)
-                .ok_or_else(|| format!("hotspot socket `{label}` is not a socket"))?,
+                .ok_or_else(|| format!("hotspot `{label}` is not a root theme in a decade"))?,
             None => {
                 let mut best = 0u16;
-                for (i, s) in real.sockets.iter().enumerate() {
-                    if s.weight() > real.sockets[usize::from(best)].weight() {
+                for (i, s) in real.root_decades.iter().enumerate() {
+                    if s.weight() > real.root_decades[usize::from(best)].weight() {
                         best = i as u16;
                     }
                 }
                 best
             }
         };
-        if real.sockets[usize::from(hot)].weight() == 0 {
-            return Err("the hotspot socket holds no real set".into());
+        if real.root_decades[usize::from(hot)].weight() == 0 {
+            return Err("the hotspot's root and decade holds no real set".into());
         }
         let swing = [
-            Group::new(real, parse_group(real, &dials.swing_a)?.into_iter()),
-            Group::new(real, parse_group(real, &dials.swing_b)?.into_iter()),
+            Group::new(
+                real,
+                parse_group(real, &pattern_settings.swing_a)?.into_iter(),
+            ),
+            Group::new(
+                real,
+                parse_group(real, &pattern_settings.swing_b)?.into_iter(),
+            ),
         ];
         let uses_swing = phases.iter().any(|p| p.pattern == Pattern::Swing);
         if uses_swing && (swing[0].total() == 0 || swing[1].total() == 0) {
             return Err("a swing group holds no real set".into());
         }
-        Ok(Switchboard {
+        Ok(Placement {
             phases,
-            dials,
+            pattern_settings,
             chunk: chunk.max(1),
             all,
             hot,
@@ -278,12 +289,12 @@ impl Switchboard {
         &self.phases[k.min(self.phases.len() - 1)]
     }
 
-    pub fn hot_socket(&self) -> u16 {
+    pub fn hot_root_decade(&self) -> u16 {
         self.hot
     }
 
-    /// The socket synthesized set `i` is plugged into.
-    pub fn socket_for(&self, i: u64, rng: &mut Rng) -> u16 {
+    /// The root and decade synthesized set `i` is plugged into.
+    pub fn root_decade_for(&self, i: u64, rng: &mut Rng) -> u16 {
         let ph = self.phase_of(i);
         let k = i - ph.start;
         let n = (ph.end - ph.start).max(1);
@@ -296,10 +307,10 @@ impl Switchboard {
                 self.all.at(((k + 1) as f64 * GOLDEN).fract())
             }
             Pattern::Wavy => {
-                let period = self.dials.wavy_period.max(1);
+                let period = self.pattern_settings.wavy_period.max(1);
                 let t = (wave % (2 * period)) as f64 / period as f64;
                 let centre = if t < 1.0 { t } else { 2.0 - t };
-                let mut q = centre + (rng.unit() - 0.5) * self.dials.wavy_amplitude;
+                let mut q = centre + (rng.unit() - 0.5) * self.pattern_settings.wavy_amplitude;
                 if q < 0.0 {
                     q = -q;
                 }
@@ -309,14 +320,15 @@ impl Switchboard {
                 self.all.at(q)
             }
             Pattern::Hotspot => {
-                if rng.unit() < self.dials.hotspot_share {
+                if rng.unit() < self.pattern_settings.hotspot_share {
                     self.hot
                 } else {
                     self.all.at(rng.unit())
                 }
             }
             Pattern::Swing => {
-                let g = &self.swing[((wave / self.dials.swing_period.max(1)) % 2) as usize];
+                let g =
+                    &self.swing[((wave / self.pattern_settings.swing_period.max(1)) % 2) as usize];
                 g.at(rng.unit())
             }
         }

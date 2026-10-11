@@ -1,8 +1,9 @@
 //! What is generated: the real catalogue passed through, the synthesized sets with their
 //! inventories, lines and nesting, and the builders with their collections and purchase logs.
 //!
-//! Every row is a function of the wiring (seed, sizes, patch, dials) and of the row's own index,
-//! except that a wave's rows are written in a shuffled physical order.
+//! Every row is a function of the configuration (seed, sizes, rates, traps, phases and their
+//! patterns' settings) and of the row's own index, except that a wave's rows are written in a
+//! shuffled physical order.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -10,15 +11,15 @@ use crate::calendar::{self, LocalTime, Shift, Zone};
 use crate::catalogue::{decade_of, is_release_year, split_version, Real, Theme, DECADE_LO};
 use crate::demand::{self, Alias, Spike, Timeline};
 use crate::paired::{self, YEAR_PAIRS};
+use crate::placement::{Pattern, Placement};
 use crate::places::Places;
 use crate::rng::{Purpose, Rng};
-use crate::switchboard::{Pattern, Switchboard};
 use crate::text;
 use crate::traps::{self, Population, Trap, DECLS};
 
-/// The generator's dials, besides the patch.
+/// How the generator synthesizes its rows, besides where each set lands (`Placement`).
 #[derive(Clone, Debug)]
-pub struct Wiring {
+pub struct Synthesis {
     pub seed: u64,
     pub sets: u64,
     pub chunk: u64,
@@ -28,13 +29,13 @@ pub struct Wiring {
     pub rerelease_ppm: u32,
     pub second_version_ppm: u32,
     pub recolour_ppm: u32,
-    /// A nesting cord joins a pack to a child of another root theme.
+    /// A nesting joins a pack to a child of another root theme.
     pub cross_nesting: f64,
-    /// A `-2` record sits in another socket than its `-1`.
+    /// A `-2` record sits in another root and decade than its `-1`.
     pub cross_versions: f64,
-    /// A bare record sits in another socket than its `-1`.
+    /// A bare record sits in another root and decade than its `-1`.
     pub cross_twins: f64,
-    /// A builder's collection row falls outside the builder's home socket.
+    /// A builder's collection row falls outside the builder's home root and decade.
     pub cross_collections: f64,
     /// The traps planted, of those `--traps` can leave out (`traps::can_leave_out`).
     pub traps: BTreeSet<Trap>,
@@ -153,7 +154,7 @@ pub struct ManifestOut {
     pub row_key: String,
     pub phase: String,
     pub wave: i64,
-    pub socket: Option<String>,
+    pub root_decade: Option<String>,
     pub detail: String,
 }
 
@@ -165,8 +166,8 @@ pub struct SetWave {
     pub lines: Vec<LineOut>,
     pub nests: Vec<NestOut>,
     pub manifest: Vec<ManifestOut>,
-    /// Per socket label (or `outside`): sets and lines.
-    pub by_socket: HashMap<String, (u64, u64)>,
+    /// Per root and decade label (or `outside`): sets and lines.
+    pub by_root_decade: HashMap<String, (u64, u64)>,
     /// Per phase label: sets and lines.
     pub by_phase: HashMap<String, (u64, u64)>,
 }
@@ -202,7 +203,7 @@ pub struct Head {
     pub year: Option<i32>,
     pub theme_id: Option<i32>,
     pub template: u32,
-    pub socket: Option<u16>,
+    pub root_decade: Option<u16>,
     pub trap: Option<(Trap, u64)>,
     pub paired: Option<PairedPack>,
     /// For a pack of the wavy pattern: the year its children's offsets are measured from, and
@@ -227,8 +228,8 @@ pub(crate) const STORES: [(&str, u32, u32, u32, bool); 5] = [
 
 pub struct World {
     pub real: Real,
-    pub wiring: Wiring,
-    pub board: Switchboard,
+    pub synthesis: Synthesis,
+    pub placement: Placement,
     /// The cities, postcodes and streets the builders live in.
     pub places: Places,
     pub set_traps: HashMap<u64, (Trap, u64)>,
@@ -256,11 +257,11 @@ pub struct World {
     /// Per set (a real set by its index, synthesized set `i` at the real sets' count plus `i`), its
     /// release year and root theme, when it is on sale by `TODAY`.
     on_sale: Vec<Option<(i32, Option<i32>)>>,
-    /// The sets on sale, which collection rows draw by demand: all of them, and per socket the ones
-    /// there.
+    /// The sets on sale, which collection rows draw by demand: all of them, and per root and decade
+    /// the ones there.
     pub buyable: Vec<u64>,
     demand_all: Alias,
-    demand_by_socket: HashMap<u16, (Vec<u64>, Alias)>,
+    demand_by_root_decade: HashMap<u16, (Vec<u64>, Alias)>,
     /// Per root theme, its spikes.
     spikes: HashMap<i32, Vec<Spike>>,
 }
@@ -302,21 +303,22 @@ pub fn inventory_ceiling(real: &Real, sets: u64) -> i64 {
 }
 
 impl World {
-    pub fn new(real: Real, wiring: Wiring, board: Switchboard) -> Result<World, String> {
-        let last_inventory = inventory_ceiling(&real, wiring.sets);
+    pub fn new(real: Real, synthesis: Synthesis, placement: Placement) -> Result<World, String> {
+        let last_inventory = inventory_ceiling(&real, synthesis.sets);
         if last_inventory > i64::from(i32::MAX) {
             return Err(format!(
                 "{} sets number their inventories up to {last_inventory}, past {}, the largest integer \
                  the tables hold",
-                wiring.sets,
+                synthesis.sets,
                 i32::MAX
             ));
         }
         let mut templates_by_year: HashMap<i32, Vec<u32>> = HashMap::new();
         for &t in &real.templates {
-            if let (Some(y), Some(_)) =
-                (real.cat.sets[t as usize].year, real.set_socket[t as usize])
-            {
+            if let (Some(y), Some(_)) = (
+                real.cat.sets[t as usize].year,
+                real.set_root_decade[t as usize],
+            ) {
                 templates_by_year.entry(y).or_default().push(t);
             }
         }
@@ -384,12 +386,12 @@ impl World {
                 pack_offsets.insert(t, offs);
             }
         }
-        let real_waves = (real.cat.sets.len() as u64).div_ceil(wiring.chunk.max(1));
-        let places = Places::new(wiring.seed, wiring.builders);
+        let real_waves = (real.cat.sets.len() as u64).div_ceil(synthesis.chunk.max(1));
+        let places = Places::new(synthesis.seed, synthesis.builders);
         let mut w = World {
             real,
-            wiring,
-            board,
+            synthesis,
+            placement,
             places,
             set_traps: HashMap::new(),
             row_traps: HashMap::new(),
@@ -407,7 +409,7 @@ impl World {
             on_sale: Vec::new(),
             buyable: Vec::new(),
             demand_all: Alias::default(),
-            demand_by_socket: HashMap::new(),
+            demand_by_root_decade: HashMap::new(),
             spikes: HashMap::new(),
         };
         w.assign_traps()?;
@@ -416,7 +418,7 @@ impl World {
     }
 
     pub fn collection_rows(&self) -> u64 {
-        self.wiring.builders * self.wiring.rows_per_builder
+        self.synthesis.builders * self.synthesis.rows_per_builder
     }
 
     /// The theme a set of trap B3 carries: none for an even ordinal, else a root theme the real
@@ -444,14 +446,14 @@ impl World {
     }
 
     fn assign_traps(&mut self) -> Result<(), String> {
-        let seed = self.wiring.seed;
+        let seed = self.synthesis.seed;
         for d in DECLS {
             let (population, map_is_sets) = match d.population {
-                Population::Sets => (self.wiring.sets, true),
+                Population::Sets => (self.synthesis.sets, true),
                 Population::CollectionRows => (self.collection_rows(), false),
                 Population::Natural | Population::Phase => continue,
             };
-            if !self.wiring.traps.contains(&d.trap) {
+            if !self.synthesis.traps.contains(&d.trap) {
                 self.planted.push((d.trap, 0));
                 continue;
             }
@@ -515,7 +517,7 @@ impl World {
                     && (trap != Trap::B5 || !self.real.modern.is_empty())
             }
             Population::CollectionRows => {
-                let zi = zone_index(k / self.wiring.rows_per_builder);
+                let zi = zone_index(k / self.synthesis.rows_per_builder);
                 match trap {
                     Trap::D1 => !self.folds[zi].is_empty(),
                     Trap::D2 => !self.gaps[zi].is_empty(),
@@ -531,16 +533,17 @@ impl World {
 
     /// The raw kind draw of synthesized set `i`: lettered, and whether it asks to be a re-release.
     fn kind_raw(&self, i: u64) -> (bool, bool) {
-        let mut r = Rng::stream(self.wiring.seed, Purpose::SetKind, i);
-        let lettered = r.chance_ppm(self.wiring.lettered_ppm);
-        let rerelease = !lettered && r.chance_ppm(self.wiring.rerelease_ppm);
+        let mut r = Rng::stream(self.synthesis.seed, Purpose::SetKind, i);
+        let lettered = r.chance_ppm(self.synthesis.lettered_ppm);
+        let rerelease = !lettered && r.chance_ppm(self.synthesis.rerelease_ppm);
         (lettered, rerelease)
     }
 
     /// Whether synthesized set `i` is a pack of the `paired` phase: its phase is `paired` and trap
     /// O5 is planted. Without O5, the phase's sets are drawn as `natural` draws them.
     fn in_paired(&self, i: u64) -> bool {
-        self.board.phase_of(i).pattern == Pattern::Paired && self.wiring.traps.contains(&Trap::O5)
+        self.placement.phase_of(i).pattern == Pattern::Paired
+            && self.synthesis.traps.contains(&Trap::O5)
     }
 
     /// Whether synthesized set `i` is the `-2` record of set `i - 1`'s number.
@@ -558,9 +561,9 @@ impl World {
     /// number whose bare form is itself a real record moves to the eight-digit range, so that no
     /// synthesized `-1` stands beside a real bare number.
     fn plain_number(&self, i: u64) -> (String, u32) {
-        let mut base = base_number(self.wiring.seed, i).to_string();
+        let mut base = base_number(self.synthesis.seed, i).to_string();
         if self.real.keys.contains(&base) {
-            base = (base_number(self.wiring.seed, i) + 9_000_000).to_string();
+            base = (base_number(self.synthesis.seed, i) + 9_000_000).to_string();
         }
         let mut v = 1;
         while self.real.keys.contains(&format!("{base}-{v}")) {
@@ -571,25 +574,29 @@ impl World {
 
     /// The synthesized set `i`, without its lines.
     pub fn head(&self, i: u64) -> Head {
-        let seed = self.wiring.seed;
+        let seed = self.synthesis.seed;
         let real = &self.real;
         let trap = self.set_traps.get(&i).copied();
         let (lettered, _) = self.kind_raw(i);
         let rerelease = self.is_rerelease(i);
-        let phase = self.board.phase_of(i);
+        let phase = self.placement.phase_of(i);
 
         if self.in_paired(i) {
             return self.paired_head(i);
         }
 
-        // The socket, and the real set this one is modelled on.
-        let mut rs = Rng::stream(seed, Purpose::SetSocket, i);
-        let mut cord = Rng::stream(seed, Purpose::SetCord, i);
-        let stays = rerelease && cord.unit() >= self.wiring.cross_versions;
-        let previous = if stays { self.head(i - 1).socket } else { None };
-        let socket = match previous {
-            Some(prev) if real.sockets[usize::from(prev)].weight() > 0 => prev,
-            _ => self.board.socket_for(i, &mut rs),
+        // The root and decade, and the real set this one is modelled on.
+        let mut rs = Rng::stream(seed, Purpose::SetRootDecade, i);
+        let mut crossing = Rng::stream(seed, Purpose::SetRelationship, i);
+        let stays = rerelease && crossing.unit() >= self.synthesis.cross_versions;
+        let previous = if stays {
+            self.head(i - 1).root_decade
+        } else {
+            None
+        };
+        let root_decade = match previous {
+            Some(prev) if real.root_decades[usize::from(prev)].weight() > 0 => prev,
+            _ => self.placement.root_decade_for(i, &mut rs),
         };
         let mut rt = Rng::stream(seed, Purpose::SetTemplate, i);
         let real_year = |t: u32| (t, real.cat.sets[t as usize].year);
@@ -599,7 +606,7 @@ impl World {
             Some((Trap::K4, _)) => real_year(*rt.pick(&real.non_ascii)),
             // An inventory filed under the box number must hold lines, or the misfiling loses nothing.
             Some((Trap::K8, _)) => {
-                let mut pick = self.slot(socket, &mut rt);
+                let mut pick = self.slot(root_decade, &mut rt);
                 for _ in 0..64 {
                     if real.first_inventory(pick.0).is_some_and(|inv| {
                         real.lines(inv.id)
@@ -608,11 +615,11 @@ impl World {
                     }) {
                         break;
                     }
-                    pick = self.slot(socket, &mut rt);
+                    pick = self.slot(root_decade, &mut rt);
                 }
                 pick
             }
-            _ => self.slot(socket, &mut rt),
+            _ => self.slot(root_decade, &mut rt),
         };
         let t = &real.cat.sets[template as usize];
 
@@ -710,8 +717,8 @@ impl World {
             && self.pack_offsets.contains_key(&template)
         {
             if let Some(y) = slot_year {
-                let period = self.board.dials.wavy_period.max(1);
-                let wave = (i - phase.start) / self.board.chunk;
+                let period = self.placement.pattern_settings.wavy_period.max(1);
+                let wave = (i - phase.start) / self.placement.chunk;
                 let pos = (wave % (2 * period)) as f64 / period as f64;
                 let (centre, mirrored) = if pos < 1.0 {
                     (pos, false)
@@ -732,16 +739,16 @@ impl World {
             }
         }
 
-        let socket_final = match (
+        let root_decade_final = match (
             theme_id.and_then(|th| real.root_of_theme.get(&th)),
             year.and_then(decade_of),
         ) {
             (Some(&root), Some(dec)) => real
-                .sockets
+                .root_decades
                 .iter()
                 .position(|s| s.root == root && s.decade == dec)
                 .map(|p| p as u16),
-            _ => real.set_socket[template as usize],
+            _ => real.set_root_decade[template as usize],
         };
 
         Head {
@@ -751,7 +758,7 @@ impl World {
             year,
             theme_id,
             template,
-            socket: socket_final,
+            root_decade: root_decade_final,
             trap,
             paired: None,
             wavy_shift,
@@ -759,16 +766,16 @@ impl World {
     }
 
     fn paired_head(&self, i: u64) -> Head {
-        let seed = self.wiring.seed;
+        let seed = self.synthesis.seed;
         let real = &self.real;
-        let phase = self.board.phase_of(i);
+        let phase = self.placement.phase_of(i);
         let k = i - phase.start;
         let pair = k / 2;
         let first = k.is_multiple_of(2);
         let (a, b) = YEAR_PAIRS[(pair % 3) as usize];
         let (pattern, partner) = if first { (a, b) } else { (b, a) };
-        let wave = (pair * 2) / self.board.chunk;
-        let period = self.board.dials.wavy_period.max(1);
+        let wave = (pair * 2) / self.placement.chunk;
+        let period = self.placement.pattern_settings.wavy_period.max(1);
         let pos = (wave % (2 * period)) as f64 / period as f64;
         let (centre, mirrored) = if pos < 1.0 {
             (pos, false)
@@ -802,12 +809,12 @@ impl World {
         };
         let t = &real.cat.sets[template as usize];
         let (base, v) = self.plain_number(i);
-        let socket = match (
+        let root_decade = match (
             t.theme_id.and_then(|th| real.root_of_theme.get(&th)),
             decade_of(pack_year),
         ) {
             (Some(&root), Some(dec)) => real
-                .sockets
+                .root_decades
                 .iter()
                 .position(|s| s.root == root && s.decade == dec)
                 .map(|p| p as u16),
@@ -820,7 +827,7 @@ impl World {
             year: Some(pack_year),
             theme_id: t.theme_id,
             template,
-            socket,
+            root_decade,
             trap: None,
             paired: Some(PairedPack {
                 pair,
@@ -834,11 +841,11 @@ impl World {
         }
     }
 
-    /// The real set a synthesized set in `socket` is modelled on, and the year it takes, drawn by the
-    /// socket's weight: one of the socket's real sets with its own year, or one of its modelled years
-    /// with a real set of its root theme from the years they are modelled on.
-    fn slot(&self, socket: u16, r: &mut Rng) -> (u32, Option<i32>) {
-        let s = &self.real.sockets[usize::from(socket)];
+    /// The real set a synthesized set in `root_decade` is modelled on, and the year it takes, drawn
+    /// by the root and decade's weight: one of its real sets with its own year, or one of its
+    /// modelled years with a real set of its root theme from the years they are modelled on.
+    fn slot(&self, root_decade: u16, r: &mut Rng) -> (u32, Option<i32>) {
+        let s = &self.real.root_decades[usize::from(root_decade)];
         let mut k = r.below(s.weight());
         if let Some(&t) = s.templates.get(k as usize) {
             return (t, self.real.cat.sets[t as usize].year);
@@ -850,11 +857,11 @@ impl World {
             }
             k -= w;
         }
-        unreachable!("a draw below the socket's weight names a slot")
+        unreachable!("a draw below the root and decade's weight names a slot")
     }
 
     /// The real child set of a given year: from the pack's root theme
-    /// unless the nesting cord crosses.
+    /// unless the nesting crosses.
     fn child_for(
         &self,
         root: Option<i32>,
@@ -862,7 +869,7 @@ impl World {
         r: &mut Rng,
         taken: &HashSet<u32>,
     ) -> Option<u32> {
-        let crosses = r.unit() < self.wiring.cross_nesting;
+        let crosses = r.unit() < self.synthesis.cross_nesting;
         let own = root.and_then(|rt| self.children_by_root_year.get(&(rt, year)));
         let pool = match own {
             Some(v) if !crosses && !v.is_empty() => v,
@@ -877,18 +884,18 @@ impl World {
         pool.iter().copied().find(|c| !taken.contains(c))
     }
 
-    fn socket_label(&self, s: Option<u16>) -> Option<String> {
-        s.map(|s| self.real.sockets[usize::from(s)].label())
+    fn root_decade_label(&self, s: Option<u16>) -> Option<String> {
+        s.map(|s| self.real.root_decades[usize::from(s)].label())
     }
 
     fn phase_label(&self, i: u64) -> String {
-        self.board.phase_of(i).label()
+        self.placement.phase_of(i).label()
     }
 
     /// The real catalogue's wave `w`: real sets `w * chunk ..`, passed through unchanged.
     pub fn real_wave(&self, w: u64) -> SetWave {
         let real = &self.real;
-        let chunk = self.wiring.chunk.max(1) as usize;
+        let chunk = self.synthesis.chunk.max(1) as usize;
         let lo = (w as usize) * chunk;
         let hi = (lo + chunk).min(real.cat.sets.len());
         let mut out = SetWave::default();
@@ -902,8 +909,10 @@ impl World {
                 theme_id: set.theme_id,
                 num_parts: set.num_parts,
             });
-            let sock = real.set_socket[s];
-            let label = self.socket_label(sock).unwrap_or_else(|| "outside".into());
+            let rd = real.set_root_decade[s];
+            let label = self
+                .root_decade_label(rd)
+                .unwrap_or_else(|| "outside".into());
             let mut lines = 0u64;
             for &k in &real.inventories_of[s] {
                 let inv = &real.cat.inventories[k as usize];
@@ -926,7 +935,7 @@ impl World {
                         Origin::Real,
                         "real",
                         wave_no,
-                        &sock,
+                        &rd,
                         l.inventory_id,
                         l.part,
                         l.color_id,
@@ -941,26 +950,19 @@ impl World {
                     });
                 }
             }
-            let e = out.by_socket.entry(label).or_default();
+            let e = out.by_root_decade.entry(label).or_default();
             e.0 += 1;
             e.1 += lines;
             let p = out.by_phase.entry("0:real".into()).or_default();
             p.0 += 1;
             p.1 += lines;
-            self.classify_set(
-                &mut out.manifest,
-                Origin::Real,
-                "0:real",
-                wave_no,
-                sock,
-                set,
-            );
+            self.classify_set(&mut out.manifest, Origin::Real, "0:real", wave_no, rd, set);
         }
         // Real traps a set carries by itself: a bare number beside its -1, a part count of -1, a
         // name after a Latin-1 round trip.
         for s in lo..hi {
             let set = &real.cat.sets[s];
-            let sock = self.socket_label(real.set_socket[s]);
+            let rd = self.root_decade_label(real.set_root_decade[s]);
             if split_version(&set.set_num).is_none()
                 && real.keys.contains(&format!("{}-1", set.set_num))
             {
@@ -971,7 +973,7 @@ impl World {
                     &set.set_num,
                     "0:real",
                     wave_no,
-                    sock.clone(),
+                    rd.clone(),
                     format!("twin of {}-1", set.set_num),
                 ));
             }
@@ -983,7 +985,7 @@ impl World {
                     &set.set_num,
                     "0:real",
                     wave_no,
-                    sock.clone(),
+                    rd.clone(),
                     String::new(),
                 ));
             }
@@ -995,7 +997,7 @@ impl World {
                     &set.set_num,
                     "0:real",
                     wave_no,
-                    sock.clone(),
+                    rd.clone(),
                     String::new(),
                 ));
             }
@@ -1007,12 +1009,12 @@ impl World {
                     &set.set_num,
                     "0:real",
                     wave_no,
-                    sock,
+                    rd,
                     format!("released in {}", real.redated[k].1),
                 ));
             }
         }
-        let mut r = Rng::stream(self.wiring.seed, Purpose::Shuffle, w);
+        let mut r = Rng::stream(self.synthesis.seed, Purpose::Shuffle, w);
         r.shuffle(&mut out.sets);
         r.shuffle(&mut out.inventories);
         r.shuffle(&mut out.lines);
@@ -1026,10 +1028,10 @@ impl World {
         origin: Origin,
         phase: &str,
         wave: i64,
-        sock: Option<u16>,
+        rd: Option<u16>,
         set: &crate::catalogue::SetRec,
     ) {
-        let label = self.socket_label(sock);
+        let label = self.root_decade_label(rd);
         if let Some(y) = set.year {
             if y > DECADE_LO && y < 2030 && y % 10 == 0 {
                 m.push(manifest(
@@ -1067,7 +1069,7 @@ impl World {
         origin: Origin,
         phase: &str,
         wave: i64,
-        sock: &Option<u16>,
+        rd: &Option<u16>,
         inv: i32,
         part: u32,
         colour: i32,
@@ -1083,7 +1085,7 @@ impl World {
                 &key(),
                 phase,
                 wave,
-                self.socket_label(*sock),
+                self.root_decade_label(*rd),
                 format!("colour {colour}"),
             ));
         }
@@ -1095,7 +1097,7 @@ impl World {
                 &key(),
                 phase,
                 wave,
-                self.socket_label(*sock),
+                self.root_decade_label(*rd),
                 String::new(),
             ));
         }
@@ -1107,7 +1109,7 @@ impl World {
                 &key(),
                 phase,
                 wave,
-                self.socket_label(*sock),
+                self.root_decade_label(*rd),
                 String::new(),
             ));
         }
@@ -1116,7 +1118,7 @@ impl World {
     /// Synthesized sets `lo..hi` as one wave.
     pub fn set_wave(&self, w: u64, lo: u64, hi: u64) -> SetWave {
         let real = &self.real;
-        let seed = self.wiring.seed;
+        let seed = self.synthesis.seed;
         let mut out = SetWave::default();
         let wave_no = w as i64;
         let inv_base = inventory_base(real);
@@ -1124,7 +1126,7 @@ impl World {
         for i in lo..hi {
             let h = self.head(i);
             let phase = self.phase_label(i);
-            let sock_label = self.socket_label(h.socket);
+            let rd_label = self.root_decade_label(h.root_decade);
             let t = h.template;
             let tinv = real.first_inventory(t);
             let inv_id = (inv_base + 2 * i as i64) as i32;
@@ -1140,7 +1142,7 @@ impl World {
                         continue;
                     }
                     let mut colour = l.color_id;
-                    if rl.chance_ppm(self.wiring.recolour_ppm) {
+                    if rl.chance_ppm(self.synthesis.recolour_ppm) {
                         if let Some(cs) = real.part_colours.get(&l.part) {
                             colour = *rl.pick(cs);
                         }
@@ -1171,7 +1173,7 @@ impl World {
                 .and_then(|th| real.root_of_theme.get(&th))
                 .copied();
             let mut nests: Vec<NestOut> = Vec::new();
-            let mut rc = Rng::stream(seed, Purpose::SetCord, i ^ 0x5eed);
+            let mut rc = Rng::stream(seed, Purpose::SetRelationship, i ^ 0x5eed);
             let mut taken: HashSet<u32> = HashSet::new();
             if let Some(p) = &h.paired {
                 for offset in paired::placed(&p.pattern, p.mirrored) {
@@ -1251,7 +1253,7 @@ impl World {
                     Origin::Synthetic,
                     &phase,
                     wave_no,
-                    &h.socket,
+                    &h.root_decade,
                     inv_id,
                     p,
                     c,
@@ -1262,7 +1264,7 @@ impl World {
             // A second, revised inventory: one line's count corrected.
             if h.trap.is_none()
                 && h.paired.is_none()
-                && rl.chance_ppm(self.wiring.second_version_ppm)
+                && rl.chance_ppm(self.synthesis.second_version_ppm)
                 && !merged.is_empty()
             {
                 let v2 = inv_id + 1;
@@ -1286,7 +1288,7 @@ impl World {
                         Origin::Synthetic,
                         &phase,
                         wave_no,
-                        &h.socket,
+                        &h.root_decade,
                         v2,
                         p,
                         c,
@@ -1297,7 +1299,7 @@ impl World {
             }
             out.nests.extend(nests.iter().cloned());
 
-            let label = sock_label.clone().unwrap_or_else(|| "outside".into());
+            let label = rd_label.clone().unwrap_or_else(|| "outside".into());
             let placed_label = match (
                 h.theme_id.and_then(|th| real.root_of_theme.get(&th)),
                 h.year.and_then(decade_of),
@@ -1305,7 +1307,7 @@ impl World {
                 (Some(_), Some(_)) => label,
                 _ => "outside".into(),
             };
-            let e = out.by_socket.entry(placed_label).or_default();
+            let e = out.by_root_decade.entry(placed_label).or_default();
             e.0 += 1;
             e.1 += lines;
             let p = out.by_phase.entry(phase.clone()).or_default();
@@ -1324,7 +1326,7 @@ impl World {
                 Origin::Synthetic,
                 &phase,
                 wave_no,
-                h.socket,
+                h.root_decade,
                 &rec,
             );
             if let Some((trap, k)) = h.trap {
@@ -1343,7 +1345,7 @@ impl World {
                     &key,
                     &phase,
                     wave_no,
-                    sock_label.clone(),
+                    rd_label.clone(),
                     detail,
                 ));
                 if trap == Trap::B3 && h.theme_id.is_none() {
@@ -1354,7 +1356,7 @@ impl World {
                         &h.set_num,
                         &phase,
                         wave_no,
-                        sock_label.clone(),
+                        rd_label.clone(),
                         "theme_id is NULL".into(),
                     ));
                 }
@@ -1367,7 +1369,7 @@ impl World {
                     &h.set_num,
                     &phase,
                     wave_no,
-                    sock_label.clone(),
+                    rd_label.clone(),
                     format!(
                         "pair={} member={} offsets={} partner_offsets={} window={} mirrored={}",
                         p.pair,
@@ -1384,8 +1386,8 @@ impl World {
             // set's inventory is filed under it, with the set's own theme and part count.
             let twin = match h.trap {
                 Some((Trap::K7, k)) => {
-                    let mut rtw = Rng::stream(seed, Purpose::SetCord, i ^ 0x7719);
-                    let crosses = rtw.unit() < self.wiring.cross_twins;
+                    let mut rtw = Rng::stream(seed, Purpose::SetRelationship, i ^ 0x7719);
+                    let crosses = rtw.unit() < self.synthesis.cross_twins;
                     let theme = match (crosses, h.theme_id) {
                         (false, Some(th)) => real
                             .parent_of_theme
@@ -1422,28 +1424,28 @@ impl World {
                     num_parts: twin_parts,
                 };
                 // The bare record is a set row of its own: it carries the traps its year and
-                // number carry, and counts in its phase and socket.
+                // number carry, and counts in its phase and root and decade.
                 self.classify_set(
                     &mut out.manifest,
                     Origin::Synthetic,
                     &phase,
                     wave_no,
-                    h.socket,
+                    h.root_decade,
                     &twin,
                 );
-                let twin_socket = match (
+                let twin_root_decade = match (
                     twin.theme_id.and_then(|th| real.root_of_theme.get(&th)),
                     twin.year.and_then(decade_of),
                 ) {
                     (Some(&root), Some(dec)) => real
-                        .sockets
+                        .root_decades
                         .iter()
                         .find(|s| s.root == root && s.decade == dec)
                         .map(|s| s.label()),
                     _ => None,
                 };
-                out.by_socket
-                    .entry(twin_socket.unwrap_or_else(|| "outside".into()))
+                out.by_root_decade
+                    .entry(twin_root_decade.unwrap_or_else(|| "outside".into()))
                     .or_default()
                     .0 += 1;
                 out.by_phase.entry(phase.clone()).or_default().0 += 1;
@@ -1461,7 +1463,7 @@ impl World {
                     &h.base,
                     &phase,
                     wave_no,
-                    sock_label,
+                    rd_label,
                     detail,
                 ));
             }
@@ -1475,10 +1477,10 @@ impl World {
 
     /// Which sets are on sale, their demand, and the tables collection rows draw them from.
     fn build_demand(&mut self) {
-        let seed = self.wiring.seed;
+        let seed = self.synthesis.seed;
         let today = calendar::days_from_civil(TODAY.0, TODAY.1, TODAY.2);
         let first_day = calendar::days_from_civil(FIRST_PURCHASE_YEAR, 1, 1);
-        let mut roots: Vec<i32> = self.real.sockets.iter().map(|s| s.root).collect();
+        let mut roots: Vec<i32> = self.real.root_decades.iter().map(|s| s.root).collect();
         roots.dedup();
         self.spikes = roots
             .into_iter()
@@ -1496,18 +1498,18 @@ impl World {
                 let twin = split_version(&set.set_num).is_none()
                     && real.keys.contains(&format!("{}-1", set.set_num));
                 let year = set.year.filter(|_| !twin);
-                (year, root(set.theme_id), real.set_socket[s])
+                (year, root(set.theme_id), real.set_root_decade[s])
             });
-            let synthetic = (0..self.wiring.sets).map(|i| {
+            let synthetic = (0..self.synthesis.sets).map(|i| {
                 let h = self.head(i);
-                (h.year, root(h.theme_id), h.socket)
+                (h.year, root(h.theme_id), h.root_decade)
             });
             reals.chain(synthetic).collect()
         };
         let mut on_sale = Vec::with_capacity(placed.len());
         let (mut buyable, mut weights) = (Vec::new(), Vec::new());
-        let mut by_socket: HashMap<u16, (Vec<u64>, Vec<f64>)> = HashMap::new();
-        for (set, &(year, root, socket)) in placed.iter().enumerate() {
+        let mut by_root_decade: HashMap<u16, (Vec<u64>, Vec<f64>)> = HashMap::new();
+        for (set, &(year, root, root_decade)) in placed.iter().enumerate() {
             let set = set as u64;
             let spikes = root
                 .and_then(|r| self.spikes.get(&r))
@@ -1523,8 +1525,8 @@ impl World {
             let w = demand::popularity(seed, set) * t.amount();
             buyable.push(set);
             weights.push(w);
-            if let Some(s) = socket {
-                let e = by_socket.entry(s).or_default();
+            if let Some(s) = root_decade {
+                let e = by_root_decade.entry(s).or_default();
                 e.0.push(set);
                 e.1.push(w);
             }
@@ -1532,7 +1534,7 @@ impl World {
         self.on_sale = on_sale;
         self.demand_all = Alias::new(&weights);
         self.buyable = buyable;
-        self.demand_by_socket = by_socket
+        self.demand_by_root_decade = by_root_decade
             .into_iter()
             .map(|(s, (sets, w))| (s, (sets, Alias::new(&w))))
             .collect();
@@ -1545,7 +1547,7 @@ impl World {
             .and_then(|r| self.spikes.get(&r))
             .map_or(&[][..], Vec::as_slice);
         demand::timeline(
-            self.wiring.seed,
+            self.synthesis.seed,
             set,
             year,
             spikes,
@@ -1566,11 +1568,11 @@ impl World {
         }
     }
 
-    /// A set a builder buys, drawn by demand: from the builder's home socket unless the collection
-    /// cord crosses.
+    /// A set a builder buys, drawn by demand: from the builder's home root and decade unless the
+    /// collection row crosses.
     fn bought_set(&self, home: u16, r: &mut Rng) -> u64 {
-        let crosses = r.unit() < self.wiring.cross_collections;
-        match (crosses, self.demand_by_socket.get(&home)) {
+        let crosses = r.unit() < self.synthesis.cross_collections;
+        match (crosses, self.demand_by_root_decade.get(&home)) {
             (false, Some((sets, alias))) => sets[alias.draw(r)],
             _ => self.buyable[self.demand_all.draw(r)],
         }
@@ -1579,14 +1581,14 @@ impl World {
     /// Builders `lo..hi` as one wave.
     pub fn builder_wave(&self, w: u64, lo: u64, hi: u64) -> BuilderWave {
         let real = &self.real;
-        let seed = self.wiring.seed;
-        let rpb = self.wiring.rows_per_builder;
+        let seed = self.synthesis.seed;
+        let rpb = self.synthesis.rows_per_builder;
         let mut out = BuilderWave::default();
         let wave_no = w as i64;
         for j in lo..hi {
             let zone = zone_of(j);
             let mut rb = Rng::stream(seed, Purpose::Builder, j);
-            let home = self.board_natural(&mut rb);
+            let home = self.natural_root_decade(&mut rb);
             let builder_id = (j + 1) as i32;
             let name = format!(
                 "{} {}.",
@@ -1840,9 +1842,9 @@ impl World {
         m
     }
 
-    fn board_natural(&self, r: &mut Rng) -> u16 {
+    fn natural_root_decade(&self, r: &mut Rng) -> u16 {
         let t = *r.pick(&self.real.templates);
-        self.real.set_socket[t as usize].unwrap_or(0)
+        self.real.set_root_decade[t as usize].unwrap_or(0)
     }
 
     /// The purchases of one collection row: store, when ordered, the wall clock the builder wrote,
@@ -2148,7 +2150,7 @@ fn manifest(
     key: &str,
     phase: &str,
     wave: i64,
-    socket: Option<String>,
+    root_decade: Option<String>,
     detail: String,
 ) -> ManifestOut {
     ManifestOut {
@@ -2158,7 +2160,7 @@ fn manifest(
         row_key: key.to_string(),
         phase: phase.to_string(),
         wave,
-        socket,
+        root_decade,
         detail,
     }
 }

@@ -6,6 +6,7 @@
 - **Stores without the brand word** — Purchases are made at a "brand store", an "online shop" and a "brand house", beside the "toy shop" and the "second-hand market"; 0.0.1 named the first three for the brand. Each takes the same share of purchases and keeps the same hours, but the rows differ from 0.0.1's.
 - **sqlx 0.9** — The generator runs on sqlx 0.9, and a URL that names no user still connects as the operating system's user. It needs Rust 1.94, as sqlx 0.9 does.
 - **Loading the real catalogue** — The README loads it into `public` of a new database with `curl` and `psql`, from the sample it has always come from, before the generator is given that database. 0.0.1's README sent you to the example's `setup`, which is gone.
+- **Where each set lands, in plain words** — A synthesized set lands in a root and decade, which 0.0.1 called a socket. `--patch` is `--phases`, and `--hotspot-socket` is `--hotspot`, the key `generator_run` already gave it. In `generator_run`, `patch` is `phases`, `sockets` is `root_decades`, `sockets_with_real_sets` is `root_decades_with_real_sets` and `measured_nesting_socket_crossing` is `measured_nesting_root_decade_crossing`; `trap_manifest`'s column `socket` is `root_decade`, and the `SUMMARY` lines per socket are `root_decade` lines. The README's *The switchboard* is *Where each set lands*.
 
 ## 0.0.1
 

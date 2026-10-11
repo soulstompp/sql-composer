@@ -57,7 +57,7 @@ pub enum Population {
     CollectionRows,
     /// Not planted: it arises from the real catalogue or from other traps' rows.
     Natural,
-    /// Written by a phase of the patch, not at a rate.
+    /// Written by a phase, not at a rate.
     Phase,
 }
 
@@ -122,8 +122,8 @@ pub fn decl(trap: Trap) -> &'static Decl {
         .expect("every trap is declared")
 }
 
-/// Whether `--traps` can leave the trap out: it is planted at a rate, or written by a phase of the
-/// patch. The others arise from the real catalogue, from other traps' rows or from how every wave
+/// Whether `--traps` can leave the trap out: it is planted at a rate, or written by a phase. The
+/// others arise from the real catalogue, from other traps' rows or from how every wave
 /// is written, and are there whatever `--traps` says.
 pub fn can_leave_out(trap: Trap) -> bool {
     !matches!(decl(trap).population, Population::Natural)

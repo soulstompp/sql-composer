@@ -268,7 +268,7 @@ impl Enc {
         self.str(&r.row_key);
         self.str(&r.phase);
         self.i64(r.wave);
-        self.opt_str(r.socket.as_deref());
+        self.opt_str(r.root_decade.as_deref());
         self.str(&r.detail);
         self.end();
     }

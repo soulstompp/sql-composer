@@ -14,9 +14,9 @@ mod load;
 mod oo;
 mod paired;
 mod partitions;
+mod placement;
 mod places;
 mod rng;
-mod switchboard;
 mod text;
 mod traps;
 mod unnest;
@@ -38,9 +38,9 @@ use tracing_subscriber::EnvFilter;
 use crate::catalogue::{Catalogue, Real};
 use crate::encode::{Enc, Format};
 use crate::load::{IndexTiming, Method, Metrics, Settings};
-use crate::switchboard::{Dials, Switchboard};
+use crate::placement::{PatternSettings, Placement};
 use crate::traps::DECLS;
-use crate::world::{builders_for, Wiring, World, PURCHASES_PER_SET, ROWS_PER_BUILDER};
+use crate::world::{builders_for, Synthesis, World, PURCHASES_PER_SET, ROWS_PER_BUILDER};
 
 #[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
 enum Size {
@@ -101,8 +101,7 @@ struct Cli {
     /// Synthesized sets; overrides `--size`.
     #[arg(long)]
     sets: Option<u64>,
-    /// The seed every random draw starts from: the same seed, `--sets` and wiring flags give the
-    /// same rows.
+    /// The seed every random draw starts from: the same seed and the same flags give the same rows.
     #[arg(long, default_value_t = 20_260_926)]
     seed: u64,
     /// Root records (sets; builders) per wave.
@@ -111,23 +110,24 @@ struct Cli {
     /// Waves written at once, each on its own session.
     #[arg(long, default_value_t = 4)]
     jobs: u32,
-    /// The phases of the switchboard, as `<pattern>:<percent>,…`.
+    /// The phases the synthesized sets are split into, each following a pattern, as
+    /// `<pattern>:<percent>,…`.
     #[arg(long, default_value = "natural:90,wavy:9,paired:1")]
-    patch: String,
-    /// Waves the `wavy` pattern's travelling wave takes to cross the socket order one way; it then
-    /// comes back over as many.
+    phases: String,
+    /// Waves the `wavy` pattern's travelling wave takes to cross the ordered roots and decades one
+    /// way; it then comes back over as many.
     #[arg(long, default_value_t = 16)]
     wavy_period: u64,
-    /// Width of the `wavy` pattern's travelling wave, as a share of the socket order.
+    /// Width of the `wavy` pattern's travelling wave, as a share of the ordered roots and decades.
     #[arg(long, default_value_t = 0.25)]
     wavy_amplitude: f64,
-    /// Share of a `hotspot` phase's sets that go to the hot socket; the rest are drawn as
+    /// Share of a `hotspot` phase's sets that go to the hot root and decade; the rest are drawn as
     /// `natural` draws them.
     #[arg(long, default_value_t = 0.9)]
     hotspot_share: f64,
-    /// The hot socket as `r<root>/<decade>s`; the heaviest socket when absent.
+    /// The hot root theme and decade, as `r<root>/<decade>s`; the heaviest when absent.
     #[arg(long)]
-    hotspot_socket: Option<String>,
+    hotspot: Option<String>,
     /// Waves a `swing` phase draws from one group before it turns to the other.
     #[arg(long, default_value_t = 4)]
     swing_period: u64,
@@ -140,16 +140,18 @@ struct Cli {
         default_value = "158,482,246,561,264,269,272,570,579,577@2010-2030"
     )]
     swing_b: String,
-    /// Nesting cords that cross to another root theme; the real catalogue's rate when absent.
+    /// Nestings that cross to another root theme; the real catalogue's rate when absent.
     #[arg(long)]
     cross_nesting: Option<f64>,
-    /// `-2` records in another socket than their `-1`; the real catalogue's rate when absent.
+    /// `-2` records in another root and decade than their `-1`; the real catalogue's rate when
+    /// absent.
     #[arg(long)]
     cross_versions: Option<f64>,
-    /// Bare records in another socket than their `-1`; the real catalogue's rate when absent.
+    /// Bare records in another root and decade than their `-1`; the real catalogue's rate when
+    /// absent.
     #[arg(long)]
     cross_twins: Option<f64>,
-    /// Collection rows outside the builder's home socket.
+    /// Collection rows outside the builder's home root and decade.
     #[arg(long, default_value_t = 0.6)]
     cross_collections: f64,
     /// Synthesized sets per million whose number leads with a letter prefix, one of the real
@@ -254,8 +256,8 @@ struct Cli {
     /// How many partitions each copied table is split into; 8 when absent.
     #[arg(long)]
     partitions: Option<u32>,
-    /// Write the synthesized sets of the patch's phases up to this one only (0: the real catalogue
-    /// alone). The wiring is unchanged, so each prefix is exactly the start of the full run.
+    /// Write the synthesized sets of the phases up to this one only (0: the real catalogue alone).
+    /// Every other flag keeps its meaning, so each prefix is exactly the start of the full run.
     #[arg(long)]
     upto_phase: Option<usize>,
 }
@@ -466,7 +468,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
 
     let builders = builders_for(sets + real.cat.sets.len() as u64);
-    let wiring = Wiring {
+    let synthesis = Synthesis {
         seed: cli.seed,
         sets,
         chunk: cli.chunk.max(1),
@@ -484,38 +486,38 @@ async fn run(cli: Cli) -> Result<(), String> {
         cross_collections: cli.cross_collections,
         traps: traps::parse_list(&cli.traps)?,
     };
-    let dials = Dials {
+    let pattern_settings = PatternSettings {
         wavy_period: cli.wavy_period,
         wavy_amplitude: cli.wavy_amplitude,
         hotspot_share: cli.hotspot_share,
-        hotspot_socket: cli.hotspot_socket.clone(),
+        hotspot: cli.hotspot.clone(),
         swing_period: cli.swing_period,
         swing_a: cli.swing_a.clone(),
         swing_b: cli.swing_b.clone(),
     };
-    let board = Switchboard::new(&real, &cli.patch, dials, sets, wiring.chunk)?;
-    let world = Arc::new(World::new(real, wiring.clone(), board)?);
+    let placement = Placement::new(&real, &cli.phases, pattern_settings, sets, synthesis.chunk)?;
+    let world = Arc::new(World::new(real, synthesis.clone(), placement)?);
 
-    // The banner: the resolved wiring and the server it runs against.
+    // The banner: the resolved configuration and the server it runs against.
     let server = load::server_settings(&pool).await;
     let mut run_rows: Vec<(String, String)> = vec![
         ("size".into(), cli.size.name()),
         ("sets".into(), sets.to_string()),
         ("seed".into(), cli.seed.to_string()),
-        ("chunk".into(), wiring.chunk.to_string()),
+        ("chunk".into(), synthesis.chunk.to_string()),
         ("jobs".into(), cli.jobs.to_string()),
-        ("patch".into(), world.board.to_string()),
+        ("phases".into(), world.placement.to_string()),
         (
             "upto_phase".into(),
             cli.upto_phase
-                .unwrap_or(world.board.phases.len())
+                .unwrap_or(world.placement.phases.len())
                 .to_string(),
         ),
         ("wavy_period".into(), cli.wavy_period.to_string()),
         ("wavy_amplitude".into(), cli.wavy_amplitude.to_string()),
         (
             "hotspot".into(),
-            world.real.sockets[usize::from(world.board.hot_socket())].label(),
+            world.real.root_decades[usize::from(world.placement.hot_root_decade())].label(),
         ),
         ("hotspot_share".into(), cli.hotspot_share.to_string()),
         ("swing_period".into(), cli.swing_period.to_string()),
@@ -523,12 +525,15 @@ async fn run(cli: Cli) -> Result<(), String> {
         ("swing_b".into(), cli.swing_b.clone()),
         ("real_sets".into(), world.real.cat.sets.len().to_string()),
         ("real_lines".into(), world.real.cat.lines.len().to_string()),
-        ("sockets".into(), world.real.sockets.len().to_string()),
         (
-            "sockets_with_real_sets".into(),
+            "root_decades".into(),
+            world.real.root_decades.len().to_string(),
+        ),
+        (
+            "root_decades_with_real_sets".into(),
             world
                 .real
-                .sockets
+                .root_decades
                 .iter()
                 .filter(|s| !s.templates.is_empty())
                 .count()
@@ -582,16 +587,19 @@ async fn run(cli: Cli) -> Result<(), String> {
         ("rows_per_builder".into(), ROWS_PER_BUILDER.to_string()),
         (
             "cross_nesting".into(),
-            format!("{:.4}", wiring.cross_nesting),
+            format!("{:.4}", synthesis.cross_nesting),
         ),
         (
             "cross_versions".into(),
-            format!("{:.4}", wiring.cross_versions),
+            format!("{:.4}", synthesis.cross_versions),
         ),
-        ("cross_twins".into(), format!("{:.4}", wiring.cross_twins)),
+        (
+            "cross_twins".into(),
+            format!("{:.4}", synthesis.cross_twins),
+        ),
         (
             "cross_collections".into(),
-            format!("{:.4}", wiring.cross_collections),
+            format!("{:.4}", synthesis.cross_collections),
         ),
         (
             "measured_nesting_root_crossing".into(),
@@ -601,7 +609,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             ),
         ),
         (
-            "measured_nesting_socket_crossing".into(),
+            "measured_nesting_root_decade_crossing".into(),
             format!(
                 "{}/{}",
                 world.real.nesting_crossing.crossed, world.real.nesting_crossing.total
@@ -628,7 +636,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             cli.second_version_ppm.to_string(),
         ),
         ("recolour_ppm".into(), cli.recolour_ppm.to_string()),
-        ("traps".into(), traps::list_name(&wiring.traps)),
+        ("traps".into(), traps::list_name(&synthesis.traps)),
         ("copy_format".into(), settings.format.name().into()),
         ("method".into(), cli.method.clone()),
         ("index_timing".into(), cli.index_timing.clone()),
@@ -675,7 +683,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     for (k, v) in &server {
         run_rows.push((format!("server_{k}"), v.clone()));
     }
-    info!("resolved wiring and server:");
+    info!("resolved configuration and server:");
     for (k, v) in &run_rows {
         info!("  {k} = {v}");
         summary(&[&"config", k, v]);
@@ -690,20 +698,20 @@ async fn run(cli: Cli) -> Result<(), String> {
         None => sets,
         Some(0) => 0,
         Some(n) => world
-            .board
+            .placement
             .phases
             .get(n - 1)
             .map(|p| p.end)
             .ok_or_else(|| {
                 format!(
-                    "--upto-phase {n}: the patch has {} phases",
-                    world.board.phases.len()
+                    "--upto-phase {n}: `--phases` has {} phases",
+                    world.placement.phases.len()
                 )
             })?,
     };
     summary(&[&"config", &"sets_written", &sets_written]);
-    let synthetic_waves = sets_written.div_ceil(wiring.chunk);
-    let builder_waves = builders.div_ceil(wiring.chunk);
+    let synthetic_waves = sets_written.div_ceil(synthesis.chunk);
+    let builder_waves = builders.div_ceil(synthesis.chunk);
     let total_waves = real_waves + synthetic_waves + builder_waves;
     let wal_before = if cli.dry_run {
         None
@@ -778,7 +786,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         let dry = cli.dry_run;
         workers.push(tokio::spawn(async move {
             let mut enc = Enc::new(settings.format);
-            let chunk = world.wiring.chunk;
+            let chunk = world.synthesis.chunk;
             loop {
                 if metrics.failed.load(Ordering::SeqCst) {
                     return Ok(());
@@ -791,21 +799,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                     let w = world.clone();
                     let wave = tokio::task::spawn_blocking(move || w.real_wave(k)).await.expect("generation");
                     let label = format!("real/{k}");
-                    let span = info_span!("wave", wave = %label, worker, origin = "real", phase = "0:real", sockets = wave.by_socket.len());
+                    let span = info_span!("wave", wave = %label, worker, origin = "real", phase = "0:real", root_decades = wave.by_root_decade.len());
                     write_set_wave(&world, &pool, &settings, &mut enc, &metrics, label, wave, dry).instrument(span).await
                 } else if k < real_waves + synthetic_waves {
                     let s = k - real_waves;
                     let (lo, hi) = (s * chunk, ((s + 1) * chunk).min(sets_written));
                     let w = world.clone();
                     let wave = tokio::task::spawn_blocking(move || w.set_wave(k, lo, hi)).await.expect("generation");
-                    let phase = world.board.phase_of(lo).label();
+                    let phase = world.placement.phase_of(lo).label();
                     let label = format!("sets/{s}");
-                    let mix = socket_mix(&wave.by_socket);
-                    let span = info_span!("wave", wave = %label, worker, origin = "synthetic", phase = %phase, sets = hi - lo, sockets = %mix);
+                    let mix = root_decade_mix(&wave.by_root_decade);
+                    let span = info_span!("wave", wave = %label, worker, origin = "synthetic", phase = %phase, sets = hi - lo, root_decades = %mix);
                     write_set_wave(&world, &pool, &settings, &mut enc, &metrics, label, wave, dry).instrument(span).await
                 } else {
                     let b = k - real_waves - synthetic_waves;
-                    let (lo, hi) = (b * chunk, ((b + 1) * chunk).min(world.wiring.builders));
+                    let (lo, hi) = (b * chunk, ((b + 1) * chunk).min(world.synthesis.builders));
                     let w = world.clone();
                     let wave = tokio::task::spawn_blocking(move || w.builder_wave(k, lo, hi)).await.expect("generation");
                     let label = format!("builders/{b}");
@@ -916,16 +924,16 @@ async fn run(cli: Cli) -> Result<(), String> {
     for (p, (s, l)) in metrics.by_phase.lock().expect("metrics lock").iter() {
         summary(&[&"phase", p, s, l]);
     }
-    let mut sockets: Vec<(String, (u64, u64))> = metrics
-        .by_socket
+    let mut root_decades: Vec<(String, (u64, u64))> = metrics
+        .by_root_decade
         .lock()
         .expect("metrics lock")
         .iter()
         .map(|(k, v)| (k.clone(), *v))
         .collect();
-    sockets.sort();
-    for (label, (s, l)) in &sockets {
-        summary(&[&"socket", label, s, l]);
+    root_decades.sort();
+    for (label, (s, l)) in &root_decades {
+        summary(&[&"root_decade", label, s, l]);
     }
     for d in DECLS {
         let planted = world
@@ -999,15 +1007,15 @@ async fn run(cli: Cli) -> Result<(), String> {
     Ok(())
 }
 
-fn socket_mix(by_socket: &std::collections::HashMap<String, (u64, u64)>) -> String {
-    let mut v: Vec<(&String, &(u64, u64))> = by_socket.iter().collect();
+fn root_decade_mix(by_root_decade: &std::collections::HashMap<String, (u64, u64)>) -> String {
+    let mut v: Vec<(&String, &(u64, u64))> = by_root_decade.iter().collect();
     v.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(b.0)));
     let top: Vec<String> = v
         .iter()
         .take(3)
         .map(|(k, c)| format!("{k}:{}", c.0))
         .collect();
-    format!("{} sockets; {}", v.len(), top.join(" "))
+    format!("{} roots and decades; {}", v.len(), top.join(" "))
 }
 
 fn dry_encode(b: &load::Batches<'_>, enc: &mut Enc, metrics: &Metrics) {
@@ -1048,7 +1056,7 @@ async fn write_set_wave(
         load::write_wave(pool, settings, &batches, enc, metrics).await
     };
     if r.is_ok() {
-        metrics.absorb_counts(&wave.by_socket, &wave.by_phase, &wave.manifest);
+        metrics.absorb_counts(&wave.by_root_decade, &wave.by_phase, &wave.manifest);
         info!(
             sets = wave.sets.len(),
             inventories = wave.inventories.len(),

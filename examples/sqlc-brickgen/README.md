@@ -1,15 +1,20 @@
 # sqlc-brickgen
 
-`sqlc-brickgen` builds a large LEGO-style catalogue from a real one and loads it into Postgres,
-together with builders, their collections and their purchase logs. LEGO® is a trademark of the LEGO
-Group, which does not sponsor, authorise or endorse this project.
+`sqlc-brickgen` builds a large catalogue of bricks, sets and themes from a real one and loads it
+into PostgreSQL, together with builders, their collections and their purchase logs. LEGO® is a
+trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
 
 The real catalogue is the eight `lego_*` tables (colours, themes, part categories, parts, sets,
-inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them once,
-writes them through unchanged but for the release years of the years with no release (see Years)
-and a few root themes (see Traps), and adds synthesized sets modelled on them: each synthesized set
-takes its root theme, year and contents from a real set, with its own set number and name. The
-generated tables go to `--schema`, which is dropped and recreated on every run.
+inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them
+once, writes them through unchanged but for the release years of the years with no release (see
+Years) and a few root themes (see Traps), and adds synthesized sets modelled on them: each
+synthesized set takes its root theme, year and contents from a real set, with its own set number
+and name. The generated tables go to `--schema`, which is dropped and recreated on every run.
+
+sql-composer's [brick example](https://github.com/soulstompp/sql-composer/tree/HEAD/examples/brick)
+runs its composed queries on the database the generator builds. The warren-surveyor
+[kit](https://github.com/soulstompp/warren-surveyor/tree/HEAD/kit) times its questions on it, and
+there the surveyor reads the DBA's indexes the generator builds (see Loading).
 
 ## Running
 
@@ -44,7 +49,8 @@ The database URL can also come from `SQLC_BRICKGEN_DATABASE_URL`, never from the
 `DATABASE_URL`: the target schema is dropped and recreated, so the database has to be named on
 purpose.
 
-Both programs speak TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
+The generator speaks TLS (rustls), as a managed PostgreSQL server usually requires. Ask for it in
+the URL:
 `?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
 also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
 names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
@@ -52,7 +58,8 @@ offer it.
 
 ## Data and licences
 
-The generator is under the MIT licence, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE).
+The generator is under the MIT licence, copyright Kenneth Allen Flegal: see
+[LICENSE](https://github.com/soulstompp/sql-composer/blob/HEAD/examples/sqlc-brickgen/LICENSE).
 
 It ships none of the real catalogue: the `curl` in *Running* downloads it to your
 machine. It is Neon's sample dump, `lego.sql` in
@@ -83,22 +90,23 @@ transaction, parent table first:
 A wave that fails rolls back whole, so the tables hold exactly the waves that committed. `--jobs`
 waves are written at once, each on its own session.
 
-Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for the
-text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are built
-after the load (`--index-timing before` builds them first). So are the composite indexes a DBA gives
-the tables for the joins between them, each led by the columns the join into its table fixes, with
-the columns the queries read in `INCLUDE` (`COMPOSITE_INDEXES` in `src/load.rs`). Two of them are
-expression indexes on the purchases, by month and then instant, one within each collection row and
-one across all of them. They read the instant through `<schema>.clock(timestamptz)`, a function
-declared `IMMUTABLE` that gives an instant as the wall clock of UTC, which makes an instant's month
-indexable; the load creates it before the indexes, and a query that means to use them reads time
-through the same function. Beside the composite indexes the load builds the unique keys the tables
-declare besides their primary keys (`UNIQUE_KEYS` in `src/load.rs`): the postcodes' `code`, and the
-natural keys of the inventory lines, `(inventory_id, part_num, color_id, is_spare)`, and of the
-nested sets, `(inventory_id, set_num)`, which have no primary key. It also builds what a DBA adds
-for the searches the other indexes do not serve (`SEARCHES`): a `text_pattern_ops` key for a
-postcode by its prefix, a GiST on the builders' homes by distance (`ll_to_earth`), and GINs on part
-names by their words and on part and set names by trigrams.
+Each batch is sent with `COPY … FROM STDIN` in binary format by default (`--copy-format text` for
+the text format, `--method unnest` for `INSERT … SELECT FROM UNNEST` batches). The primary keys are
+built after the load (`--index-timing before` builds them first). So are the composite indexes a
+DBA gives the tables for the joins between them, each led by the columns the join into its table
+fixes, with the columns the queries read in `INCLUDE` (`COMPOSITE_INDEXES` in `src/load.rs`). Two
+of them are expression indexes on the purchases, by month and then instant, one within each
+collection row and one across all of them. They read the instant through
+`<schema>.clock(timestamptz)`, a function declared `IMMUTABLE` that gives an instant as the wall
+clock of UTC, which makes an instant's month indexable; the load creates it before the indexes, and
+a query that means to use them reads time through the same function. Beside the composite indexes
+the load builds the unique keys the tables declare besides their primary keys (`UNIQUE_KEYS` in
+`src/load.rs`): the postcodes' `code`, and the natural keys of the inventory lines,
+`(inventory_id, part_num, color_id, is_spare)`, and of the nested sets, `(inventory_id, set_num)`,
+which have no primary key. It also builds what a DBA adds for the searches the other indexes do
+not serve (`SEARCHES`): a `text_pattern_ops` key for a postcode by its prefix, a GiST on the
+builders' homes by distance (`ll_to_earth`), and GINs on part names by their words and on part and
+set names by trigrams.
 
 The generator writes its own lines and nested sets merged on those keys, and the real catalogue's
 unchanged. So when the keys or partitions are asked for, it first checks that the real catalogue
@@ -123,12 +131,12 @@ In a schema of their own they are found by none of these, and the builders' home
 build. On those versions, give `--extension-schema public`. From PostgreSQL 16 on, `earthdistance`
 names `cube` by its schema, and any schema serves.
 
-Autovacuum is off on the tables during the load and back on afterwards (`--autovacuum-during-load on`
-leaves it on); then the tables are vacuumed and analysed. `--vacuum off` leaves out the vacuum, and
-`--analyze off` the statistics; with both off the tables are left as loaded. The object-oriented
-classes and the partitioned copies are vacuumed and analysed whatever they say. `--unlogged`
-creates unlogged tables for scratch runs, and `--synchronous-commit` sets the loading sessions'
-commit mode (off by default).
+Autovacuum is off on the tables during the load and back on afterwards
+(`--autovacuum-during-load on` leaves it on); then the tables are vacuumed and analysed.
+`--vacuum off` leaves out the vacuum, and `--analyze off` the statistics; with both off the tables
+are left as loaded. The object-oriented classes and the partitioned copies are vacuumed and
+analysed whatever they say. `--unlogged` creates unlogged tables for scratch runs, and
+`--synchronous-commit` sets the loading sessions' commit mode (off by default).
 
 ## Years
 

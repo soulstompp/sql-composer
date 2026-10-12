@@ -635,15 +635,22 @@ difference. Then it goes on into more of PostgreSQL's SQL: window functions, `DI
 `LATERAL`, `ROLLUP`, `percentile_cont`, `generate_series`, an anti-join, division, `array_agg`,
 `jsonb` and `MERGE`.
 
-It searches with the indexes the generator builds: by the words of a name (`websearch_to_tsquery`,
+It searches with the indexes sqlc-brickgen builds: by the words of a name (`websearch_to_tsquery`,
 ranked with `ts_rank` and marked with `ts_headline`), by a regular expression (`~*`, and
 `regexp_match` to read a brick's size out of its name), and by place (`earth_box` and
 `earth_distance` for a radius, `<->` for the nearest first). Each search fills a slot as any filter
 does: words and patterns take `@filter`, and the builders near a city or in a postcode district take
 `@area`.
 
-It ends at `laws`: every promise the example makes, each checked against a second spelling of the
-same answer in direct SQL, and two run on mock tables. `laws` exits 1 if any of them fails.
+It checks the catalogue itself with a roster of checks, and their rows in one union, which
+`--respell` writes to read the roster once. It ends at `laws`: every promise the example makes,
+each checked against a second spelling of the same answer in direct SQL, and three run on mock
+tables. `fit` holds every composed file to the plan PostgreSQL makes for it, and runs none. Each
+exits 1 if any of its laws fails.
+
+[process-modulus][process-modulus] composes the queries that check its documents the same way: a
+larger tree, with a walk of its own, composed with `--with`. Its walk in European Portuguese
+composes the English tree's relations, found through `--search-path`.
 
 ## Reference
 
@@ -1116,4 +1123,5 @@ project.
 [examples/brick/sqlc/checks/all.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/all.sqlc
 [examples/brick/sqlc/checks/sets_without_lines.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/sets_without_lines.sqlc
 [examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
+[process-modulus]: https://github.com/soulstompp/process-modulus
 [LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE

@@ -187,7 +187,8 @@ respelled statement to the rows the statement as composed returns, by `laws::hol
 
 ### Coding Style
 
-The code follows the [Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md),
+The code follows the
+[Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md),
 enforced by [rustfmt](https://github.com/rust-lang/rustfmt).
 To run rustfmt tests locally:
 

@@ -16,8 +16,8 @@ runs its composed queries on the database the generator builds. The warren-surve
 [kit](https://github.com/soulstompp/warren-surveyor/tree/HEAD/kit) times its questions on it, and
 there the surveyor reads the DBA's indexes the generator builds (see Loading). The warren-snail
 [bench](https://github.com/soulstompp/warren-snail/tree/HEAD/bench) writes the purchases and the
-collection into a database in one file, declared by the generator's own composite indexes, and
-times it against PostgreSQL on the same tables.
+collection into a database in one file, declared by the DBA's indexes the generator builds on
+them, and times it against PostgreSQL on the same tables.
 
 ## Running
 

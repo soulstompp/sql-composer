@@ -1208,7 +1208,7 @@ cargo run -p brick-example -- --database-url postgres://user@host/dbname migrate
 SQLC_BRICK_DATABASE_URL=postgres://user@host/dbname cargo run -p brick-example -- all
 ```
 
-The example speaks TLS (rustls), as a managed Postgres usually requires. Ask for it in the URL:
+The example speaks TLS (rustls), as a managed PostgreSQL usually requires. Ask for it in the URL:
 `?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
 also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
 names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not

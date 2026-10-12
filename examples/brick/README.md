@@ -7,8 +7,10 @@ subcommand composes the template, prints the statement it composes to, and runs 
 The walk starts at a set's lines and builds on them. They are listed, written into tables, and
 narrowed by a filter passed in. Then the themes the sets belong to are gathered into scopes, the
 scopes combined as sets and counted, and each relation named once. The walk goes on into more of
-PostgreSQL's SQL, and into searches that read the indexes the catalogue is built with. It ends at
-`laws`, which checks what the steps promise against a second spelling of the same answer.
+PostgreSQL's SQL, into searches that read the indexes the catalogue is built with, and into a
+roster of checks on the catalogue itself. It ends at `laws`, which checks what the steps promise
+against a second spelling of the same answer, and `fit`, which checks each composed statement
+against the plan PostgreSQL makes for it.
 
 The catalogue is the database sqlc-brickgen builds from a real one: sets, their inventories and
 parts, colours and themes, and the builders who buy the sets.
@@ -1041,6 +1043,77 @@ theme. The builders of a postcode pattern anchored on a prefix are the builders 
 begins with it. `nearest` prints the five builders nearest the city, with their distance in metres,
 as near as any.
 
+The last step checks the catalogue itself.
+
+## Checking the catalogue
+
+### 18. A roster of checks
+
+Which lines name a part the parts catalogue does not hold, and which sets have no line at all? Each
+question is a check, and each check's rule is written once, in a roster.
+[`checks/roster.sqlc`][checks/roster.sqlc] lists the checks as `VALUES`, one row per check:
+
+```sql
+# The example's checks, one row per check, keyed by slug: the slug each check is cut to, and the
+# rule it finds rows against. Each check reads its rule from here, so a rule is written once.
+SELECT * FROM (VALUES
+    ('lines_uncatalogued', 'a line whose part is not in the parts catalogue'),
+    ('sets_without_lines', 'a set with no inventory line')
+) AS roster (slug, rule)
+```
+
+A check reads the roster, cut to its own row by its slug, and left joins `ON true` the rows it
+finds. [`checks/lines_uncatalogued.sqlc`][checks/lines_uncatalogued.sqlc]:
+
+```sql
+# The inventory lines whose part is not in the parts catalogue, under the roster's row for this
+# check: one row per line, with the set its inventory belongs to, and the line itself in detail.
+# Where every line's part is in the catalogue, the roster's row comes back alone.
+SELECT r.rule, p.set_num, p.detail
+FROM (
+    :compose(checks/roster.sqlc)
+) r
+LEFT JOIN (
+    SELECT
+        i.set_num,
+        format('inventory %s, version %s: part %s in colour %s%s',
+            ip.inventory_id, i.version, ip.part_num, ip.color_id,
+            CASE WHEN ip.is_spare THEN ', a spare' ELSE '' END) AS detail
+    FROM lego_inventory_parts ip
+    JOIN lego_inventories i ON i.id = ip.inventory_id
+    WHERE NOT EXISTS (SELECT 1 FROM lego_parts pt WHERE pt.part_num = ip.part_num)
+) p ON true
+WHERE r.slug = 'lines_uncatalogued'
+```
+
+Its rows are the lines step 1 marks `uncatalogued`. `ON true` joins the check's own row of the
+roster to each line it finds, so each row carries the check's rule. Where the check finds nothing,
+the `LEFT JOIN` keeps the roster's row alone, with no `set_num` and no `detail`. A check that finds
+nothing still returns its rule, and is never missing from the rows.
+[`checks/sets_without_lines.sqlc`][checks/sets_without_lines.sqlc] is the same shape over the sets:
+a set whose inventories hold no line, and a set with no inventory.
+[`checks/all.sqlc`][checks/all.sqlc] is their union:
+
+```sql
+# Every check's findings, one row each, and a row with no set_num for a check that finds nothing.
+:union(ALL checks/lines_uncatalogued.sqlc, checks/sets_without_lines.sqlc)
+```
+
+It composes to [`.sql/checks/all.sql`][.sql/checks/all.sql]. Each check is wrapped as the union of
+step 6 wraps its sources, and each holds the roster's body, so the statement reads the roster once
+for each check. `ALL` writes `UNION ALL`, which keeps every row of every check and looks for no
+duplicate to remove. `cargo sqlc compose --respell` writes the union to read the roster once, as
+sql-composer's page shows in [*A union of arms that read one roster*][--respell].
+
+```sh
+cargo run -p brick-example -- checks
+```
+
+It prints each check's rule, how many rows it found, and the first ten, by set. A check that finds
+nothing prints its rule alone. The lines whose part the catalogue does not hold are the real
+catalogue's own, which the generator writes whatever `--traps` says. The union's rows are the two
+checks' rows, each as often as its check returns it, and respelled it returns the same rows.
+
 The walk ends at the laws.
 
 ## The laws
@@ -1082,13 +1155,47 @@ step with the values above, then the laws.
 | 17 | the builders in `^SW` are those whose postcode begins with it | `LIKE 'SW%'` |
 | 17 | the 5 builders nearest London are as near as any | every home measured with `earth_distance`, the nearest five |
 | 17 | what the builders near London bought adds up to their purchases | the purchases of the builders within the haversine distance |
+| 18 | each check's rows are what it finds, under its rule from the roster | the lines a `LEFT JOIN` to the parts finds no part for, and every set less the sets with a line (`EXCEPT`), each with how many it examined |
+| 18 | `checks/all.sqlc` is every check's rows, each as often | each check composed alone |
+| 18 | `checks/all.sqlc` respelled is one union of an arm for each check, and returns its rows as composed | the rows as composed, each as often |
 | 12 | on mock rows, 1991 between releases in 1990 and 1992 is listed with 0 | the rows `1990, 1`, `1991, 0`, `1992, 2` |
 | 13 | on mock rows, the division keeps the owner of every set, and nobody for an empty scope | the one owner of both sets, and nobody |
+| 18 | on mock rows, a check that finds nothing returns its roster row alone, composed and respelled | the rule alone and the two sets with no line; the respelling with its arms joined inner, which loses the rule |
 
-The last two run their template on mock tables: rows of the example's own, in place of the
+The last three run their template on mock tables: rows of the example's own, in place of the
 catalogue's. The calendar gets a year with no release between two that have one. The division gets
 a theme with a theme below it, a builder who owns both its sets, one who owns one of them, and a
-theme with no sets.
+theme with no sets. The checks get a set with a line whose part is in the catalogue, a set whose
+inventory holds no line, and a set with no inventory.
+
+## The plans
+
+```sh
+cargo run -p brick-example -- fit
+```
+
+`fit` composes every template as `cargo sqlc compose` does, plain and with `--with`, and plans each
+composed file with `EXPLAIN (COSTS OFF)`, as a generic plan when it binds a value. It runs none of
+them, inside a read-only transaction it rolls back, and exits 1 if a law fails, or if a seed meant
+to break one does not.
+
+- **Each table, and each list of `VALUES`, is scanned as often as the file's text writes it.**
+  `cargo sqlc tree` says how many copies of each template the file holds. Each copy reads the
+  tables its template's own text names, and the lists of `VALUES` it writes, each list told apart
+  by its columns. A plan that scans a table more or fewer times fails, unless the planner's reason
+  is named: a `LEFT JOIN` it removed, because nothing above the join reads the table and the join
+  matches at most one of its rows. Each file `--respell` rewrites is held to its plan by its own
+  text: respelled, `checks/all.sql` scans the roster's list once and the list of its arms' numbers
+  once, where as composed it scans the roster's list once for each check.
+- **Each spelling `cargo sqlc spell` can write leaves the plan as it was.** Each is written in its
+  template's place, and every composed file that holds the template, plain and with `--with`, is
+  planned again. The plan is the one the file has as written, or differs only in how it is
+  printed: the same conditions in another order, or a relation read by another name. Join orders
+  are laid out and never written.
+- **The laws fail where they must.** Each is checked on seeds, and fails on every one: a copy of a
+  template the text holds and the tree does not count, a copy the tree counts and the text does
+  not hold, the respelled text of `checks/all.sql` held to the plan of the file as composed, and
+  joins written in other orders.
 
 ## Connecting
 
@@ -1176,6 +1283,11 @@ sqlc/
     theme_set_parts.sqlc           # A theme scope's lines (for the count)
     technic_moulds.sqlc            # @scope = technic (for intersect and except)
     city_moulds.sqlc               # @scope = city (for intersect and except)
+  checks/
+    roster.sqlc                    # VALUES: the checks, each with its slug and rule
+    lines_uncatalogued.sqlc        # The lines whose part is not in the parts catalogue
+    sets_without_lines.sqlc        # The sets with no inventory line
+    all.sqlc                       # :union(ALL) of the checks, each reading the roster
 ```
 
 ## The data and its licences
@@ -1252,4 +1364,10 @@ LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or en
 [areas/postcodes.sqlc]: sqlc/areas/postcodes.sqlc
 [builders/bought_in_postcodes.sqlc]: sqlc/builders/bought_in_postcodes.sqlc
 [builders/nearest.sqlc]: sqlc/builders/nearest.sqlc
+[checks/roster.sqlc]: sqlc/checks/roster.sqlc
+[checks/lines_uncatalogued.sqlc]: sqlc/checks/lines_uncatalogued.sqlc
+[checks/sets_without_lines.sqlc]: sqlc/checks/sets_without_lines.sqlc
+[checks/all.sqlc]: sqlc/checks/all.sqlc
+[.sql/checks/all.sql]: .sql/checks/all.sql
+[--respell]: ../../README.md#a-union-of-arms-that-read-one-roster---respell
 [src/main.rs]: src/main.rs

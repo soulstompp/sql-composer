@@ -74,7 +74,7 @@
 
 ### sql-composer-py
 
-- **A Python module** — New in 0.1.0: PyPI's `sql-composer`, imported as `sql_composer`, built by maturin. `parse`, `parse_file`, a `Composer` for a dialect named by its string, and `compose_all` for a directory, `respell` among its keywords, giving each template's standing and the text of `manifest.json`. A refusal raises `sql_composer.Error` with sql-composer's own message.
+- **A Python module** — New in 0.1.0: the distribution `sql-composer`, imported as `sql_composer`, built from `crates/sql-composer-py` by maturin. `parse`, `parse_file`, a `Composer` for a dialect named by its string, and `compose_all` for a directory, `respell` among its keywords, giving each template's standing and the text of `manifest.json`. A refusal raises `sql_composer.Error` with sql-composer's own message.
 - **The brick example's checks, respelled** — The tests compose the brick templates through `compose_all`, with `respell=True` and without, and get the committed files byte for byte, but for `checks/all.sql` respelled, which reads the roster once, as `cargo sqlc compose --respell` writes it.
 
 ### examples

@@ -2065,9 +2065,8 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         ),
     );
 
-    // 23. The builders near a city are the builders whose homes lie within the distance by the
-    //     haversine formula, on a sphere the earth's size: the cube only lets the index pass over
-    //     the homes far away.
+    // 23. The builders near a city are the builders whose homes lie within the haversine distance,
+    //     on a sphere the earth's size: the cube only lets the index pass over the homes far away.
     let near = compose(sqlc_dir, "areas/near_city.sqlc");
     let near_values = [int("city_id", DEFAULT_CITY_ID), int("km", DEFAULT_KM)];
     let composed: BTreeMap<i32, f64> = bound(&near, &near_values)
@@ -2103,7 +2102,7 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         ),
         !composed.is_empty() && composed.len() == truth.len() && same_metres,
         &format!(
-            "{} by the index, {} by the formula",
+            "{} by the index, {} by the haversine distance",
             composed.len(),
             truth.len()
         ),

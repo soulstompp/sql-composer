@@ -3162,8 +3162,7 @@ mod tests {
 
     #[test]
     fn test_define_and_compose_are_one_relation_without_a_registry() {
-        // With nothing named, the two directives are the same splice, which is the ground the
-        // proof that a name and its definition agree stands on.
+        // With nothing named, the two directives are the same splice.
         let (dir, _) = view_fixture();
         write_temp_file(
             &dir,

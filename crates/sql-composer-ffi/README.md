@@ -1,5 +1,8 @@
 # sql-composer-ffi
 
+> **Também disponível em português europeu: [`README.pt.md`](
+> https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/README.pt.md).**
+
 The C ABI of [sql-composer](https://crates.io/crates/sql-composer): parse SQL templates, compose
 them for a dialect, and compose a whole directory of them as `cargo sqlc compose` does, from any
 language that calls C.

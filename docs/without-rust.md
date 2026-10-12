@@ -1,5 +1,7 @@
 # Composing without Rust
 
+> **Também disponível em português europeu: [`without-rust.pt.md`](without-rust.pt.md).**
+
 Your SQL stays SQL. Each query is a template, a file of plain SQL that other templates compose by
 its path, and `cargo sqlc compose` writes every statement out composed, as a `.sql` file. `psql`
 runs it as it stands, and a program in any language runs it with the names `manifest.json` gives

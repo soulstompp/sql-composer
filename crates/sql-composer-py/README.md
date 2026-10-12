@@ -1,5 +1,8 @@
 # sql-composer for Python
 
+> **Também disponível em português europeu: [`README.pt.md`](
+> https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-py/README.pt.md).**
+
 Python bindings for [sql-composer](https://crates.io/crates/sql-composer): parse SQL templates,
 compose them for a dialect, and compose a whole directory of them as `cargo sqlc compose` does.
 The distribution is `sql-composer`, the module `sql_composer`.

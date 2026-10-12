@@ -1,5 +1,7 @@
 # Brick example
 
+> **Também disponível em português europeu: [`README.pt.md`](README.pt.md).**
+
 This example walks sql-composer's template language one template at a time, on a catalogue of
 building-brick sets. Each step asks the catalogue a question and answers it with a template. Its
 subcommand composes the template, prints the statement it composes to, and runs it.

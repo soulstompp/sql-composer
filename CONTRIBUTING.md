@@ -1,5 +1,7 @@
 # Contributing
 
+> **Também disponível em português europeu: [`CONTRIBUTING.pt.md`](CONTRIBUTING.pt.md).**
+
 Suggestions, bug reports and pull requests to sql-composer are welcome.
 
 ## Submitting bug reports

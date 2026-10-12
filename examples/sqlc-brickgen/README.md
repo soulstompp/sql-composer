@@ -1,5 +1,8 @@
 # sqlc-brickgen
 
+> **Também disponível em português europeu: [`README.pt.md`](
+> https://github.com/soulstompp/sql-composer/blob/HEAD/examples/sqlc-brickgen/README.pt.md).**
+
 `sqlc-brickgen` builds a large catalogue of bricks, sets and themes from a real one and loads it
 into PostgreSQL, together with builders, their collections and their purchase logs. LEGO® is a
 trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.

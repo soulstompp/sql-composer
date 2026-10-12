@@ -5,11 +5,16 @@
 Uma junção copiada para uma segunda consulta já são duas junções, que nascem iguais e acabam por
 divergir.
 
-O sql-composer fica com uma só: cada consulta vive num ficheiro seu, em SQL simples, e as outras
-consultas compõem-na pelo caminho desse ficheiro. O `cargo sqlc compose` escreve depois cada
-instrução composta tal como chega à base de dados, em SQL simples, sem macros nem nada montado em
-tempo de execução, e esse ficheiro, o DBA lê-o, o `EXPLAIN` executa-o e o `query_file!()` do SQLx
-confere-o quando o código compila.
+O sql-composer fica com uma só: cada consulta escreve-se uma vez, em SQL simples, e é composta em
+todas as instruções que precisem dela, para PostgreSQL, MySQL, MariaDB, SQLite ou DuckDB. Uma
+alteração faz-se, assim, num só ficheiro, e a composição seguinte leva-a a todas as instruções que a
+contêm. O que chega à base de dados é um ficheiro de SQL simples, e esse ficheiro, o DBA lê-o, o
+`EXPLAIN` executa-o, o `query_file!()` do SQLx confere-o quando o código compila e um programa em
+qualquer linguagem corre-o pelos nomes que o manifesto dá a cada um dos seus marcadores.
+
+Cada consulta vive num ficheiro seu, um modelo, e os outros modelos compõem-na pelo caminho desse
+ficheiro; o `cargo sqlc compose` escreve depois cada instrução composta sem diretiva nenhuma lá
+dentro, e nada fica por montar em tempo de execução.
 
 A composição funciona porque toda a consulta devolve uma relação, isto é, linhas que partilham as
 mesmas colunas, e uma relação pode estar em qualquer sítio onde estaria uma tabela, de modo que uma
@@ -18,8 +23,12 @@ que assenta toda a linguagem de modelos: uma relação posta dentro de outra, um
 argumento, relações combinadas como conjuntos e cada relação nomeada uma só vez.
 
 A instrução composta, quem a planeia continua a ser a base de dados; o sql-composer limita-se a
-escrevê-la. Essa mesma instrução, o [warren-snail][warren-snail] também a lê, na sintaxe do
-PostgreSQL, numa base de dados que guarda num só ficheiro e que percorre uma coluna de cada vez.
+escrevê-la. No PostgreSQL, a extensão do [warren-surveyor][warren-surveyor] age enquanto ele
+planeia: o speller dela escreve a instrução noutra grafia onde o catálogo diz que as linhas
+continuam as mesmas, e o surveyor lê nos índices do DBA as linhas e as estatísticas que, de
+outro modo, o planeador do PostgreSQL estimaria. Essa mesma instrução, o
+[warren-snail][warren-snail] também a lê, na sintaxe do PostgreSQL, numa base de dados que guarda
+num só ficheiro e que percorre uma coluna de cada vez.
 
 ## Instalar
 
@@ -42,6 +51,10 @@ Para compor a partir de Rust, basta juntar a biblioteca:
 [dependencies]
 sql-composer = "0.1.0"
 ```
+
+Em C ou em Python, há pacotes que compõem dentro do programa que os usa (*C e Python*, mais
+abaixo); e um projeto sem Rust nenhum compõe só com o `cargo sqlc`, como mostra
+[Compor sem Rust][docs/without-rust.md], que faz os mesmos passos com o `psql` e o manifesto.
 
 ## Uma primeira composição
 
@@ -177,10 +190,12 @@ categoria que um `INSERT` e um `MERGE` escrevem e as contagens de peças sobress
 `UPDATE` mantém em dia. Uma alteração à junção faz-se, por isso, num só sítio, e a composição
 seguinte leva-a a todos eles.
 
-O compositor nunca analisa o SQL que insere, e um erro no SQL compõe-se sem queixa: só a base de
-dados o recusa. É por isso que os ficheiros compostos ficam no repositório, ao lado dos modelos: o
-`cargo sqlc compose --verify` confirma que continuam a ser o que os modelos compõem, e o SQLx, ou
-um teste, executa-os.
+O compositor nunca analisa o SQL que insere, a não ser sob o `--respell`, e um erro no SQL compõe-se
+sem queixa: só a base de dados o recusa. É por isso que os ficheiros compostos ficam no repositório
+ao lado dos modelos, com o `manifest.json` que a composição escreve junto deles e que guarda as
+opções com que foram compostos e, de cada ficheiro, os nomes a que correspondem os seus marcadores.
+O `cargo sqlc compose --verify` confirma que os ficheiros continuam a ser o que os modelos compõem,
+com as opções que o manifesto regista, e o SQLx, ou um teste, executa-os.
 
 ## A linguagem de modelos
 
@@ -215,17 +230,20 @@ Na instrução composta, o compositor escreve o marcador próprio do dialeto:
 ```sql
 SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id = :bind(theme_id)
 -- PostgreSQL: ... WHERE year = $2 AND theme_id = $1
+-- DuckDB:     ... WHERE year = $2 AND theme_id = $1
 -- SQLite:     ... WHERE year = ?2 AND theme_id = ?1
 -- MySQL:      ... WHERE year = ? AND theme_id = ?
+-- MariaDB:    ... WHERE year = ? AND theme_id = ?
 ```
 
-No PostgreSQL e no SQLite, cada nome é numerado pelo lugar que ocupa, por ordem alfabética, entre os
-nomes da instrução, e um nome usado duas vezes fica um só marcador; no MySQL, cada uso é um `?` à
-parte, pela ordem em que a instrução os usa. O `bind_params` da instrução composta lista os nomes
-pela ordem dos marcadores, que é também a ordem em que o `query_file!()` recebe os argumentos. Num
-modelo com várias instruções, cada uma numera os seus marcadores a partir do primeiro, e o
-`statement_starts` diz onde começam, no `bind_params`, os nomes de cada uma. O `cargo sqlc compose`
-escreve as duas listas de cada ficheiro composto no `manifest.json` do destino (*Referência*).
+No PostgreSQL, no DuckDB e no SQLite, cada nome é numerado pelo lugar que ocupa, por ordem
+alfabética, entre os nomes da instrução, e um nome usado duas vezes fica um só marcador; no MySQL e
+no MariaDB, cada uso é um `?` à parte, pela ordem em que a instrução os usa. O `bind_params` da
+instrução composta lista os nomes pela ordem dos marcadores, que é também a ordem em que o
+`query_file!()` recebe os argumentos. Num modelo com várias instruções, cada uma numera os seus
+marcadores a partir do primeiro, e o `statement_starts` diz onde começam, no `bind_params`, os
+nomes de cada uma. O `cargo sqlc compose` escreve as duas listas de cada ficheiro composto no
+`manifest.json` do destino (*Referência*).
 
 Um nome que recebe uma lista de valores dá um marcador por valor. Composta com três valores em
 `color_ids` (`compose_with_values`), a consulta
@@ -423,6 +441,81 @@ também é vista, vale o nome da instrução.
 O `--with` ocupa o lugar de ambos, pelo que não se combina com `--views`, e um `:define` que apareça
 sob `--with` é recusado.
 
+### Uma união de braços que leem um mesmo rol: `--respell`
+
+O `cargo sqlc compose --respell` escreve noutra grafia, no ficheiro composto, um certo tipo de
+união: aquela cujos braços leem todos um mesmo rol, cortado em cada braço à linha que lhe pertence
+e juntado à esquerda, `ON true`, ao que esse braço lê. As verificações do exemplo brick fazem uma
+união assim, com o seu rol em [`checks/roster.sqlc`][examples/brick/sqlc/checks/roster.sqlc] e
+cada verificação como braço de [`checks/all.sqlc`][examples/brick/sqlc/checks/all.sqlc]. Uma
+delas é
+[`checks/sets_without_lines.sqlc`][examples/brick/sqlc/checks/sets_without_lines.sqlc]:
+
+```sql
+# The sets with no inventory line, under the roster's row for this check: one row per set, keyed
+# by set_num, with its name. A set whose inventories hold no line is one, and so is a set with no
+# inventory. Where every set has a line, the roster's row comes back alone.
+SELECT r.rule, p.set_num, p.detail
+FROM (
+    :compose(checks/roster.sqlc)
+) r
+LEFT JOIN (
+    SELECT s.set_num, s.name AS detail
+    FROM lego_sets s
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM lego_inventories i
+        WHERE i.set_num = s.set_num
+          AND EXISTS (SELECT 1 FROM lego_inventory_parts ip WHERE ip.inventory_id = i.id)
+    )
+) p ON true
+WHERE r.slug = 'sets_without_lines'
+```
+
+```sql
+# Every check's findings, one row each, and a row with no set_num for a check that finds nothing.
+:union(ALL checks/lines_uncatalogued.sqlc, checks/sets_without_lines.sqlc)
+```
+
+Poupa o rol lido outra vez por cada braço. Na união tal como foi composta, cada braço tem o corpo
+do rol e lê-o; na nova grafia, escrita no ficheiro composto, o rol lê-se uma só vez, cada linha
+dele emparelhada com os braços cujo corte passa, e as linhas próprias de todos os braços leem-se
+numa só união, cada uma marcada com o número do seu braço. Dentro do `SELECT * FROM (` exterior, o
+ficheiro composto fica assim:
+
+```sql
+SELECT r.rule, p.set_num, p.detail
+FROM (SELECT * FROM (VALUES
+    ('lines_uncatalogued', 'a line whose part is not in the parts catalogue'),
+    ('sets_without_lines', 'a set with no inventory line')
+) AS roster (slug, rule)
+
+) r
+JOIN (VALUES (1), (2)) AS a(arm)
+  ON (a.arm = 1 AND (r.slug = 'lines_uncatalogued'))
+  OR (a.arm = 2 AND (r.slug = 'sets_without_lines'))
+LEFT JOIN (
+SELECT * FROM (
+SELECT 1 AS arm, p.set_num AS set_num, p.detail AS detail
+```
+
+O `EXPLAIN` mostra o rol varrido uma só vez, ao passo que a instrução tal como foi composta o varre
+uma vez por braço, e as duas devolvem as mesmas linhas: o `fit` do exemplo brick confere cada
+ficheiro com os varrimentos do seu plano, e o `laws`, as linhas. Cada ficheiro escrito noutra
+grafia tem a sua linha, `Respelled sqlc/checks/all.sqlc: 1 union(s), of 2 arms`, a última linha
+conta as uniões escritas noutra grafia, e o manifesto regista a opção, pelo que o `--verify` a lê
+de lá.
+
+É o único sítio onde compor analisa SQL: o sqlparser lê cada instrução composta, sem nada
+conferir, e a que não conseguir ler fica tal como foi composta, com uma linha na saída de erro,
+`Unparsed sqlc/script.sqlc: statement(s) 1 of 2, written as composed`; todos os outros bytes do
+ficheiro ficam também tal como foram compostos. O `--respell` só escreve noutra grafia para o
+PostgreSQL, e para qualquer outro dialeto é recusado. Como assenta apenas no texto composto, sem
+catálogo, chave nem colação, só vale onde todos os braços leem o mesmo rol, o juntam `ON true`, o
+cortam com um `WHERE` que só lê o rol e devolvem colunas do rol que são as mesmas em todos os
+braços, ou colunas simples das linhas do próprio braço. O que assenta nas chaves do catálogo
+escreve-se noutra grafia enquanto o PostgreSQL planeia, pelo [speller do warren-surveyor][speller].
+
 ### Comentários
 
 Um `#` abre um comentário do modelo em qualquer ponto de uma linha, e o comentário vai até ao fim
@@ -456,6 +549,24 @@ literal de texto o guarda, `#variable_conflict` incluído, com uma diferença: l
 diretiva compõe-se, e um `:bind`, quer esteja escrito ali, quer venha de um modelo composto ali, é
 recusado, porque nenhum valor lá chega.
 
+### Cinco bases de dados
+
+O `cargo sqlc compose --dialect` compõe os mesmos modelos para uma de cinco bases de dados,
+`postgres` (por omissão), `mysql`, `mariadb`, `sqlite` ou `duckdb`, cada uma tal como lê o SQL com
+a sua configuração por omissão; na biblioteca, quem as nomeia é o `Dialect`.
+
+Poupa uma cópia de cada modelo por cada base de dados. Na instrução composta, o dialeto decide
+quatro coisas: os marcadores que o `:bind` escreve; os nomes que o `--with` recusa, que são as
+palavras reservadas de cada base de dados, lidas do PostgreSQL 16 e 18, do MySQL 9.7, do
+MariaDB 12.3, do SQLite 3.53 e do DuckDB 1.5; onde acabam as aspas, os comentários e as
+instruções; e como uma tabela simulada escreve os seus valores. Compostos para cada uma das cinco,
+os ficheiros do exemplo brick só diferem nos marcadores.
+
+Um modelo que só algumas das bases de dados leem da mesma maneira di-lo com `:dialect(…)`, e não é
+composto para nenhuma outra; já uma configuração que mude o sítio onde as aspas acabam, como o
+`standard_conforming_strings` do PostgreSQL desligado ou o `ANSI_QUOTES` do MySQL, não tem dialeto
+próprio, e o `--respell`, esse, só escreve para o PostgreSQL.
+
 ## Tabelas simuladas: um modelo sobre linhas à escolha
 
 Uma tabela simulada dá a uma tabela linhas à escolha de quem testa, e todas as instruções compostas
@@ -476,7 +587,7 @@ composer.add_mock_table(
 ```
 
 Poupa as tabelas de teste criadas, preenchidas e apagadas à volta de cada caso, e a cópia de uma
-consulta reescrita para as ler.
+consulta escrita outra vez para as ler.
 
 Na instrução composta, a simulação fica à cabeça de cada instrução que nomeie a tabela, no seu
 `WITH`: `lego_sets AS (SELECT CAST('100-1' AS varchar) AS set_num, … UNION ALL …)`. Um nome de
@@ -491,6 +602,56 @@ A simulação deixa de valer onde o nome simples não chega: um nome com esquema
 entre aspas duplas. Uma instrução que escreva na tabela escreve na própria tabela, e o MySQL não
 aceita `WITH` antes de um `INSERT`.
 
+## Grafias: cada modelo escrito da maneira que se escolher
+
+Um modelo pode escrever-se de várias maneiras que devolvem as mesmas linhas: uma condição no `ON` de
+uma junção interna ou no `WHERE`, um `NOT` sobre um `AND` ou distribuído por cada operando, uma
+relação lida uma só vez escrita no sítio onde se lê ou como consulta WITH. O
+`cargo sqlc spellings <template>` expõe as grafias de um modelo, eixo a eixo, contadas antes
+de se escrever qualquer uma delas; no `spellings.toml`, na raiz da pasta dos modelos, escolhe-se
+uma grafia por eixo, e o `cargo sqlc spell` escreve todos os modelos nas grafias escolhidas, tal
+como o `cargo fmt` escreve o código.
+
+Poupa o estilo da casa explicado outra vez a cada pessoa, e a cada agente, que escreva um modelo,
+porque passam a ser os próprios modelos a mostrá-lo. O `cargo sqlc spell --check` aponta cada
+modelo que não esteja nas grafias escolhidas e não escreve nada, pelo que uma verificação na
+integração contínua os mantém nelas.
+
+Para a lista das peças de uma caixa, o `cargo sqlc spellings sets/select_set_parts.sqlc` começa
+por contar:
+
+```text
+sqlc/sets/select_set_parts.sqlc: 2 spelling(s), counted an axis at a time
+  join order: 1, laid out to be read: cargo sqlc spell writes no join order, since an order can change the plan PostgreSQL makes
+  how a relation read once is named: 2
+    the relation set_part_details (a WITH query): 2
+  where a condition sits: 1
+  negation: 1
+  a semi-join's form: 1
+```
+
+Depois, escreve cada grafia por inteiro, a primeira tal como está escrita, e a segunda lê a mesma
+relação a partir do `FROM`, como um modelo à parte:
+
+```sql
+FROM (
+    :compose(shared/set_part_details.sqlc)
+) set_part_details
+```
+
+Escolhe-se com `naming = "template"` no `spellings.toml`: o `cargo sqlc spell --check` aponta
+então cada modelo do exemplo brick que não esteja escrito assim, e o `cargo sqlc spell` escreve-os.
+Uma grafia vê-se no diff do modelo e no texto do seu ficheiro composto, e o `fit` do exemplo brick
+confere que nenhuma grafia que o `spell` escreva muda o plano que o PostgreSQL faz para cada
+ficheiro composto.
+
+O sqlparser lê cada modelo como SQL do PostgreSQL, com cada diretiva representada por SQL do tipo
+que lhe corresponde, e não se lê catálogo nenhum. As ordens das junções expõem-se para serem lidas
+e nunca se escrevem, porque uma ordem pode mudar o plano; um modelo que outro componha mantém a
+cabeça tal como está escrita; e um modelo escrito só para outras bases de dados, tal como uma
+instrução que o sqlparser não consiga ler, fica como está, e o mesmo acontece a todos os modelos
+onde nada se escolheu.
+
 ## O percurso
 
 O [exemplo brick][examples/brick/README.md] percorre a álgebra relacional um modelo de cada vez,
@@ -499,7 +660,7 @@ relação passada como argumento, o fecho dos temas, união, interseção e dife
 mais do SQL do PostgreSQL, com funções de janela, `DISTINCT ON`, `LATERAL`, `ROLLUP`,
 `percentile_cont`, `generate_series`, uma antijunção, divisão, `array_agg`, `jsonb` e `MERGE`.
 
-Pesquisa também com os índices que o gerador constrói: pelas palavras de um nome
+Pesquisa também com os índices que o sqlc-brickgen constrói: pelas palavras de um nome
 (`websearch_to_tsquery`, com a ordem dada pelo `ts_rank` e as palavras marcadas pelo
 `ts_headline`), por uma expressão regular (`~*`, e o `regexp_match` para ler o tamanho de um tijolo
 no próprio nome) e por lugar (`earth_box` e `earth_distance` para um raio, `<->` para os mais
@@ -507,9 +668,15 @@ próximos primeiro). Cada pesquisa preenche uma vaga como qualquer filtro: as pa
 entram em `@filter`, e os construtores perto de uma cidade ou de um distrito postal entram em
 `@area`.
 
-Acaba no `laws`, que são todas as promessas que o exemplo faz, cada uma conferida com uma segunda
-escrita da mesma resposta em SQL direto, e duas delas sobre tabelas simuladas; se alguma falhar, o
-`laws` sai com 1.
+Examina o próprio catálogo com um rol de verificações, cujas linhas junta numa só união, que o
+`--respell` escreve de modo a ler o rol uma só vez. Acaba no `laws`, que são todas as promessas que
+o exemplo faz, cada uma conferida com uma segunda grafia da mesma resposta em SQL direto, três delas
+sobre tabelas simuladas; já o `fit` confere cada ficheiro composto com o plano que o PostgreSQL faz
+para ele, sem executar nenhum. Cada um deles sai com 1 se alguma das suas leis falhar.
+
+Da mesma maneira, o [process-modulus][process-modulus] compõe as consultas que conferem os seus
+documentos, numa árvore maior, com um percurso seu e composta com `--with`; e o percurso dele em
+português europeu compõe as relações da árvore em inglês, que encontra através do `--search-path`.
 
 ## Referência
 
@@ -524,6 +691,7 @@ cargo sqlc compose --skip-prepare                   # sem o cargo sqlx prepare
 cargo sqlc compose --verify                         # compara, sem escrever nada
 cargo sqlc compose --with                           # cada relação nomeada uma vez por instrução
 cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
+cargo sqlc compose --respell                        # os braços de um rol lidos numa só junção
 ```
 
 - **`--source`** é a pasta dos modelos: `sqlc` por omissão, ou `SQLC_SOURCE_DIR` quando a opção não
@@ -534,8 +702,9 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   `.sql/sets/select_set_parts.sql`. A composição escreve primeiro numa pasta temporária, que só toma
   o lugar do destino depois de todos os modelos se terem composto; o destino é substituído por
   inteiro, pelo que um modelo apagado ou mudado de sítio não deixa ficheiro para trás, e um ficheiro
-  escrito à mão no destino desaparece na composição seguinte. O `--target` deve, portanto, apontar
-  para uma pasta que não tenha mais nada. Ao lado dos ficheiros fica o `manifest.json` (mais abaixo).
+  escrito à mão no destino desaparece na composição seguinte. O `--target` deve, portanto,
+  apontar para uma pasta que não tenha mais nada. Ao lado dos ficheiros fica o `manifest.json`
+  (mais abaixo).
 - **`--search-path`** é mais uma pasta a partir da qual se leem os caminhos do `:compose`, depois do
   `--source`, pelo que um modelo pode compor uma relação que está noutra árvore. Os modelos que lá
   estão não dão ficheiro nenhum, e, com `--with`, uma relação encontrada lá toma o nome do seu
@@ -554,23 +723,32 @@ cargo sqlc compose --views sqlc/views.sqlc          # um registo de vistas
   combina com `--views`.
 - **`--views`** carrega um registo de vistas, e cada modelo que o registo nomeia passa a ler-se como
   a sua vista.
-- **`--respell`** reescreve, para o PostgreSQL, cada instrução composta cujo próprio texto prova que
-  devolve as mesmas linhas (mais abaixo), e recusa-se para qualquer outro dialeto.
+- **`--respell`** escreve numa só junção a união dos braços que leem um mesmo rol, para o
+  PostgreSQL (*Uma união de braços que leem um mesmo rol*), e é recusado para qualquer outro
+  dialeto.
 
 Cada modelo que esteja no `--source` tem uma linha sua: `Composed`; `Shape`, com as vagas que deixa
 abertas; ou `Skipped`, na saída de erro, com a vaga por preencher e o modelo onde ela está. A última
-linha conta-os a todos: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`.
+linha conta-os a todos: `Composed 51 of 55 template(s) into .sql: 4 shape(s), 0 skipped`. Com o
+`--respell`, cada ficheiro escrito noutra grafia tem uma linha `Respelled`, cada instrução que o
+sqlparser não consiga ler tem uma linha `Unparsed` na saída de erro, e a última linha acaba com as
+uniões escritas noutra grafia: `, 1 union(s) respelled`.
 
 O `manifest.json`, na raiz do destino, regista como foram compostos os ficheiros: as opções
-(`dialect`, `with`, `views`, `search_path`) e, de cada ficheiro composto, os nomes dos parâmetros
-pela ordem dos marcadores (`bind_params`) e onde começam os nomes de cada instrução
+(`dialect`, `with`, `views`, `search_path`, `respell`) e, de cada ficheiro composto, os nomes dos
+parâmetros pela ordem dos marcadores (`bind_params`) e onde começam os nomes de cada instrução
 (`statement_starts`). O do exemplo brick diz isto de um dos seus ficheiros:
 
 ```json
-"sets/select_colored_parts.sql": {
-  "bind_params": ["color_name", "set_num"],
-  "statement_starts": [0]
-}
+    "sets/select_colored_parts.sql": {
+      "bind_params": [
+        "color_name",
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
 ```
 
 Um programa em qualquer linguagem corre, assim, um ficheiro composto pelos nomes: o `$1` é o
@@ -586,9 +764,9 @@ cargo sqlc tree --invert shared/theme_closure.sqlc  # os ficheiros que guardam u
 ```
 
 Mostra os modelos de cada ficheiro composto como o `cargo tree` mostra as dependências de um pacote:
-cada modelo que o ficheiro guarda, uma vez por cada caminho que até ele vai dar, com a vaga onde está
-cada preenchimento e o nome que fica escrito sempre que um nome está no lugar de um corpo. Um modelo
-guardado mais do que uma vez tem ainda uma linha com as suas cópias:
+cada modelo que o ficheiro guarda, uma vez por cada caminho que até ele vai dar, com a vaga onde
+está cada preenchimento e o nome que fica escrito sempre que um nome está no lugar de um corpo. Um
+modelo guardado mais do que uma vez tem ainda uma linha com as suas cópias:
 
 ```text
 reports/shared_moulds.sqlc
@@ -606,23 +784,54 @@ shared/theme_closure.sqlc: 2 copies
 
 Com o `--with`, o fecho fica nomeado uma só vez, à cabeça da instrução,
 `shared/theme_closure.sqlc (WITH shared_theme_closure)`, e cada sítio que o compunha lê o nome; se
-depois a base de dados lê uma cópia uma vez ou duas, quem o diz é o plano dela, no `EXPLAIN`. O
-`--invert` (`-i`) mostra, para um só modelo, cada ficheiro composto que o guarda, com as suas
+depois a base de dados lê uma cópia uma vez ou duas, quem o diz é o plano dela, no `EXPLAIN`, e o
+`fit` do exemplo brick confere as cópias de cada ficheiro composto com os varrimentos do seu plano,
+onde um varrimento só pode faltar por causa de um `LEFT JOIN` que a base de dados tenha retirado.
+O `--invert` (`-i`) mostra, para um só modelo, cada ficheiro composto que o guarda, com as suas
 cópias, ou seja, cada instrução a que chega uma alteração nesse modelo. O `cargo sqlc tree` aceita o
 `--source`, o `--dialect`, o `--with`, o `--views` e o `--search-path`, como o `compose`.
 
-### `--respell`
+### `cargo sqlc spellings` e `cargo sqlc spell`
 
-Uma união cujos braços leem todos um mesmo rol, cada braço cortado às linhas que são suas e juntado
-`ON true` ao que lê, lê o rol uma vez por braço. O `--respell` escreve-a como uma só junção: o rol
-lido uma única vez, cada linha dele emparelhada com os braços cujo corte passa, e as linhas próprias
-de todos os braços lidas numa só união, cada uma marcada com o número do seu braço.
-Só esta reescrita é do sql-composer, porque só ela se prova a partir do texto composto, sem catálogo,
-chave nem colação; as que assentam no catálogo faz o warren-pg-speller, dentro do planeador do
-PostgreSQL. Tudo o resto do ficheiro fica tal como foi composto. As instruções leem-se com o
-sqlparser, e a que ele não consiga ler fica como foi composta, com uma linha na saída de erro:
-`Unparsed <file>: statement(s) 4 of 52, written as composed`. Cada ficheiro reescrito tem também a
-sua linha, `Respelled <file>: 1 union(s), of 32 arms`, e o manifesto regista a opção.
+```sh
+cargo sqlc spellings sets/select_set_parts.sqlc               # todos os eixos contados e escritos
+cargo sqlc spellings shared/scope_sets.sqlc --axis conditions # todos os eixos contados, um escrito
+cargo sqlc spell --check                                      # aponta, sem escrever nada
+cargo sqlc spell                                              # escreve os modelos nas grafias escolhidas
+```
+
+Ambos aceitam o `--source`, em cuja raiz está o `spellings.toml`, e o `--search-path`, como o
+`compose`. O `spellings` recebe o modelo pelo seu caminho dentro da pasta dos modelos e expõe cada
+grafia em cada sítio, incluindo as que nenhuma escolha escreve, como uma condição num `ON` mais
+adiante, ao passo que o `spell` escreve todos os modelos dessa pasta. O `spell --check` sai com 1 se
+algum modelo não estiver nas grafias escolhidas, e uma lista de junções com mais de 8 relações fica
+como está escrita, sem que se exponham as suas ordens.
+
+O `spellings.toml` tem uma chave por eixo, e um eixo que lá não esteja fica escrito como cada modelo
+o escreve:
+
+| chave | escolhas | o que cada uma escreve |
+|---|---|---|
+| `conditions` | `on`, `where` | uma condição no `ON` da primeira junção interna onde já estejam juntadas todas as relações que ela nomeia, ou no `WHERE` |
+| `negation` | `pushed`, `over` | cada `NOT` sobre um `AND` ou um `OR` distribuído pelos seus operandos, ou um só `NOT` sobre operandos que são, cada um, um `NOT`; `NOT NOT p` como `p`, num caso e no outro |
+| `naming` | `inline`, `with`, `template` | uma relação lida uma só vez escrita onde é lida, como consulta WITH à cabeça da instrução, ou como o `:compose` de um modelo seu |
+| `semi_join` | `in`, `exists` | `x IN (SELECT y …)` ou `EXISTS (SELECT … WHERE x = y)` |
+| `join_order` | uma tabela: `template`, `order` | nada: a ordem da lista de junções de um modelo, que o `spell` confere com a regra do mais exterior primeiro, dizendo o que encontra |
+
+```toml
+conditions = "where"
+naming = "template"
+
+[join_order]
+template = "shared/scope_sets.sqlc"
+order = ["s", "sc", "scope"]
+```
+
+Uma chave que nenhum eixo tenha é recusada com os eixos que há, e uma escolha que o seu eixo não
+tenha, com as escolhas desse eixo. Uma condição só muda de sítio onde o seu texto diz que relações
+lê, com cada coluna nomeada com a sua relação, e só entre junções internas e o `WHERE`; o
+`NOT (a = b)` nunca se escreve `a <> b`, nem o `NOT IN` como `NOT EXISTS`, e uma semijunção
+debaixo de um `NOT` fica como está escrita.
 
 ### Diretivas
 
@@ -669,7 +878,7 @@ O `source::compose_all` compõe todos os modelos de uma pasta como o `cargo sqlc
 com as opções que um `source::Flags` guarda, e diz o que fez de cada um: `Standing::Written`, com o
 seu `ComposedSql`; `Standing::Shape`; ou `Standing::Skipped`. O `Dialect::ALL` lista os dialetos, e
 o `"mysql".parse::<Dialect>()` lê um deles pelo nome que o `--dialect` lhe dá.
-O `Composer::tree` dá o que a composição de um modelo escreve, tal como o `cargo sqlc tree` o mostra.
+O `Composer::tree` dá o que a composição de um modelo escreve, como o `cargo sqlc tree` o mostra.
 
 | tipo | o que é |
 |---|---|
@@ -682,19 +891,25 @@ O `Composer::tree` dá o que a composição de um modelo escreve, tal como o `ca
 | `Command` | um `:count()`, `:union()`, `:intersect()` ou `:except()`, com o modificador e as fontes |
 | `CommandKind` | `Count`, `Union`, `Intersect` ou `Except` |
 | `Composer` | compõe modelos em SQL para um dialeto |
-| `ComposedSql` | o SQL composto e os nomes dos parâmetros pela ordem dos marcadores |
+| `ComposedSql` | as instruções compostas e os nomes dos parâmetros delas pela ordem dos marcadores |
 | `Held` | um modelo tal como uma instrução composta o guarda: como se chega a ele, o nome que fica escrito por ele e o que ele próprio guarda |
 | `Reach` | como se chega a um modelo: `Root`, `Compose`, `Slot`, `Define`, `Source` ou `Head` |
-| `source::Flags` | o dialeto, o `--with`, o `--views` e o `--search-path` com que uma pasta se compõe |
+| `source::Flags` | o dialeto, o `--with`, o `--views`, o `--search-path` e, com a funcionalidade `respell`, o `--respell` com que uma pasta se compõe |
 | `source::Standing` | o que a composição fez de um modelo: escrito, forma ou saltado |
 | `source::Manifest` | o que o `manifest.json` guarda, com a funcionalidade `serde` |
-| `respell::Respelled` | um ficheiro reescrito: o texto, as instruções, as que ficaram por ler e as uniões reescritas, com a funcionalidade `respell` |
+| `respell::Respelled` | um ficheiro escrito noutra grafia: o texto, as instruções, as que ficaram por ler e as uniões escritas noutra grafia, com a funcionalidade `respell` |
+| `spellings::Layout` | as grafias de um modelo, eixo a eixo e sítio a sítio, como o `cargo sqlc spellings` as mostra, com a funcionalidade `spellings` |
+| `spellings::Picks` | o que o `spellings.toml` guarda, com a funcionalidade `spellings` |
 | `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` ou `Duckdb` |
 | `MockTable` | linhas à escolha para uma tabela: o nome, as colunas por ordem e as linhas |
 | `MockColumn` | uma coluna de uma tabela simulada: o nome e o tipo, escrito como o dialeto o escreve |
 
 A funcionalidade `serde` deriva `Serialize` e `Deserialize` para os tipos principais, e a `std`,
-ligada por omissão, compila com a biblioteca padrão.
+ligada por omissão, compila com a biblioteca padrão. A `respell` traz o sqlparser e o
+`respell::respell`, que escreve um ficheiro composto noutra grafia como o `--respell`, e a
+`spellings` traz o sqlparser, o `spellings::lay_out` e o `spellings::spell`, que expõem as grafias
+de um modelo e o escrevem nas grafias escolhidas, como o `cargo sqlc spellings` e o
+`cargo sqlc spell`.
 
 ```toml
 sql-composer = { version = "0.1.0", features = ["serde"] }
@@ -873,6 +1088,28 @@ use sql_composer::Dialect;
 validate_syntax("SELECT set_num, name FROM lego_sets WHERE year = $1", Dialect::Postgres)?;
 ```
 
+### C e Python
+
+Há dois pacotes que levam o compositor a programas que não estão escritos em Rust: o
+`sql-composer-ffi`, que é a sua ABI de C, com o cabeçalho `sql_composer.h`, e o `sql-composer-py`,
+que é o módulo de Python `sql_composer`, distribuído como `sql-composer`. Cada um analisa um modelo
+e compõe-no para qualquer um dos cinco dialetos, com caminhos de pesquisa, relações nomeadas, um
+registo de vistas, tabelas simuladas e o número de valores de cada parâmetro, devolvendo o SQL, os
+nomes dos parâmetros pela ordem dos marcadores e onde começam os nomes de cada instrução. Cada um
+compõe também uma pasta inteira como o `cargo sqlc compose`, com o `--respell` entre as opções, e
+diz o que fez de cada modelo, além de dar o texto do `manifest.json`.
+
+Poupam um segundo compositor escrito para outra linguagem, e um programa que chame o `cargo sqlc`
+para compor. Compostos por qualquer um dos dois, com ou sem `--respell`, os modelos do exemplo
+brick dão, byte a byte, os ficheiros que o `cargo sqlc compose` escreve, entre eles a união das
+verificações escrita noutra grafia.
+
+Os valores, esses, continuam a ser do programa que chama, que os passa com a sua própria biblioteca
+de base de dados, pela ordem em que os nomes vêm listados. Nenhum dos dois expõe grafias, o que
+fazem o `cargo sqlc` e a funcionalidade `spellings` do núcleo, e as chamadas estão nos README do
+[sql-composer-ffi][crates/sql-composer-ffi/README.md] e do
+[sql-composer-py][crates/sql-composer-py/README.md].
+
 ### O espaço de trabalho
 
 ```
@@ -883,6 +1120,8 @@ crates/
   sql-composer-postgres/  # controlador PostgreSQL (síncrono e assíncrono)
   sql-composer-mysql/     # controlador MySQL (síncrono e assíncrono)
   sql-composer-sqlx/      # integração com o sqlx (verify, validate)
+  sql-composer-ffi/       # a ABI de C (sql_composer.h)
+  sql-composer-py/        # o módulo de Python sql_composer
   cargo-sqlc/             # o comando cargo sqlc
 examples/
   brick/                  # todas as diretivas menos o :define, e mais do SQL do PostgreSQL, na base de dados do sqlc-brickgen
@@ -899,6 +1138,12 @@ origem o README do exemplo indica. LEGO® é uma marca do LEGO Group, que não p
 nem subscreve este projeto.
 
 [README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/README.md
+[warren-surveyor]: https://github.com/soulstompp/warren-surveyor
+[warren-snail]: https://github.com/soulstompp/warren-snail
+[speller]: https://github.com/soulstompp/warren-surveyor/blob/HEAD/warren-pg-speller/README.md
+[docs/without-rust.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/docs/without-rust.pt.md
+[crates/sql-composer-ffi/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/README.pt.md
+[crates/sql-composer-py/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-py/README.pt.md
 [examples/brick/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/brick
 [examples/sqlc-brickgen/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/sqlc-brickgen
 [examples/brick/sqlc/shared/set_part_details.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/shared/set_part_details.sqlc
@@ -910,6 +1155,9 @@ nem subscreve este projeto.
 [examples/brick/sqlc/reports/city_only_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/city_only_moulds.sqlc
 [examples/brick/sqlc/reports/count_theme_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/count_theme_parts.sqlc
 [examples/brick/sqlc/reports/shared_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/shared_moulds.sqlc
-[examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
+[examples/brick/sqlc/checks/roster.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/roster.sqlc
+[examples/brick/sqlc/checks/all.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/all.sqlc
+[examples/brick/sqlc/checks/sets_without_lines.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/sets_without_lines.sqlc
+[examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.pt.md
+[process-modulus]: https://github.com/soulstompp/process-modulus
 [LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE
-[warren-snail]: https://github.com/soulstompp/warren-snail

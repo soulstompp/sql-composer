@@ -1,10 +1,13 @@
 //! The fit's laws: what `cargo sqlc tree` says each composed file holds, held to the plan
 //! PostgreSQL makes for it. Every statement is planned by `EXPLAIN (COSTS OFF)` and never run.
 //!
-//! 1. Each composed file, plain and with `--with`, scans each table as often as its text writes
-//!    it: each template the tree holds reads the tables its own text names, once for every copy
-//!    of it the tree counts. Where the plan scans a table more or less often, the difference is
-//!    named by what the planner did, and a difference nothing names fails the law.
+//! 1. Each composed file, plain and with `--with`, scans each table and each list of VALUES as
+//!    often as its text writes it: each template the tree holds reads the tables its own text
+//!    names and the lists of VALUES it writes, once for every copy of it the tree counts. A list
+//!    of VALUES is told apart by its columns. Where the plan scans a table more or less often, the
+//!    difference is named by what the planner did, and a difference nothing names fails the law.
+//!    Each file `--respell` rewrites is held to its plan by its own text, which reads the roster
+//!    once for each union and writes the list of the union's arm numbers.
 //! 2. Every template under the source takes exactly one standing. It needs no database, so it is
 //!    `cargo-sqlc`'s test `test_every_template_under_the_source_is_reported_once`.
 //! 3. Each spelling `cargo sqlc spell` can write of each template, written in its place, leaves
@@ -25,15 +28,28 @@ use sqlx::{AssertSqlSafe, PgPool, Row};
 
 use crate::verdict;
 
-/// How many times each table is scanned, by its name.
+/// How many times each table, or each list of VALUES, is scanned, by its name.
 type Scans = BTreeMap<String, usize>;
 
-/// What a template's own text does with each table: the tables it reads, and those it reads
-/// through a `LEFT JOIN`, each with how many times.
+/// What a template's own text does with each table and list of VALUES: those it reads, and the
+/// tables it reads through a `LEFT JOIN`, each with how many times.
 #[derive(Default)]
 struct Own {
     reads: Scans,
     left_joined: Scans,
+}
+
+/// The name a list of VALUES of `columns` columns is counted under.
+fn values(columns: usize) -> String {
+    match columns {
+        1 => "VALUES of 1 column".to_string(),
+        n => format!("VALUES of {n} columns"),
+    }
+}
+
+/// Whether `name` is a list of VALUES, and not a table.
+fn is_values(name: &str) -> bool {
+    name.starts_with("VALUES of ")
 }
 
 /// One table a composed file's text and its plan disagree on: how many scans of it each holds,
@@ -45,9 +61,11 @@ struct Difference {
     kind: Option<&'static str>,
 }
 
-/// A composed file held to its plan: how many tables they agree on, and each they do not.
+/// A composed file held to its plan: how many tables they agree on, each list of VALUES they
+/// agree on with how many times, and each table or list they do not.
 struct Fit {
     agree: usize,
+    lists: Vec<(String, usize)>,
     differences: Vec<Difference>,
 }
 
@@ -57,12 +75,16 @@ impl Fit {
         self.differences.iter().all(|d| d.kind.is_some())
     }
 
-    /// The tables agreed on, then each difference with what the planner did.
+    /// The tables agreed on and each list of VALUES, then each difference with what the planner
+    /// did.
     fn detail(&self) -> String {
         let mut detail = match self.agree {
             1 => "1 table agrees".to_string(),
             n => format!("{n} tables agree"),
         };
+        for (list, n) in &self.lists {
+            detail.push_str(&format!("; {list} {n} written, {n} planned"));
+        }
         for d in &self.differences {
             detail.push_str(&format!(
                 "; {} {} written, {} planned: {}",
@@ -183,9 +205,9 @@ fn words(text: &str) -> Vec<String> {
     words
 }
 
-/// What a template's own text does with each of `tables`: every name of one in its SQL, outside
-/// what it composes and binds, its strings and its comments. A name with a `.` after it qualifies
-/// a column and is not read, and the table an `INSERT INTO` names is written, not read.
+/// What a template's own text does with each of `tables` and each list of VALUES: every name of
+/// one in its SQL, and every list, outside what it composes and binds, its strings and its
+/// comments.
 fn own(template: &Template, tables: &BTreeSet<String>) -> Own {
     let text: String = template
         .elements
@@ -195,10 +217,44 @@ fn own(template: &Template, tables: &BTreeSet<String>) -> Own {
             _ => " ",
         })
         .collect();
-    let words = words(&text);
+    own_text(&text, tables)
+}
+
+/// The columns of the list of VALUES whose `VALUES` is `words[at]`, where it is one a `FROM`
+/// reads: in parentheses of its own, its first row read for how many values it holds.
+fn list_at(words: &[String], at: usize) -> Option<usize> {
+    if at == 0 || words[at - 1] != "(" || words.get(at + 1).map(String::as_str) != Some("(") {
+        return None;
+    }
+    let mut depth = 0;
+    let mut columns = 1;
+    for word in &words[at + 1..] {
+        match word.as_str() {
+            "(" => depth += 1,
+            ")" if depth == 1 => return Some(columns),
+            ")" => depth -= 1,
+            "," if depth == 1 => columns += 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// What `text`, SQL, does with each of `tables` and each list of VALUES: every name of one
+/// outside its strings and its comments, and every list in parentheses of its own, as a `FROM`
+/// reads one. A name with a `.` after it qualifies a column and is not read, and the table an
+/// `INSERT INTO` names is written, not read.
+fn own_text(text: &str, tables: &BTreeSet<String>) -> Own {
+    let words = words(text);
     let mut own = Own::default();
     for (at, word) in words.iter().enumerate() {
         let before = |n: usize| at.checked_sub(n).map(|i| words[i].as_str());
+        if word == "values" {
+            if let Some(columns) = list_at(&words, at) {
+                *own.reads.entry(values(columns)).or_default() += 1;
+            }
+            continue;
+        }
         let qualifies = words.get(at + 1).is_some_and(|next| next == ".");
         let inserted = before(1) == Some("into") && before(2) == Some("insert");
         if !tables.contains(word) || qualifies || inserted {
@@ -286,23 +342,75 @@ fn planned(lines: &[String], tables: &BTreeSet<String>) -> Scans {
     scans
 }
 
-/// The plan of a composed statement, as `EXPLAIN (COSTS OFF)` prints it, line by line: its generic
-/// plan when it binds parameters. It goes as a simple query, inside a read-only transaction that
-/// is rolled back; prepared, its placeholders would be the EXPLAIN's own, and want values. A file
-/// of more than one statement is refused, since a simple query runs every statement after the
-/// first.
-async fn explain(pool: &PgPool, composed: &ComposedSql) -> Result<Vec<String>, String> {
+/// The lists of VALUES a plan printed `VERBOSE` scans, each by its columns: those its scan
+/// outputs, which are every column of the list.
+fn planned_lists(lines: &[String]) -> Scans {
+    let mut scans = Scans::new();
+    for (i, line) in lines.iter().enumerate() {
+        if !node(line, i == 0).is_some_and(|scan| scan.starts_with("Values Scan on ")) {
+            continue;
+        }
+        let output = lines[i + 1..]
+            .iter()
+            .take_while(|l| node(l, false).is_none())
+            .find_map(|l| l.trim_start().strip_prefix("Output: "));
+        if let Some(output) = output {
+            let mut depth = 0;
+            let mut columns = 1;
+            for word in words(output) {
+                match word.as_str() {
+                    "(" => depth += 1,
+                    ")" => depth -= 1,
+                    "," if depth == 0 => columns += 1,
+                    _ => {}
+                }
+            }
+            *scans.entry(values(columns)).or_default() += 1;
+        }
+    }
+    scans
+}
+
+/// The scans of each of `tables` and each list of VALUES the plan of `composed` holds. A plan
+/// that scans a list of VALUES is printed again `VERBOSE`, for the columns each list outputs.
+async fn scans(
+    pool: &PgPool,
+    composed: &ComposedSql,
+    tables: &BTreeSet<String>,
+) -> Result<Scans, String> {
+    let plan = explain(pool, composed, false).await?;
+    let mut scans = planned(&plan, tables);
+    if plan.iter().any(|line| line.contains("Values Scan on ")) {
+        let verbose = explain(pool, composed, true).await?;
+        scans.extend(planned_lists(&verbose));
+    }
+    Ok(scans)
+}
+
+/// The plan of a composed statement, as `EXPLAIN (COSTS OFF)` prints it, line by line, and
+/// `VERBOSE` where `verbose`: its generic plan when it binds parameters. It goes as a simple
+/// query, inside a read-only transaction that is rolled back; prepared, its placeholders would be
+/// the EXPLAIN's own, and want values. A file of more than one statement is refused, since a
+/// simple query runs every statement after the first.
+async fn explain(
+    pool: &PgPool,
+    composed: &ComposedSql,
+    verbose: bool,
+) -> Result<Vec<String>, String> {
     if composed.statement_starts.len() > 1 {
         return Err(format!(
             "it holds {} statements, and only one is planned at a time",
             composed.statement_starts.len()
         ));
     }
-    let options = if composed.bind_params.is_empty() {
-        "COSTS OFF"
-    } else {
-        "COSTS OFF, GENERIC_PLAN"
-    };
+    let mut options = vec!["COSTS OFF"];
+    if verbose {
+        options.push("VERBOSE");
+    }
+    if !composed.bind_params.is_empty() {
+        options.push("GENERIC_PLAN");
+    }
+    let options = options.join(", ");
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::raw_sql("SET TRANSACTION READ ONLY")
         .execute(&mut *tx)
@@ -319,10 +427,7 @@ async fn explain(pool: &PgPool, composed: &ComposedSql) -> Result<Vec<String>, S
     Ok(rows.iter().map(|row| row.get::<String, _>(0)).collect())
 }
 
-/// `composed` held to its plan, with `copies` the copies of each template its tree counts. A
-/// table the plan scans fewer times than the text writes is a `LEFT JOIN` the planner removed,
-/// when the text left joins it at least as many times as the plan leaves out: PostgreSQL drops a
-/// left join when nothing above it reads the table and its condition matches at most one row.
+/// `composed` held to its plan, with `copies` the copies of each template its tree counts.
 async fn fit(
     pool: &PgPool,
     sqlc_dir: &Path,
@@ -332,16 +437,28 @@ async fn fit(
     tables: &BTreeSet<String>,
 ) -> Result<Fit, String> {
     let written = written(sqlc_dir, copies, texts, tables);
-    let planned = planned(&explain(pool, composed).await?, tables);
+    Ok(held(&written, &scans(pool, composed, tables).await?))
+}
+
+/// What a text writes held to what its plan scans. A table the plan scans fewer times than the
+/// text writes is a `LEFT JOIN` the planner removed, when the text left joins it at least as many
+/// times as the plan leaves out: PostgreSQL drops a left join when nothing above it reads the
+/// table and its condition matches at most one row.
+fn held(written: &Own, planned: &Scans) -> Fit {
     let mut names: BTreeSet<&String> = written.reads.keys().collect();
     names.extend(planned.keys());
     let mut fit = Fit {
         agree: 0,
+        lists: vec![],
         differences: vec![],
     };
     for table in names {
         let count = |scans: &Scans| scans.get(table).copied().unwrap_or(0);
-        let (w, p) = (count(&written.reads), count(&planned));
+        let (w, p) = (count(&written.reads), count(planned));
+        if w == p && is_values(table) {
+            fit.lists.push((table.clone(), w));
+            continue;
+        }
         if w == p {
             fit.agree += 1;
             continue;
@@ -355,7 +472,7 @@ async fn fit(
             kind,
         });
     }
-    Ok(fit)
+    fit
 }
 
 /// The composer and each template's standing, for PostgreSQL, plain or with `--with`.
@@ -394,8 +511,9 @@ fn fails_on(seed: &str, fit: Result<Fit, String>) -> bool {
     fails
 }
 
-/// Law 1's seeds, composed plain: a copy the text holds and the tree does not count, and a copy
-/// the tree counts and the text does not hold. Whether the law fails on each.
+/// Law 1's seeds, composed plain: a copy the text holds and the tree does not count, a copy the
+/// tree counts and the text does not hold, and a file's text as `--respell` writes it held to the
+/// plan of the file as composed. Whether the law fails on each.
 async fn seeds(
     pool: &PgPool,
     sqlc_dir: &Path,
@@ -433,12 +551,12 @@ async fn seeds(
     let shared_moulds = Path::new("reports/shared_moulds.sqlc");
     let closure = PathBuf::from("shared/theme_closure.sqlc");
     let mut counted = copies(&composer, sqlc_dir, shared_moulds);
-    let held = counted.get(&closure).copied().unwrap_or(0);
-    counted.insert(closure.clone(), held + 1);
+    let in_text = counted.get(&closure).copied().unwrap_or(0);
+    counted.insert(closure.clone(), in_text + 1);
     let seed = format!(
-        "{}, its tree counting {} copies of {} where its text holds {held}",
+        "{}, its tree counting {} copies of {} where its text holds {in_text}",
         shared_moulds.display(),
-        held + 1,
+        in_text + 1,
         closure.display()
     );
     let second = match standings.get(shared_moulds) {
@@ -452,7 +570,50 @@ async fn seeds(
         }
     };
 
-    first && second
+    // The first file --respell rewrites, its text held to the plan of the file as composed, which
+    // reads the roster once for each arm and no list of arm numbers.
+    let third = match rewritten(sqlc_dir).first() {
+        Some((rel_path, respelled, _)) => {
+            let seed = format!(
+                "{}, its text as respelled held to the plan of the file as composed",
+                rel_path.display()
+            );
+            match standings.get(rel_path) {
+                Some(Standing::Written(composed)) => fails_on(
+                    &seed,
+                    scans(pool, composed, tables)
+                        .await
+                        .map(|planned| held(&own_text(&respelled.sql, tables), &planned)),
+                ),
+                _ => {
+                    println!("SEED {seed}: CANNOT BE MADE — the template has no composed file");
+                    false
+                }
+            }
+        }
+        None => {
+            println!("SEED a file --respell rewrites: CANNOT BE MADE — it rewrites none");
+            false
+        }
+    };
+
+    first && second && third
+}
+
+/// Each file `--respell` rewrites, by its template's path, as respelled, with how many arms each
+/// union it respells joins.
+fn rewritten(sqlc_dir: &Path) -> Vec<(PathBuf, ComposedSql, Vec<usize>)> {
+    let mut standings =
+        source::compose_all(sqlc_dir, &Flags::new(Dialect::Postgres)).expect("compose failed");
+    let respelled = source::respell_all(&mut standings, Dialect::Postgres).expect("respell failed");
+    respelled
+        .into_iter()
+        .filter(|(_, done)| !done.unions.is_empty())
+        .filter_map(|(rel_path, done)| match standings.remove(&rel_path) {
+            Some(Standing::Written(composed)) => Some((rel_path, composed, done.unions)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Where two plans part, when they do: the first line that differs, with each plan's.
@@ -670,7 +831,7 @@ async fn rounds(
         let Standing::Written(composed) = standing else {
             continue;
         };
-        match explain(pool, composed).await {
+        match explain(pool, composed, false).await {
             Ok(plan) => {
                 let holds = copies(&composer, sqlc_dir, rel_path).into_keys().collect();
                 files.insert(rel_path.clone(), (plan, holds));
@@ -735,7 +896,7 @@ async fn rounds(
                     continue;
                 };
                 let (written, _) = &files[*file];
-                match explain(pool, composed).await {
+                match explain(pool, composed, false).await {
                     Ok(plan) => {
                         let Some(at) = parting(written, &plan) else {
                             continue;
@@ -856,7 +1017,7 @@ async fn orders_part(pool: &PgPool, links: &[(&str, &str, &str)]) -> Option<Stri
         let composed = Composer::new(Dialect::Postgres)
             .compose(&template)
             .expect("compose failed");
-        match explain(pool, &composed).await {
+        match explain(pool, &composed, false).await {
             Ok(plan) => plans.push(plan),
             Err(e) => return Some(format!("it could not be planned: {e}")),
         }
@@ -922,8 +1083,8 @@ pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> boo
     let mut texts = BTreeMap::new();
     let mut all_hold = true;
 
-    // 1. Each composed file, plain and with --with, scans each table as often as its copies read
-    //    it, or the planner's reason is named.
+    // 1. Each composed file, plain and with --with, scans each table and each list of VALUES as
+    //    often as its copies read it, or the planner's reason is named.
     for with in [false, true] {
         let mode = if with { "--with" } else { "plain" };
         let (composer, standings) = composed(sqlc_dir, with);
@@ -938,6 +1099,21 @@ pub(crate) async fn cmd_fit(pool: &PgPool, sqlc_dir: &Path, schema: &str) -> boo
                 Err(e) => verdict(&law, false, &format!("it could not be planned: {e}")),
             };
         }
+    }
+    //    Each file --respell rewrites scans each table and each list of VALUES as often as its
+    //    own text writes it.
+    for (rel_path, respelled, unions) in rewritten(sqlc_dir) {
+        let law = format!(
+            "{}, --respell, unions by their arms {unions:?}, scans what its text reads",
+            rel_path.display()
+        );
+        all_hold &= match scans(pool, &respelled, &tables).await {
+            Ok(planned) => {
+                let fit = held(&own_text(&respelled.sql, &tables), &planned);
+                verdict(&law, fit.holds(), &fit.detail())
+            }
+            Err(e) => verdict(&law, false, &format!("it could not be planned: {e}")),
+        };
     }
     let seeds_fail = seeds(pool, sqlc_dir, &mut texts, &tables).await;
 
@@ -969,6 +1145,42 @@ mod tests {
 
     fn tables() -> BTreeSet<String> {
         ["lego_sets", "lego_themes"].map(String::from).into()
+    }
+
+    #[test]
+    fn a_list_of_values_is_counted_by_its_columns() {
+        let text =
+            "SELECT r.rule FROM (SELECT * FROM (VALUES\n    ('a, b', 'c'),\n    ('d', 'e')\n) \
+                    AS roster (slug, rule)) r\nJOIN (VALUES (1), (2)) AS a(arm) ON true\n\
+                    JOIN lego_sets s ON s.name = r.rule";
+        assert_eq!(
+            own_text(text, &tables()).reads,
+            Scans::from([(values(1), 1), (values(2), 1), ("lego_sets".to_string(), 1)])
+        );
+        let merge = "MERGE INTO summary t USING src ON t.id = src.id \
+                     WHEN NOT MATCHED THEN INSERT (id, name) VALUES (src.id, src.name)";
+        assert_eq!(
+            own_text(merge, &tables()).reads,
+            Scans::new(),
+            "a row MERGE inserts is no list it scans"
+        );
+    }
+
+    #[test]
+    fn a_plan_s_lists_of_values_are_counted_by_their_columns() {
+        let verbose = plan(&[
+            "Nested Loop",
+            "  Output: \"*VALUES*\".column2, p.set_num",
+            "  ->  Values Scan on \"*VALUES*_1\"",
+            "        Output: \"*VALUES*_1\".column1",
+            "  ->  Values Scan on \"*VALUES*\"",
+            "        Output: \"*VALUES*\".column1, \"*VALUES*\".column2",
+            "        Filter: (\"*VALUES*\".column1 = 'a, b'::text)",
+        ]);
+        assert_eq!(
+            planned_lists(&verbose),
+            Scans::from([(values(1), 1), (values(2), 1)])
+        );
     }
 
     #[test]

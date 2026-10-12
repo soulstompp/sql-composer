@@ -18,7 +18,8 @@ que assenta toda a linguagem de modelos: uma relação posta dentro de outra, um
 argumento, relações combinadas como conjuntos e cada relação nomeada uma só vez.
 
 A instrução composta, quem a planeia continua a ser a base de dados; o sql-composer limita-se a
-escrevê-la.
+escrevê-la. Essa mesma instrução, o [warren-snail][warren-snail] também a lê, na sintaxe do
+PostgreSQL, numa base de dados que guarda num só ficheiro e que percorre uma coluna de cada vez.
 
 ## Instalar
 
@@ -911,3 +912,4 @@ nem subscreve este projeto.
 [examples/brick/sqlc/reports/shared_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/shared_moulds.sqlc
 [examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
 [LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE
+[warren-snail]: https://github.com/soulstompp/warren-snail

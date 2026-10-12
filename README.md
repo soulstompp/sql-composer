@@ -24,6 +24,8 @@ The database still plans the composed statement, and sql-composer only writes it
 [warren-surveyor][warren-surveyor]'s extension acts while it plans: its speller respells the
 statement where the catalog says the rows stay the same, and its surveyor reads your indexes for
 the rows and statistics PostgreSQL's planner would otherwise estimate.
+[warren-snail][warren-snail] reads the same composed statement, in PostgreSQL's syntax, from a
+database it keeps in one file and reads a column at a time.
 
 ## Install
 
@@ -1085,6 +1087,7 @@ project.
 
 [README.pt.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/README.pt.md
 [warren-surveyor]: https://github.com/soulstompp/warren-surveyor
+[warren-snail]: https://github.com/soulstompp/warren-snail
 [speller]: https://github.com/soulstompp/warren-surveyor/blob/HEAD/warren-pg-speller/README.md
 [docs/without-rust.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/docs/without-rust.md
 [crates/sql-composer-ffi/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/README.md

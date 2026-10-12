@@ -2,8 +2,11 @@
 
 use std::path::PathBuf;
 
+use crate::types::Dialect;
+
 /// The error type for sql-composer operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A referenced template file was not found on any search path.
     #[error("template not found: {path}")]
@@ -25,6 +28,24 @@ pub enum Error {
     #[error("binding '{name}' has no values")]
     MissingBinding {
         /// The name of the missing binding.
+        name: String,
+    },
+
+    /// A binding was given a number of values outside what its `EXPECTING` says.
+    #[error("binding '{name}' was given {given} value(s), and expects {expected}")]
+    ValueCount {
+        /// The name of the binding.
+        name: String,
+        /// How many values it was given.
+        given: usize,
+        /// What its `EXPECTING` says: `2..3`, or `at least 2`.
+        expected: String,
+    },
+
+    /// A binding written without `NULL` was given a NULL.
+    #[error("binding '{name}' was given a NULL, and its :bind does not say NULL")]
+    NullValue {
+        /// The name of the binding.
         name: String,
     },
 
@@ -61,10 +82,12 @@ pub enum Error {
     },
 
     /// A slot referenced in a template was not provided by the caller.
-    #[error("missing slot '@{name}' — not provided by caller")]
+    #[error("missing slot '@{name}' in {template} — not provided by caller")]
     MissingSlot {
         /// The name of the missing slot.
         name: String,
+        /// The template the slot stands in: its path, or the name a literal template was given.
+        template: String,
     },
 
     /// A template registered as a view takes an argument, which a view cannot.
@@ -76,6 +99,81 @@ pub enum Error {
         view: String,
         /// What it takes: a bound parameter or an open slot.
         reason: String,
+    },
+
+    /// A relation's name, taken from its file, is a word the database reserves.
+    #[error("{path} would be named {name}, which is a reserved word")]
+    ReservedName {
+        /// The template the name was taken from.
+        path: PathBuf,
+        /// The name.
+        name: String,
+    },
+
+    /// Two templates a statement reads take the same name from their files.
+    #[error("{first} and {second} would both be named {name}")]
+    NameTaken {
+        /// The name.
+        name: String,
+        /// The template that took it first.
+        first: PathBuf,
+        /// The template that would take it again.
+        second: PathBuf,
+    },
+
+    /// A `:define` met while the composer names every relation itself.
+    #[error("{path} is composed with :define, and the composer is naming every relation itself")]
+    DefinitionWhileNaming {
+        /// The template the `:define` puts in place.
+        path: PathBuf,
+    },
+
+    /// A template composed for a dialect its `:dialect(…)` does not name.
+    #[error("{template} is written for {written}, and is composed for {composed}", written = crate::types::listed(.declared.iter().map(Dialect::name)), composed = .dialect.name())]
+    NotWrittenFor {
+        /// The template: its path, or the name a literal template was given.
+        template: String,
+        /// The dialects it declares.
+        declared: Vec<Dialect>,
+        /// The dialect it was composed for.
+        dialect: Dialect,
+    },
+
+    /// A manifest that could not be written or read as JSON.
+    #[cfg(feature = "serde")]
+    #[error("manifest: {0}")]
+    Manifest(#[from] serde_json::Error),
+
+    /// A respelling asked for a dialect it does not write.
+    #[cfg(feature = "respell")]
+    #[error("--respell writes PostgreSQL alone, and this is composed for {}", .dialect.name())]
+    RespellFor {
+        /// The dialect composed for.
+        dialect: Dialect,
+    },
+
+    /// A `spellings.toml` that does not read as picks.
+    #[cfg(feature = "spellings")]
+    #[error("{path}: {message}")]
+    Picks {
+        /// The file.
+        path: String,
+        /// What is wrong in it.
+        message: String,
+    },
+
+    /// A name that is no dialect's.
+    #[error("{name} is not a dialect: postgres, mysql, mariadb, sqlite or duckdb")]
+    UnknownDialect {
+        /// The name given.
+        name: String,
+    },
+
+    /// A `:bind` composed into a dollar quote, where no value reaches it.
+    #[error("binding '{name}' would stand inside a dollar quote, where no value reaches it")]
+    BindInDollarQuote {
+        /// The name of the binding.
+        name: String,
     },
 }
 

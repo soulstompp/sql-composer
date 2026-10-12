@@ -1,0 +1,8 @@
+# The parts whose names match a regular expression, as filter patterns: (this part, any colour). The
+# match ignores case (~*), and the parts' trigram index serves it. A filter's contract is in
+# shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
+WHERE p.name ~* :bind(pattern)

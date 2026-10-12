@@ -1,0 +1,11 @@
+# The sets of a theme scope released in min_year or later: one row per set, keyed by set_num, each
+# labelled with the name of the scope's own theme. The caller decides the scope (the @scope slot):
+# one row per theme_id, with the scope's theme as scope_id. The label is read through scope_id, so
+# it always names the scope that chose the rows.
+SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
+FROM lego_sets s
+JOIN (
+    :compose(@scope)
+) sc ON sc.theme_id = s.theme_id
+JOIN lego_themes scope ON scope.id = sc.scope_id
+WHERE s.year >= :bind(min_year)

@@ -1,0 +1,19 @@
+# The median set size of each root theme, with the smallest and the largest, over every set in its
+# subtree: one row per root theme, keyed by root_id. percentile_cont(0.5) orders a theme's sizes
+# and takes the middle one, or halfway between the two middle ones when the theme has an even
+# number of sized sets. A set with no size is left out of all three, and sized counts the sets
+# that were in.
+WITH set_roots AS (
+    :compose(shared/set_roots.sqlc)
+)
+SELECT
+    root_id,
+    root_name,
+    count(*) AS sets,
+    count(num_parts) AS sized,
+    min(num_parts) AS smallest,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY num_parts) AS median,
+    max(num_parts) AS largest
+FROM set_roots
+GROUP BY root_id, root_name
+ORDER BY root_id

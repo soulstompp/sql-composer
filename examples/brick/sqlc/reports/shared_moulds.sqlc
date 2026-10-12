@@ -1,0 +1,2 @@
+# The moulds both Technic and City sets use: one row per part_num.
+:intersect(queries/technic_moulds.sqlc, queries/city_moulds.sqlc)

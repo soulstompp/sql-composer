@@ -1,0 +1,24 @@
+# Each root theme's three newest sets, from anywhere in its subtree: up to three rows per root
+# theme, keyed by (root_id, set_num). LATERAL lets the subquery read the theme of the row it is
+# joined to, so LIMIT keeps three per theme rather than three in all. Newest is by year, a set
+# with no year last, and of sets released the same year the higher set_num, so the three are
+# always the same three.
+SELECT
+    r.id AS root_id,
+    r.name AS root_name,
+    n.set_num,
+    n.name,
+    n.year
+FROM lego_themes r
+CROSS JOIN LATERAL (
+    SELECT s.set_num, s.name, s.year
+    FROM lego_sets s
+    JOIN (
+        :compose(shared/theme_closure.sqlc)
+    ) tc ON tc.theme_id = s.theme_id
+    WHERE tc.ancestor_id = r.id
+    ORDER BY s.year DESC NULLS LAST, s.set_num DESC
+    LIMIT 3
+) n
+WHERE r.parent_id IS NULL
+ORDER BY r.id, n.year DESC NULLS LAST, n.set_num DESC

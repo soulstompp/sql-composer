@@ -13,11 +13,15 @@ pub struct Template {
     pub elements: Vec<Element>,
     /// Where this template originated from.
     pub source: TemplateSource,
+    /// The dialects the template declares it is written for, by `:dialect(…)` at its head, in
+    /// the order it names them. Empty when it declares none, which is every dialect.
+    pub dialects: Vec<Dialect>,
 }
 
 /// The origin of a template.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum TemplateSource {
     /// Loaded from a file at the given path.
     File(PathBuf),
@@ -28,6 +32,7 @@ pub enum TemplateSource {
 /// A single element in a template.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Element {
     /// Raw SQL text passed through unchanged.
     Sql(String),
@@ -56,6 +61,7 @@ pub struct Binding {
 /// What a `:compose(...)` target refers to.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ComposeTarget {
     /// A direct file path.
     Path(PathBuf),
@@ -106,6 +112,7 @@ pub struct Command {
 /// The kind of aggregate command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CommandKind {
     /// COUNT command - wraps in `SELECT COUNT(*) FROM (...)`.
     Count,
@@ -125,9 +132,28 @@ pub enum CommandKind {
     Except,
 }
 
-/// Target database dialect for placeholder syntax.
+/// The database a template is composed for: its placeholders and the words it reserves, each at
+/// the database's default settings.
+///
+/// A `match` on it outside this crate needs a wildcard arm, so a dialect added later breaks no
+/// caller:
+///
+/// ```compile_fail,E0004
+/// use sql_composer::Dialect;
+///
+/// fn sign(dialect: Dialect) -> &'static str {
+///     match dialect {
+///         Dialect::Postgres => "$",
+///         Dialect::Mysql => "?",
+///         Dialect::Mariadb => "?",
+///         Dialect::Sqlite => "?",
+///         Dialect::Duckdb => "$",
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Dialect {
     /// PostgreSQL: `$1`, `$2`, `$3`
     Postgres,
@@ -135,23 +161,135 @@ pub enum Dialect {
     Mysql,
     /// SQLite: `?1`, `?2`, `?3`
     Sqlite,
+    /// MariaDB: `?`, `?`, `?`
+    Mariadb,
+    /// DuckDB: `$1`, `$2`, `$3`
+    Duckdb,
+}
+
+/// How a dialect writes a statement's placeholders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum Placeholders {
+    /// Numbered from 1 after a sign: `$1` on PostgreSQL and DuckDB, `?1` on SQLite. A name used
+    /// twice takes one number, and the names are numbered in alphabetical order.
+    Numbered(char),
+    /// A bare `?` for each use, in the order the statement uses them: MySQL and MariaDB.
+    Positional,
+}
+
+impl Placeholders {
+    /// The placeholder for the given 1-based parameter index.
+    pub fn placeholder(&self, index: usize) -> String {
+        match self {
+            Placeholders::Numbered(sign) => format!("{sign}{index}"),
+            Placeholders::Positional => "?".to_string(),
+        }
+    }
 }
 
 impl Dialect {
+    /// Every dialect, in the order `--dialect` lists them.
+    pub const ALL: &'static [Dialect] = &[
+        Dialect::Postgres,
+        Dialect::Mysql,
+        Dialect::Mariadb,
+        Dialect::Sqlite,
+        Dialect::Duckdb,
+    ];
+
+    /// The name `--dialect` and `:dialect(…)` take for this dialect, which [`str::parse`] reads
+    /// back.
+    ///
+    /// ```
+    /// use sql_composer::Dialect;
+    ///
+    /// for &dialect in Dialect::ALL {
+    ///     assert_eq!(dialect.name().parse::<Dialect>().unwrap(), dialect);
+    /// }
+    /// assert!("postgresql".parse::<Dialect>().is_err());
+    /// ```
+    pub fn name(&self) -> &'static str {
+        match self {
+            Dialect::Postgres => "postgres",
+            Dialect::Mysql => "mysql",
+            Dialect::Mariadb => "mariadb",
+            Dialect::Sqlite => "sqlite",
+            Dialect::Duckdb => "duckdb",
+        }
+    }
+
+    /// How this dialect writes its placeholders.
+    pub fn placeholders(&self) -> Placeholders {
+        match self {
+            Dialect::Postgres | Dialect::Duckdb => Placeholders::Numbered('$'),
+            Dialect::Sqlite => Placeholders::Numbered('?'),
+            Dialect::Mysql | Dialect::Mariadb => Placeholders::Positional,
+        }
+    }
+
     /// Format a placeholder for the given 1-based parameter index.
     pub fn placeholder(&self, index: usize) -> String {
-        match self {
-            Dialect::Postgres => format!("${index}"),
-            Dialect::Mysql => "?".to_string(),
-            Dialect::Sqlite => format!("?{index}"),
-        }
+        self.placeholders().placeholder(index)
     }
 
     /// Whether this dialect uses numbered placeholders ($1, ?1) vs positional (?).
     ///
-    /// Numbered dialects (Postgres, SQLite) support alphabetical parameter ordering
-    /// and deduplication. Positional dialects (MySQL) use document-order placeholders.
+    /// Numbered dialects (PostgreSQL, SQLite, DuckDB) support alphabetical parameter ordering
+    /// and deduplication. Positional dialects (MySQL, MariaDB) use document-order placeholders.
     pub fn supports_numbered_placeholders(&self) -> bool {
-        matches!(self, Dialect::Postgres | Dialect::Sqlite)
+        matches!(self.placeholders(), Placeholders::Numbered(_))
+    }
+
+    /// The words this dialect refuses as a relation's name, in lower case. `--with` refuses a
+    /// file whose name would be one of them.
+    pub fn reserved_words(&self) -> &'static [&'static str] {
+        match self {
+            Dialect::Postgres => crate::reserved::POSTGRES,
+            Dialect::Mysql => crate::reserved::MYSQL,
+            Dialect::Sqlite => crate::reserved::SQLITE,
+            Dialect::Mariadb => crate::reserved::MARIADB,
+            Dialect::Duckdb => crate::reserved::DUCKDB,
+        }
+    }
+
+    /// Where this dialect's database begins and ends its quoted spans and comments.
+    pub(crate) fn regime(&self) -> &'static crate::scan::Regime {
+        match self {
+            Dialect::Postgres | Dialect::Duckdb => &crate::scan::POSTGRES,
+            Dialect::Mysql => &crate::scan::MYSQL,
+            Dialect::Mariadb => &crate::scan::MARIADB,
+            Dialect::Sqlite => &crate::scan::SQLITE,
+        }
+    }
+}
+
+impl std::str::FromStr for Dialect {
+    type Err = crate::error::Error;
+
+    /// The dialect `--dialect` and `:dialect(…)` name: `postgres`, `mysql`, `mariadb`, `sqlite` or
+    /// `duckdb`.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Dialect::ALL
+            .iter()
+            .find(|dialect| dialect.name() == name)
+            .copied()
+            .ok_or_else(|| crate::error::Error::UnknownDialect {
+                name: name.to_string(),
+            })
+    }
+}
+
+/// `a`, `a and b`, `a, b and c`.
+pub(crate) fn listed<S: AsRef<str>>(items: impl IntoIterator<Item = S>) -> String {
+    let items: Vec<S> = items.into_iter().collect();
+    match &items[..] {
+        [] => String::new(),
+        [one] => one.as_ref().to_string(),
+        [rest @ .., last] => {
+            let rest: Vec<&str> = rest.iter().map(AsRef::as_ref).collect();
+            format!("{} and {}", rest.join(", "), last.as_ref())
+        }
     }
 }

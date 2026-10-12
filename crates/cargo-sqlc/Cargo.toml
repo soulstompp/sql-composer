@@ -1,19 +1,24 @@
 [package]
 name = "cargo-sqlc"
-version = "0.0.4"
+version.workspace = true
 description = "Cargo subcommand for composing SQL templates with sql-composer"
 keywords = ["sql", "cargo", "subcommand", "composer"]
 categories = ["command-line-utilities", "database"]
-repository = "https://github.com/soulstompp/sql-composer"
-license = "MIT"
-edition = "2021"
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [[bin]]
 name = "cargo-sqlc"
 path = "src/main.rs"
 
 [dependencies]
-sql-composer = { version = "0.0.4", path = "../sql-composer" }
-clap = { version = "4", features = ["derive", "env"] }
-walkdir = "2"
-tempfile = "3"
+sql-composer = { workspace = true, features = ["serde", "respell", "spellings"] }
+clap.workspace = true
+walkdir.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+serde_json = "1"

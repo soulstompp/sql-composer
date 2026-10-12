@@ -1,0 +1,23 @@
+# What the builders in an area bought, by the root theme of the set: one row per root theme, keyed
+# by root_id, with the purchases and the builders who made them, most purchases first. The caller
+# decides the area (the @area slot): builders, with one column, builder_id. A builder the area
+# names twice still counts once, since the area only decides who is in it.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+),
+set_roots AS (
+    :compose(shared/set_roots.sqlc)
+),
+area AS (
+    :compose(@area)
+)
+SELECT
+    sr.root_id,
+    sr.root_name,
+    count(*) AS purchases,
+    count(DISTINCT ps.builder_id) AS builders
+FROM purchase_sets ps
+JOIN set_roots sr ON sr.set_num = ps.set_num
+WHERE ps.builder_id IN (SELECT a.builder_id FROM area a)
+GROUP BY sr.root_id, sr.root_name
+ORDER BY purchases DESC, sr.root_id

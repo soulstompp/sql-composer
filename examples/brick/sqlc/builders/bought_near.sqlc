@@ -1,0 +1,3 @@
+# What the builders within km kilometres of a city bought, by root theme: the area purchases with
+# the circle round the city in the @area slot.
+:compose(shared/area_purchases.sqlc, @area = areas/near_city.sqlc)

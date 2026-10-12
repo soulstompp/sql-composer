@@ -1,0 +1,14 @@
+# A set's colours, version by version: one row per version, keyed by version, with every colour
+# once, in name order. A line whose colour is missing from the catalogue has no colour name; it is
+# counted in unnamed_lines and kept out of the array, where it would be a NULL.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    version,
+    array_agg(DISTINCT color_name ORDER BY color_name)
+        FILTER (WHERE color_name IS NOT NULL) AS colors,
+    count(*) FILTER (WHERE color_name IS NULL) AS unnamed_lines
+FROM set_part_details
+GROUP BY version
+ORDER BY version

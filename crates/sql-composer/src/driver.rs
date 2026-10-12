@@ -28,7 +28,7 @@ pub trait ComposerConnection {
     /// e.g. `Box<dyn rusqlite::types::ToSql>` or `Box<dyn duckdb::ToSql>`
     type Value;
 
-    /// The composed SQL string (callers use this to prepare statements).
+    /// The composed statements, as text (callers use this to prepare statements).
     type Statement;
 
     /// The error type for this driver.
@@ -54,7 +54,7 @@ pub trait ComposerConnectionAsync {
     /// The database-specific value type for bind parameters.
     type Value;
 
-    /// The composed SQL string.
+    /// The composed statements, as text.
     type Statement;
 
     /// The error type for this driver.
@@ -76,7 +76,7 @@ pub trait ComposerConnectionAsync {
 /// produce the ordered value vector matching placeholder order.
 ///
 /// For single-value bindings, each name maps to one value.
-/// For multi-value bindings (e.g. IN clauses), the composed SQL already has
+/// For multi-value bindings (e.g. IN clauses), the composed statement already has
 /// the correct number of placeholders per binding name, so we flatten all
 /// values for each occurrence.
 pub fn resolve_values<V>(
@@ -98,6 +98,32 @@ pub fn resolve_values<V>(
         // to exactly one value. Multi-value bindings have been expanded by
         // compose_with_values() so each placeholder gets its own entry.
         result.push(vs.remove(0));
+    }
+
+    Ok(result)
+}
+
+/// Like [`resolve_values`], for positional placeholders (MySQL's `?`), where `bind_params`
+/// lists a name once for every placeholder it fills, use after use.
+///
+/// A name used twice in a statement is two placeholders, or two runs of them for a list, and
+/// each use takes the name's values again from the first: `x` given `[7]` and used twice fills
+/// `?` and `?` with 7 and 7, and given `[1, 2]` fills `?, ?` and `?, ?` with 1, 2, 1, 2.
+pub fn resolve_values_by_use<V: Clone>(
+    composed: &ComposedSql,
+    values: &BTreeMap<String, Vec<V>>,
+) -> Result<Vec<V>> {
+    let mut taken: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut result = Vec::with_capacity(composed.bind_params.len());
+
+    for name in &composed.bind_params {
+        let vs = values
+            .get(name)
+            .filter(|vs| !vs.is_empty())
+            .ok_or_else(|| Error::MissingBinding { name: name.clone() })?;
+        let n = taken.entry(name.as_str()).or_default();
+        result.push(vs[*n % vs.len()].clone());
+        *n += 1;
     }
 
     Ok(result)
@@ -137,6 +163,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE a = $1 AND b = $2".into(),
             bind_params: vec!["a".into(), "b".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         values.insert("a".into(), vec!["hello"]);
@@ -151,6 +178,7 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE a = $1".into(),
             bind_params: vec!["missing".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<&str>> = BTreeMap::new();
 
@@ -165,12 +193,56 @@ mod tests {
         let composed = ComposedSql {
             sql: "SELECT * FROM t WHERE id IN ($1, $2, $3)".into(),
             bind_params: vec!["ids".into(), "ids".into(), "ids".into()],
+            ..Default::default()
         };
         let mut values: BTreeMap<String, Vec<i32>> = BTreeMap::new();
         values.insert("ids".into(), vec![10, 20, 30]);
 
         let result = resolve_values(&composed, &mut values).unwrap();
         assert_eq!(result, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_a_name_used_twice_takes_its_value_at_each_use() {
+        use crate::composer::Composer;
+        use crate::parser::parse_template;
+        use crate::types::{Dialect, TemplateSource};
+
+        let template = parse_template(
+            "SELECT * FROM t WHERE a = :bind(x) OR b = :bind(x)",
+            TemplateSource::Literal("twice".into()),
+        )
+        .unwrap();
+        let composer = Composer::new(Dialect::Mysql);
+
+        let one: BTreeMap<String, Vec<i32>> = bind_values!("x" => [7]);
+        let composed = composer.compose_with_values(&template, &one).unwrap();
+        assert_eq!(composed.sql, "SELECT * FROM t WHERE a = ? OR b = ?");
+        assert_eq!(resolve_values_by_use(&composed, &one).unwrap(), vec![7, 7]);
+
+        let list: BTreeMap<String, Vec<i32>> = bind_values!("x" => [1, 2]);
+        let composed = composer.compose_with_values(&template, &list).unwrap();
+        assert_eq!(composed.sql, "SELECT * FROM t WHERE a = ?, ? OR b = ?, ?");
+        assert_eq!(
+            resolve_values_by_use(&composed, &list).unwrap(),
+            vec![1, 2, 1, 2]
+        );
+    }
+
+    #[test]
+    fn test_resolve_values_by_use_missing_binding() {
+        let composed = ComposedSql {
+            sql: "SELECT * FROM t WHERE a = ?".into(),
+            bind_params: vec!["missing".into()],
+            ..Default::default()
+        };
+        let empty: BTreeMap<String, Vec<i32>> = BTreeMap::new();
+        let err = resolve_values_by_use(&composed, &empty).unwrap_err();
+        assert!(matches!(err, Error::MissingBinding { ref name } if name == "missing"));
+
+        let none: BTreeMap<String, Vec<i32>> = BTreeMap::from([("missing".into(), vec![])]);
+        let err = resolve_values_by_use(&composed, &none).unwrap_err();
+        assert!(matches!(err, Error::MissingBinding { ref name } if name == "missing"));
     }
 
     #[test]

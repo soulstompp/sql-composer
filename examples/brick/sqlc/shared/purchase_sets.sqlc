@@ -1,0 +1,11 @@
+# Every purchase with its builder and the set it bought, one row per purchase, keyed by
+# purchase_id. A purchase names a row of its builder's collection, and the set is that row's: the
+# purchase never carries the set itself, so the set is read through the collection row.
+SELECT
+    p.purchase_id,
+    p.builder_id,
+    c.set_num,
+    p.ordered_at,
+    p.delivered_at
+FROM lego_purchases p
+JOIN lego_collection c ON c.builder_id = p.builder_id AND c.row_no = p.row_no

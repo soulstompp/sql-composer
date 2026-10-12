@@ -1,0 +1,407 @@
+{
+  "dialect": "postgres",
+  "with": false,
+  "views": null,
+  "search_path": [],
+  "respell": false,
+  "files": {
+    "areas/near_city.sql": {
+      "bind_params": [
+        "city_id",
+        "km"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "areas/postcodes.sql": {
+      "bind_params": [
+        "pattern"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/bought_in_postcodes.sql": {
+      "bind_params": [
+        "pattern"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/bought_near.sql": {
+      "bind_params": [
+        "city_id",
+        "km"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/complete_scope.sql": {
+      "bind_params": [
+        "theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/latest_purchases.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/nearest.sql": {
+      "bind_params": [
+        "city_id",
+        "top"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "builders/purchase_history.sql": {
+      "bind_params": [
+        "builder_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/all.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/lines_uncatalogued.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/roster.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/sets_without_lines.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "filters/by_category.sql": {
+      "bind_params": [
+        "category_name"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "filters/by_color.sql": {
+      "bind_params": [
+        "color_name"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "filters/by_pattern.sql": {
+      "bind_params": [
+        "pattern"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "filters/by_words.sql": {
+      "bind_params": [
+        "words"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "inventory/track_set_parts.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "inventory/update_spare_counts.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "parts/brick_sizes.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "parts/search_parts.sql": {
+      "bind_params": [
+        "top",
+        "words"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "queries/city_moulds.sql": {
+      "bind_params": [
+        "city_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "queries/city_sets.sql": {
+      "bind_params": [
+        "city_theme_id",
+        "min_year"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "queries/technic_moulds.sql": {
+      "bind_params": [
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "queries/technic_sets.sql": {
+      "bind_params": [
+        "min_year",
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "queries/theme_set_parts.sql": {
+      "bind_params": [
+        "theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/city_only_moulds.sql": {
+      "bind_params": [
+        "city_theme_id",
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/combined_theme_sets.sql": {
+      "bind_params": [
+        "city_theme_id",
+        "min_year",
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/count_theme_parts.sql": {
+      "bind_params": [
+        "theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/insert_set_summary.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/merge_set_summary.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/purchases_by_year_theme.sql": {
+      "bind_params": [
+        "from_year",
+        "to_year"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/release_years.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/shared_moulds.sql": {
+      "bind_params": [
+        "city_theme_id",
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "reports/theme_set_sizes.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "scopes/city.sql": {
+      "bind_params": [
+        "city_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "scopes/technic.sql": {
+      "bind_params": [
+        "technic_theme_id"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/never_bought.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_category_parts.sql": {
+      "bind_params": [
+        "category_name",
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_colored_parts.sql": {
+      "bind_params": [
+        "color_name",
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_parts_by_pattern.sql": {
+      "bind_params": [
+        "pattern",
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_parts_by_words.sql": {
+      "bind_params": [
+        "set_num",
+        "words"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_set_parts.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/select_sets_by_themes.sql": {
+      "bind_params": [
+        "min_year",
+        "theme_ids"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/set_colors.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "sets/set_document.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "shared/purchase_sets.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "shared/set_category_totals.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "shared/set_part_details.sql": {
+      "bind_params": [
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+    "shared/set_roots.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "shared/theme_closure.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "themes/newest_sets.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# Every check's findings, one row each, and a row with no set_num for a check that finds nothing.
+:union(ALL checks/lines_uncatalogued.sqlc, checks/sets_without_lines.sqlc)

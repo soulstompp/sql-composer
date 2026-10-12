@@ -1,0 +1,15 @@
+# The bricks whose names give their size, as "Brick 2 x 4": one row per part, keyed by part_num,
+# with the width and the length read out of the name. The pattern is anchored at both ends, so a
+# name with anything more is not a sized brick; ~ keeps the names it matches, through the parts'
+# trigram index, and regexp_match returns the numbers its two groups catch.
+SELECT
+    sized.part_num,
+    sized.name,
+    sized.size[1]::integer AS width,
+    sized.size[2]::integer AS length
+FROM (
+    SELECT p.part_num, p.name, regexp_match(p.name, '^Brick (\d+) x (\d+)$') AS size
+    FROM lego_parts p
+    WHERE p.name ~ '^Brick (\d+) x (\d+)$'
+) sized
+ORDER BY width, length, sized.part_num

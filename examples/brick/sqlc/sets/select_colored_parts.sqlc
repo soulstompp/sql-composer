@@ -1,0 +1,3 @@
+# A set's lines in the colour color_name, one row per line, keyed by the line: the set's lines with
+# the colour's filter in the @filter slot.
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)

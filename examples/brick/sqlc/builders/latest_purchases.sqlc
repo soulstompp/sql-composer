@@ -1,0 +1,16 @@
+# Each builder's latest purchase: one row per builder who bought anything, keyed by builder_id.
+# DISTINCT ON keeps the first row of each builder in the ORDER BY, so the ORDER BY decides which
+# purchase that is: the latest placed, and of two placed at the same instant, the higher
+# purchase_id.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+)
+SELECT DISTINCT ON (ps.builder_id)
+    ps.builder_id,
+    b.name AS builder_name,
+    ps.purchase_id,
+    ps.ordered_at,
+    ps.set_num
+FROM purchase_sets ps
+JOIN lego_builders b ON b.builder_id = ps.builder_id
+ORDER BY ps.builder_id, ps.ordered_at DESC, ps.purchase_id DESC

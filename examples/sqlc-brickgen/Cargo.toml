@@ -1,0 +1,29 @@
+[package]
+name = "sqlc-brickgen"
+version = "0.0.2"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/soulstompp/sql-composer"
+readme = "README.md"
+rust-version = "1.94"
+keywords = ["postgres", "test-data", "generator", "benchmark", "partitioning"]
+categories = ["command-line-utilities", "database", "development-tools::testing"]
+include = ["src/**", "data/cities.tsv", "README.md", "CHANGELOG.md", "LICENSE"]
+description = "Generates a large catalogue of bricks and sets from a real one, with builders' collections and purchase logs, and loads it into PostgreSQL in hierarchical waves"
+
+[[bin]]
+name = "sqlc-brickgen"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
+# sqlx-postgres 0.9.0 builds whoami without `std`, so a URL that names no user connects as
+# `anonymous`; whoami's default features have it read the operating system's user again.
+whoami = "2"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+log = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+# The IANA time zone database, bundled, so every machine reads the same offset history.
+jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }

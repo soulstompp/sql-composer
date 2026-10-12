@@ -1,0 +1,30 @@
+[package]
+name = "sql-composer-ffi"
+version.workspace = true
+description = "C ABI for sql-composer: parse and compose SQL templates from any language that calls C"
+keywords = ["sql", "template", "composer", "ffi", "c"]
+categories = ["database", "external-ffi-bindings"]
+repository.workspace = true
+license.workspace = true
+readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+# `cdylib` and `staticlib` are what a C program links, `rlib` so the crate's own tests link against
+# the same functions a C caller calls.
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+# `serde` for the manifest, which `sql_composer_compose_all` gives as the text cargo sqlc writes,
+# and `respell` for `sql_composer_flags_set_respell`.
+sql-composer = { workspace = true, features = ["serde", "respell"] }
+
+[build-dependencies]
+# Writes `sql_composer.h` from this crate's source into `OUT_DIR`. No default features: they are
+# its command line, which a build script does not run.
+cbindgen = { version = "0.29", default-features = false }
+
+[dev-dependencies]
+tempfile.workspace = true
+walkdir.workspace = true

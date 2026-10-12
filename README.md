@@ -1,110 +1,76 @@
 # sql-composer
 
-`sql-composer` helps to manage the complexity of growing SQL codebases by eliminating duplication while keeping you in real SQL. It is a clean macro-based template engine that composes complete, reusable SQL statements into larger queries. You write real SQL, extract the shared queries into their own files, and compose them into the queries with predictable named bindings that are portable across SQL dialects.
+> **Também disponível em português europeu: [`README.pt.md`][README.pt.md].**
 
-The ability to actively collaborate with your DBA team as the database fills up and query performance starts to matter by providing them SQL is worth the code maintenance costs, but is a major ask for the design team. SQLx makes this process dramatically more manageable with its `query_file!()` macro, which reads a query from a `.sql` file and checks it against the database at compile time. sql-composer tries to reintroduce some of the code reuse lost when SQL is just SQL.
+A join copied into a second query is two joins. They start out the same, and they drift apart.
 
-In probably its most natural use case, sql-composer serves as a pre-compiler for the `.sql` files SQLx's `query_file!()` reads at compile time. You write `.sqlc` templates with `:compose()` references to shared logic, run `cargo sqlc compose` to generate the final `.sql` files, and `query_file!()` picks them up for compile-time verification.
+sql-composer keeps one. Each query is written once, in plain SQL, and every statement that needs
+it has it composed in, for PostgreSQL, MySQL, MariaDB, SQLite or DuckDB. A change is made in one
+file, and the next compose writes it into every statement that holds it. What reaches the database
+is a file of plain SQL: a DBA reads it, `EXPLAIN` runs it, SQLx's `query_file!()` checks it when
+your code compiles, and a program in any language runs it by the names its manifest gives each
+placeholder.
 
-The clean macros provide query reuse and basic bindings and feel and look a fair amount like a SQL function. The average SQL-savvy user should be able to quickly learn to read `.sqlc` templates and adapting to an existing set of templates should be fairly straightforward. This means DBAs should be able to follow along with templates but more importantly that OLTP queries can now be reused at least partially for ETL and OLAP query workloads.
+Each query lives in a file of its own, a template, and other templates compose it by its path.
+`cargo sqlc compose` writes each composed statement with no directive left in it, and nothing is
+assembled at run time.
 
-The templates allow for `#` comments that are stripped during composition, so you can document your business rules, explain join ordering decisions, and leave notes for future developers without cluttering the SQL that hits your database. These comments can help teams collaborate and ensure a strong contextual understanding of queries for agents and search tools.
+Composition works because every query returns a relation, rows that share their columns, and a
+relation can stand wherever a table stands. A query composed into another is read there as a table.
+That is closure, and the whole template language rests on it: one relation put inside another, a
+relation passed as an argument, relations combined as sets, and each relation named once.
 
-Reading and adapting to `.sqlc` templates is fairly straightforward, but designing them — particularly when starting from scratch — is a different skill. These templates will add cognitive load while designing your data paths in SQL, but they help distribute the ever-changing burden of query performance tuning across as many different specialists as possible. It will inevitably take all of you.
+The database still plans the composed statement, and sql-composer only writes it. On PostgreSQL,
+[warren-surveyor][warren-surveyor]'s extension acts while it plans: its speller respells the
+statement where the catalog says the rows stay the same, and its surveyor reads your indexes for
+the rows and statistics PostgreSQL's planner would otherwise estimate.
+[warren-snail][warren-snail] reads the same composed statement, in PostgreSQL's syntax, from a
+database it keeps in one file and reads a column at a time.
 
-## Features
+## Install
 
-- **Clean macro syntax** embedded in SQL — no new language to learn
-- **Dialect-aware placeholders** — Postgres (`$1`), MySQL (`?`), SQLite (`?1`)
-- **Template composition** — include and reuse complete SQL statements via `:compose(path)`
-- **Parameterized slots** — declare `@slot` placeholders in shared templates, filled by callers
-- **Multi-value bindings** — expand `:bind(ids)` into `$1, $2, $3` for `IN` clauses
-- **Recursive directory scanning** — compose entire directory trees of templates
-- **`--verify` mode** — CI-friendly check that composed output matches committed `.sql` files
-- **Atomic output** — composition writes to a temp directory, swaps on success, cleans stale files
-- **Circular reference detection** — prevents infinite loops in template includes
-- **`#` comments** — rich documentation stripped from output, zero cost in production
-- **Driver crates** — thin wrappers for rusqlite, DuckDB, postgres, and MySQL
-
-## Why sql-composer
-
-**Eliminate SQL duplication without ever leaving SQL.** Shared business logic — what "active" means, how you resolve versions, how you calculate revenue — lives in one place and gets composed into every query that needs it. No ORM abstraction layer, no query builder DSL. Just SQL.
-
-**Work directly with your DBA team.** The composed `.sql` files are the exact queries that hit your database. When your DBA has questions or suggestions, you're both looking at the same SQL. You can trace any statement back to the template that produced it.
-
-**Reuse across OLTP and OLAP systems.** The same shared templates can be composed into transactional queries for Postgres (via SQLx) and analytical queries for DuckDB (via the duckdb driver) — without maintaining two divergent copies of your core business logic. Even across different database engines, the shared SQL stays in sync.
-
-**Built for SQLx's `query_file!()`**. sql-composer is designed as a complement to SQLx. `cargo sqlc compose` generates the `.sql` files that `query_file!()` reads at compile time, then runs `cargo sqlx prepare` to save the query data SQLx checks them against when it builds offline. The macro takes its arguments in the order of the composed statement's placeholders, which for Postgres and SQLite is the alphabetical order of the bind names (see [How Bind Parameter Ordering Works](#how-bind-parameter-ordering-works)). You get DRY templates and compile-time verified queries.
-
-**Rich documentation, zero production overhead.** Templates support `#` comments that are stripped during composition. Document your business rules, explain join ordering, leave notes for agents and future developers — none of it ends up in the SQL that hits your database.
-
-**Clean macros.** sql-composer macros compose structured SQL building blocks — CTEs, queries, filters — not arbitrary string fragments. You can't splice in a bare WHERE clause or a partial JOIN. Templates are organized around composable units that each have a clear role in the final query, preventing the fragment spaghetti that makes other template systems unmaintainable.
-
-### Caveats
-
-* sql-composer requires structuring your SQL so that shared logic lives in composable units (CTEs, subqueries, filters) that get assembled into larger queries. This is a different way of organizing SQL than the more common approach of copy-pasting fragments. It may take some experimentation to find the right balance of template granularity and composition for your codebase. Also, as always, a particular RDBMS engine and the evolving shape of the data will ultimately decide which of this code reuse remains viable over time.
-
-* This adds another layer of tooling and complexity to your SQL codebase. I am currently experimenting with a `sqlc_file!()` macro that could help somewhat mimic the amazing SQLx-style compile-time SQL errors that make life dramatically easier.
-
-## Example: Lego Database
-
-The examples below use the [Lego database](https://www.kaggle.com/datasets/rtatman/lego-database) ([SQL](https://raw.githubusercontent.com/neondatabase/postgres-sample-dbs/main/lego.sql)), which has sets, parts, colors, themes, inventories, and the joins between them. It's a good fit because even simple questions ("what parts are in this set, with colors and categories?") require a 4-table join — exactly the kind of logic you'd want to write once and reuse.
-
-LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
-
-### The problem: duplicated joins
-
-Suppose you need to query the full part details for a set. The join chain is always the same:
-
-```sql
--- This 4-table join appears in every query that needs part details for a set.
--- Without sql-composer, you copy-paste it into SELECT, INSERT, and UPDATE queries.
-FROM lego_inventory_parts ip
-JOIN lego_inventories i ON i.id = ip.inventory_id
-JOIN lego_parts p ON p.part_num = ip.part_num
-JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-JOIN lego_colors c ON c.id = ip.color_id
-WHERE i.set_num = '75192-1'
+```sh
+cargo install cargo-sqlc
 ```
 
-Every query that needs part details — listing parts, building reports, updating counts — repeats this join chain. When the schema changes or the DBA adds an index hint, you update it in one place or forget and break something.
+This installs one program, `cargo-sqlc`, into Cargo's `bin` directory (`~/.cargo/bin` unless you
+set it elsewhere). Cargo runs it as `cargo sqlc`. Composing reads `.sqlc` files, writes `.sql`
+files, and connects to no database.
 
-### The solution: shared template, composed three ways
+After it composes, it runs `cargo sqlx prepare`, which saves the query data SQLx checks against
+offline. That step is SQLx's own command, installed apart with `cargo install sqlx-cli`, and it
+connects to the database in `DATABASE_URL`. `--skip-prepare` leaves it out.
+`cargo uninstall cargo-sqlc` takes the program away again.
 
-Write the shared logic once as a CTE in its own template:
+To compose from Rust instead, add the library:
 
-```
-sqlc/
-  shared/
-    set_part_details.sqlc       # The canonical 4-table join, written once
-  sets/
-    select_set_parts.sqlc       # SELECT — list parts for a set
-  reports/
-    insert_set_summary.sqlc     # INSERT SELECT — populate a reporting table
-  inventory/
-    update_spare_counts.sqlc    # UPDATE — sync spare part counts
+```toml
+[dependencies]
+sql-composer = "0.1.0"
 ```
 
-#### [`shared/set_part_details.sqlc`](examples/lego/sqlc/shared/set_part_details.sqlc)
+From C or Python, the bindings compose inside your own program (*C and Python*, below). A project
+with no Rust in it composes with `cargo sqlc` alone: [Composing without Rust][docs/without-rust.md]
+runs the same steps through `psql` and the manifest.
+
+## A first composition
+
+The templates on this page read the tables of the [brick example][examples/brick/]: a catalogue of
+building-brick sets, with their parts, colours and themes, and the builders who buy them, all built
+by [sqlc-brickgen][examples/sqlc-brickgen/].
+
+A set's lines are a join of five tables: every line of the set's inventories, with its part, the
+part's category and its colour. Written once, it is a file of its own,
+[`shared/set_part_details.sqlc`][examples/brick/sqlc/shared/set_part_details.sqlc]:
 
 ```sql
 # What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
-# line (inventory_id, part_num, color_id, is_spare). A set LEGO sold in more than one version has
-# one inventory per version, and each line carries its version. Nothing here adds two versions
+# line (inventory_id, part_num, color_id, is_spare). A set sold in more than one version has one
+# inventory per version, and each line carries its version. Nothing here adds two versions
 # together: a caller that totals a set totals it per version.
 #
 # A line is never dropped for what the catalogue lacks. A line whose part is not in the parts
 # catalogue keeps its row, with part_status 'uncatalogued' and no part name or category.
-#
-# This query is the single source of truth for "what parts are in a set."
-# If the DBA asks you to change join order or add a filter, change it here
-# and every query that composes this template picks up the fix.
-#
-# Used by: sets/select_set_parts.sqlc
-#          reports/insert_set_summary.sqlc
-#          inventory/track_set_parts.sqlc
-#          inventory/update_spare_counts.sqlc
-#          shared/filtered_set_parts.sqlc
 SELECT
     ip.inventory_id,
     i.version,
@@ -126,16 +92,18 @@ LEFT JOIN lego_colors c ON c.id = ip.color_id
 WHERE i.set_num = :bind(set_num)
 ```
 
-This is a complete, valid query. Callers compose it into a CTE — the `WITH ... AS (...)` wrapping lives in the calling template, not here. Every `#` comment is stripped from the output.
+It is a complete query. It runs on its own, given a `set_num`, and its comment says what its rows
+are and what keys them.
+The `#` lines are the template's own comments, and they never reach the database.
 
-#### [`sets/select_set_parts.sqlc`](examples/lego/sqlc/sets/select_set_parts.sqlc) — SELECT
+The listing of a set's parts composes it,
+[`sets/select_set_parts.sqlc`][examples/brick/sqlc/sets/select_set_parts.sqlc]:
 
 ```sql
-# List all parts for a set with full details, one row per line, version by version.
-# Composes the shared part resolution query into a CTE. The ORDER BY ends on the line key, so the
-# order is total and a truncated listing is always the same rows. A line with no category, part name
-# or colour name comes after the named ones; the ORDER BY says so, because databases disagree on
-# where a NULL sorts.
+# A set's parts, one row per line, version by version, each line with its part, category and
+# colour. The ORDER BY ends on the line key, so the order is total and a truncated listing is always
+# the same rows. A line with no category, part name or colour name comes after the named ones; the
+# ORDER BY says so, because databases disagree on where a NULL sorts.
 WITH set_part_details AS (
     :compose(shared/set_part_details.sqlc)
 )
@@ -163,67 +131,135 @@ ORDER BY
     is_spare
 ```
 
-#### [`reports/insert_set_summary.sqlc`](examples/lego/sqlc/reports/insert_set_summary.sqlc) — INSERT SELECT
+From the example's directory, `cargo sqlc compose --source sqlc --target .sql --skip-prepare`
+writes [`.sql/sets/select_set_parts.sql`][examples/brick/.sql/sets/select_set_parts.sql]. The join
+stands where the `:compose` was, and a numbered placeholder where the `:bind` was:
 
 ```sql
-# Populate the per-category part count summary for a set: one row per (set, version, category). A
-# set LEGO sold in several versions gets one summary per version, never a sum across them.
-# Reuses the same part resolution as the detail query so counts
-# are always consistent with what the detail view shows.
-#
-# A category with no spare lines gets a spare total of 0, and one with only spare lines gets a part
-# total of 0. A line with no category (its part is not in the catalogue) is not summarised here; the
-# parts listing shows it. Running it again replaces the version's summary rather than adding a
-# second copy.
 WITH set_part_details AS (
-    :compose(shared/set_part_details.sqlc)
+    SELECT
+    ip.inventory_id,
+    i.version,
+    ip.part_num,
+    ip.color_id,
+    ip.is_spare,
+    ip.quantity,
+    CASE WHEN p.part_num IS NULL THEN 'uncatalogued' ELSE 'catalogued' END AS part_status,
+    p.name AS part_name,
+    pc.name AS category_name,
+    c.name AS color_name,
+    c.rgb AS color_rgb,
+    c.is_trans
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+LEFT JOIN lego_parts p ON p.part_num = ip.part_num
+LEFT JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+LEFT JOIN lego_colors c ON c.id = ip.color_id
+WHERE i.set_num = $1
+
 )
-INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
 SELECT
-    :bind(set_num),
+    inventory_id,
     version,
+    part_num,
+    color_id,
+    is_spare,
+    part_status,
+    part_name,
     category_name,
-    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0),
-    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0)
+    color_name,
+    color_rgb,
+    quantity
 FROM set_part_details
-WHERE category_name IS NOT NULL
-GROUP BY version, category_name
-ON CONFLICT (set_num, version, category_name) DO UPDATE
-SET total_parts = EXCLUDED.total_parts,
-    total_spare = EXCLUDED.total_spare
+ORDER BY
+    version,
+    inventory_id,
+    category_name IS NULL, category_name,
+    part_name IS NULL, part_name,
+    color_name IS NULL, color_name,
+    part_num,
+    color_id,
+    is_spare
 ```
 
-#### [`inventory/update_spare_counts.sqlc`](examples/lego/sqlc/inventory/update_spare_counts.sqlc) — UPDATE
+The listing by colour further down composes the same file. So do the per-category totals an
+`INSERT` and a `MERGE` write, and the spare counts an `UPDATE` keeps. A change to the join is made
+once, and the next compose writes it into every one of them.
+
+The composer never parses the SQL it splices, `--respell` apart. A mistake in the SQL composes
+cleanly, and only the database refuses it. So the composed files are committed beside their
+templates, with the `manifest.json` the compose writes beside them: the flags they were composed
+with, and for each file the names its placeholders stand for. `cargo sqlc compose --verify` checks
+that the files are still what the templates compose to, with the flags the manifest records, and
+SQLx or a test runs them.
+
+## The template language
+
+The directives are the moves of the relational algebra, written in SQL. Each section below says
+what a template states, the copy it saves, how it shows in the composed statement, and where it
+stops.
+
+### `:compose`: one relation inside another
+
+`:compose(path)` puts the relation in `path` where the directive stands: in a `FROM`, a `JOIN`, a
+`WITH`, an `EXISTS`, an `INSERT … SELECT` or an `UPDATE … FROM`. The path is read under `--source`,
+or under the search paths a `Composer` is given.
+
+It saves the query pasted in by hand, the copy that drifts. In the composed statement the
+relation's body stands where the directive was, with its `#` comments gone. Give each splice an
+alias, as the example does, so that two composed relations with columns of the same name stay apart.
+
+A template that composes itself, through any chain of files, is refused as a circular reference,
+and so is a path that names no file.
+
+### `:bind`: the values a statement takes
+
+`:bind(name)` is a value the statement takes when it runs. A name can also take a list of values,
+for an `IN`.
+
+It saves the hand-numbered `$3` that has to move whenever a filter is added. A value is matched to
+its placeholder by name, never by position.
+
+The composer writes the dialect's own placeholder:
 
 ```sql
-# Sync the spare part counts in inventory_tracking from the canonical part resolution, version by
-# version: a part's spare count is the sum of its spare lines across colours, in that version. A
-# tracked part with no spare lines in its version gets 0.
-# When the DBA changes the join logic in set_part_details, this UPDATE stays in sync.
-WITH set_part_details AS (
-    :compose(shared/set_part_details.sqlc)
-)
-UPDATE inventory_tracking it
-SET
-    spare_count = COALESCE(spd.total_spare, 0),
-    updated_at = NOW()
-FROM (
-    SELECT version, part_num, SUM(quantity) FILTER (WHERE is_spare) AS total_spare
-    FROM set_part_details
-    GROUP BY version, part_num
-) spd
-WHERE it.set_num = :bind(set_num)
-  AND it.version = spd.version
-  AND it.part_num = spd.part_num
+SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id = :bind(theme_id)
+-- PostgreSQL: ... WHERE year = $2 AND theme_id = $1
+-- DuckDB:     ... WHERE year = $2 AND theme_id = $1
+-- SQLite:     ... WHERE year = ?2 AND theme_id = ?1
+-- MySQL:      ... WHERE year = ? AND theme_id = ?
+-- MariaDB:    ... WHERE year = ? AND theme_id = ?
 ```
 
-All three queries share the same 4-table join. Change the join logic once in `shared/set_part_details.sqlc`, run `cargo sqlc compose`, and every composed `.sql` file is updated. The DBA can read any of the output files and see the full query — no templates, no macros, just SQL.
+For PostgreSQL, DuckDB and SQLite, each name is numbered by its alphabetical place among the
+statement's names, and a name used twice is one placeholder. For MySQL and MariaDB, each use is a
+`?` of its own, in the order the statement uses them. The composed statement's `bind_params` lists
+the names in placeholder order, and `query_file!()` takes its arguments in that same order. In a
+template of several statements, each numbers its placeholders from the first, and
+`statement_starts` gives where each statement's names begin in `bind_params`. `cargo sqlc compose`
+writes both lists for each composed file into the target's `manifest.json` (*Reference*).
 
-### Parameterized composition with slots
+A name given a list of values gets one placeholder per value. Composed with three values for
+`color_ids` (`compose_with_values`),
 
-Sometimes a shared template needs to vary one piece of its logic depending on the caller. For example, the same base query might need different filters for different use cases. Instead of duplicating the entire template, use **slot arguments** — the shared template declares named slots with `@slot_name`, and the caller fills them with concrete file paths.
+```sql
+SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids)) AND is_trans = :bind(is_trans)
+```
 
-#### [`shared/filtered_set_parts.sqlc`](examples/lego/sqlc/shared/filtered_set_parts.sqlc) — base query with a `@filter` slot
+becomes `... WHERE id IN ($1, $2, $3) AND is_trans = $4`, with `bind_params`
+`["color_ids", "color_ids", "color_ids", "is_trans"]`.
+
+`:bind(name EXPECTING 1..20)` says how many values a binding takes, and `EXPECTING 2` says at least
+two. `compose_with_values` refuses a count outside them (`ValueCount`). `:bind(name NULL)` says a
+binding takes `NULL`, and the SQLite, DuckDB and MySQL drivers refuse a NULL given to one that does
+not say so (`NullValue`). The PostgreSQL drivers' values show a NULL only once they are sent, so
+there `NULL` is only recorded, on the parsed `Binding` (`nullable`).
+
+### Slots: a relation passed as an argument
+
+A template can leave a relation open, as a slot, and let each caller fill it.
+[`shared/filtered_set_parts.sqlc`][examples/brick/sqlc/shared/filtered_set_parts.sqlc] is a set's
+lines, kept by whatever filter the caller passes as `@filter`:
 
 ```sql
 # A set's lines that match a filter. The caller decides which filter to use (the @filter slot).
@@ -247,7 +283,8 @@ WHERE EXISTS (
 )
 ```
 
-#### [`filters/by_color.sqlc`](examples/lego/sqlc/filters/by_color.sqlc) — a standalone filter query
+A filter is a query of its own,
+[`filters/by_color.sqlc`][examples/brick/sqlc/filters/by_color.sqlc]:
 
 ```sql
 # A colour, as a filter pattern: (any part, this colour). The colour is chosen by its name; a
@@ -259,189 +296,534 @@ FROM lego_colors c
 WHERE c.name = :bind(color_name)
 ```
 
-#### [`filters/by_category.sqlc`](examples/lego/sqlc/filters/by_category.sqlc) — another standalone filter
+and [`sets/select_colored_parts.sqlc`][examples/brick/sqlc/sets/select_colored_parts.sqlc] fills
+the slot with it:
 
 ```sql
-# A part category, as filter patterns: (this part, any colour) for every part in the category. A
-# category belongs to the part, so the patterns come from the parts catalogue and not from any
-# inventory. A filter's contract is in shared/filtered_set_parts.sqlc.
-SELECT DISTINCT
-    p.part_num,
-    NULL::integer AS color_id
-FROM lego_parts p
-JOIN lego_part_categories pc ON pc.id = p.part_cat_id
-WHERE pc.name = :bind(category_name)
-```
-
-#### [`sets/select_colored_parts.sqlc`](examples/lego/sqlc/sets/select_colored_parts.sqlc) — fills `@filter` with the color filter
-
-```sql
+# A set's lines in the colour color_name, one row per line, keyed by the line: the set's lines with
+# the colour's filter in the @filter slot.
 :compose(shared/filtered_set_parts.sqlc, @filter = filters/by_color.sqlc)
 ```
 
-#### [`sets/select_category_parts.sqlc`](examples/lego/sqlc/sets/select_category_parts.sqlc) — fills `@filter` with the category filter
+A slot is filled only by the `:compose` that names it. A template composed inside another inherits
+none of its caller's slots, so each level passes on what it needs. `@` means a slot only inside
+`:compose(…)`; anywhere else, `@name` is SQL and passes through.
+
+It saves the base query written once for each filter. The same slot takes a category
+(`filters/by_category.sqlc`), the words of a search (`filters/by_words.sqlc`) and a regular
+expression (`filters/by_pattern.sqlc`), and the base stays one file.
+
+In the composed statement, the filter's body stands where `:compose(@filter)` was.
+
+A template with a slot left open is a shape, not a query. The library refuses to compose it alone
+(`MissingSlot`, naming the slot and the template it stands in), and `cargo sqlc compose` writes no
+file for it. It says so, with the slots the shape leaves open:
+`Shape sqlc/shared/filtered_set_parts.sqlc: @filter open`.
+
+A caller that leaves a slot unfilled gets no file either, and nothing can compose it, since a slot
+is filled only by the `:compose` that names it. `cargo sqlc compose` reports it skipped, on standard
+error, with the slot and the template it stands in:
+`Skipped sqlc/sets/select_colored_parts.sqlc: @filter of shared/filtered_set_parts.sqlc left open`.
+`--verify` reports it the same way, beside the `STALE` its file gets once committed. Neither
+changes the exit code.
+
+### Union, intersection and difference
+
+`:union`, `:intersect` and `:except` combine whole queries, each one a file.
+[`reports/city_only_moulds.sqlc`][examples/brick/sqlc/reports/city_only_moulds.sqlc] is the moulds
+City sets use and no Technic set does:
 
 ```sql
-:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)
+# The moulds City sets use and no Technic set does: one row per part_num. The order of the sources
+# matters: the first is the one the second is taken from.
+:except(queries/city_moulds.sqlc, queries/technic_moulds.sqlc)
 ```
 
-Both callers compose the same base query but plug in different filters. The base template is written once; the filter logic is swapped at composition time. Slots are explicitly scoped — a child template does NOT inherit slots from its parent, so there's no spooky action at a distance.
+A difference's order matters: `:except(a, b, c)` is `a` less everything in `b` or `c`. A bare
+`:union`, `:intersect` or `:except` removes duplicate rows. `ALL` keeps them (`:except(ALL a, b)`),
+and `DISTINCT` says the default out loud.
 
-### Union, count, and multi-value bindings
+It saves one query's body pasted beside another's.
 
-The Lego example also demonstrates combining queries with `:union()`, counting with `:count()`, and multi-value bind parameters for `IN` clauses.
+In the composed statement, each source is wrapped in a derived table of its own,
+`SELECT * FROM (…) AS _except_1`, and so is the whole, `(…) AS _except`. In SQL, `INTERSECT` binds
+more tightly than `UNION` and `EXCEPT`, and those two group from left to right. Without its
+wrapping, a source would regroup with its neighbours: `a EXCEPT b UNION c` means
+`(a EXCEPT b) UNION c`, a plausible table with no error. The wrapping keeps each source whole,
+another set operation or a query ending in `ORDER BY` and `LIMIT` among them, so any of the three
+can be another's source.
 
-#### [`sets/select_sets_by_themes.sqlc`](examples/lego/sqlc/sets/select_sets_by_themes.sqlc) — multi-value `:bind()` for `IN`
+A set operation compares whole rows, so a column list is refused rather than ignored. SQLite takes
+one modifier, `ALL`, and only after `UNION`.
 
-```sql
-# Find sets in any of the given theme scopes: each given theme and every theme below it. One row per
-# set, however many of the given scopes contain it. The ORDER BY ends on set_num, so the order is
-# total. Within a year, a set with no part count comes before the counted ones; the ORDER BY says
-# so, because databases disagree on where a NULL sorts. A set with no year is never at or after
-# min_year, so the year needs no such term. Demonstrates a multi-value bind for an IN clause.
-SELECT
-    s.set_num,
-    s.name,
-    s.year,
-    t.name AS theme_name,
-    s.num_parts
-FROM lego_sets s
-JOIN lego_themes t ON t.id = s.theme_id
-WHERE EXISTS (
-    SELECT 1
-    FROM (
-        :compose(shared/theme_closure.sqlc)
-    ) tc
-    WHERE tc.theme_id = s.theme_id
-      AND tc.ancestor_id IN (:bind(theme_ids EXPECTING 1..20))
-)
-  AND s.year >= :bind(min_year)
-ORDER BY s.year DESC, s.num_parts IS NULL DESC, s.num_parts DESC, s.set_num
-```
+### `:count`: a relation reduced to one figure
 
-At runtime, call `compose_with_values()` with the actual value count for `theme_ids`, and the composer expands `:bind(theme_ids)` into the right number of placeholders: `$2, $3, $4` for 3 values.
-
-#### [`reports/combined_theme_sets.sqlc`](examples/lego/sqlc/reports/combined_theme_sets.sqlc) — `:union()`
+`:count(source)` counts a query's rows, and `:count(DISTINCT part_num OF source)` counts the
+distinct values of its columns. Several sources are counted as their union.
+[`reports/count_theme_parts.sqlc`][examples/brick/sqlc/reports/count_theme_parts.sqlc]:
 
 ```sql
-# Combine Technic and City sets into one result, each row labelled with its scope.
-# Demonstrates :union() composing two standalone queries.
-:union(queries/technic_sets.sqlc, queries/city_sets.sqlc)
-```
-
-Each union source ([`queries/technic_sets.sqlc`](examples/lego/sqlc/queries/technic_sets.sqlc), [`queries/city_sets.sqlc`](examples/lego/sqlc/queries/city_sets.sqlc)) is a complete, standalone query. Bind parameters from both sources are merged alphabetically: `$1`=city_theme_id, `$2`=min_year, `$3`=technic_theme_id.
-
-#### [`reports/count_theme_parts.sqlc`](examples/lego/sqlc/reports/count_theme_parts.sqlc) — `:count(DISTINCT)`
-
-```sql
-# Count the distinct moulds (part numbers) across every set in a theme scope.
-# Demonstrates :count(DISTINCT col OF source).
+# How many distinct moulds (part numbers) the sets of a theme scope use, the theme and every theme
+# below it: one row, one count.
 :count(DISTINCT part_num OF queries/theme_set_parts.sqlc)
 ```
 
-Wraps [`queries/theme_set_parts.sqlc`](examples/lego/sqlc/queries/theme_set_parts.sqlc) in `SELECT COUNT(DISTINCT part_num) FROM (...) AS _count_sub`.
+It saves the source pasted by hand into a `SELECT COUNT(…)`.
 
-### Running the example
+In the composed statement, it is `SELECT COUNT(DISTINCT part_num) FROM (…) AS _count_sub`.
 
-The complete working example with all templates, a Rust binary, and setup instructions is in [`examples/lego/`](examples/lego/). See [`examples/lego/README.md`](examples/lego/README.md) for details.
+With several sources, the count's `ALL` goes into their union too, as `UNION ALL`. Otherwise the
+union is a bare `UNION`, which removes duplicate rows and which SQLite takes as well.
 
-## Quick Start
+### Each relation named once
 
-### CLI usage
+`cargo sqlc compose --with` writes each relation a statement reads once, named, at the head of the
+statement.
 
-Install `cargo-sqlc` as a cargo subcommand:
+It saves the copies. A relation composed by two templates is written twice into any statement that
+composes both: a composed statement holds one copy of a relation for every path that leads to it,
+and the database plans every copy.
+[`reports/shared_moulds.sqlc`][examples/brick/sqlc/reports/shared_moulds.sqlc] reads the theme
+closure through both of its sources, so its composed statement holds the closure twice.
+`cargo sqlc tree` draws each path (*Reference*).
 
-```sh
-# From crates.io
-cargo install cargo-sqlc
+With `--with`, every composed statement opens with one `WITH` that names each relation it reads,
+each after the relations it reads in turn, and the statement comes last. A relation is named after
+its path under `--source`, its directories joined by `_`: `shared/theme_closure.sqlc` is
+`shared_theme_closure`, and every place that composes it reads `SELECT * FROM shared_theme_closure`.
+The moulds Technic and City share then hold the closure once. Nothing is created on the database.
 
-# From source
-cargo install --path crates/cargo-sqlc
-```
+- A statement that opens with its own `WITH` or `WITH RECURSIVE` takes the names first, inside that
+  clause, and a `CREATE … AS` takes them at the head of its query. Any other statement takes them
+  in front of it, and MySQL takes no `WITH` before an `INSERT`.
+- A template of several statements gets a `WITH` for each, naming only what that statement reads.
+  The statements end at each `;` outside quotes, comments, dollar quotes and psql meta-commands,
+  as the dialect's database reads them.
+- A template that binds a parameter, itself or through a template it composes, is written where it
+  is composed, as without `--with`. So is a template composed with its slots filled. What either
+  reads is still named.
+- A name the dialect reserves is refused (`key` on MySQL, `left` on PostgreSQL), and so are two
+  files that would take one name.
 
-Cargo automatically discovers binaries named `cargo-<name>` on your `PATH` and makes them available as `cargo <name>`. After installing, `cargo sqlc` is ready to use.
-
-Compose templates into `.sql` files:
-
-```sh
-# Compose all templates recursively from sqlc/ -> .sql/
-cargo sqlc compose
-
-# The output mirrors the source directory structure:
-#   sqlc/sets/select_set_parts.sqlc -> .sql/sets/select_set_parts.sql
-#   sqlc/shared/set_part_details.sqlc -> .sql/shared/set_part_details.sql
-
-# With a specific dialect
-cargo sqlc compose --dialect mysql
-
-# Skip the sqlx prepare step
-cargo sqlc compose --skip-prepare
-
-# Override source/target directories
-cargo sqlc compose --source assets/sqlc --target assets/.sql
-
-# Verify that committed .sql files match templates (for CI)
-cargo sqlc compose --verify
-
-# Name the templates a view registry registers, instead of inlining them
-cargo sqlc compose --views sqlc/views.sqlc
-```
-
-The compose step recursively walks all subdirectories under `--source`, composes every `.sqlc` file, and writes the output to the corresponding path under `--target`. The target directory is wiped and recreated on each run, so deleted or reorganized source files don't leave stale output behind. All composition happens to a temporary directory first — the target is only replaced after every file composes successfully.
-
-After composing, `cargo sqlx prepare` runs automatically to keep the query cache up to date for compile-time checked queries. Set `DATABASE_URL` for this step, or use `--skip-prepare` to skip it.
-
-#### `--verify` mode
-
-```sh
-cargo sqlc compose --verify
-```
-
-Composes all templates to memory and diffs against the existing target files. Reports changed, missing, and stale files, then exits with code 1 on any mismatch. Use this in CI to ensure committed `.sql` files stay in sync with `.sqlc` sources — analogous to `cargo fmt -- --check`.
-
-#### `--views` registry
-
-```sh
-cargo sqlc compose --views sqlc/views.sqlc
-```
-
-A view registry is a template of `CREATE VIEW <name> AS :define(<path>)` statements:
+A statement can also choose its own names. `:define(path)` writes the body where `:compose` would
+name it, and the name in front of its `AS` then stands for that template everywhere below, at any
+depth:
 
 ```sql
-# sqlc/views.sqlc
-CREATE OR REPLACE VIEW theme_closure AS :define(shared/theme_closure.sqlc);
+WITH theme_closure AS (
+    :define(shared/theme_closure.sqlc)
+)
+:compose(reports/count_theme_parts.sqlc)
 ```
 
-With `--views`, every composed statement says `SELECT * FROM <name>` wherever it composes `<path>`, at any depth, instead of inlining the template's body. Without it, everything inlines. A registered template that binds a parameter or leaves a slot open is refused, since a view takes no argument. The registry is read from the path as given, or else under `--source`. When it lies under `--source`, it composes like any other template, into the `CREATE VIEW` statements to run on the database: `:define` puts each view's body in place, and a view built on another names it.
+The count's source composes `shared/theme_closure.sqlc` too, and reads it there as
+`SELECT * FROM theme_closure`.
 
-#### Environment variables
+A template of `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` statements is a view registry.
+Loaded with `cargo sqlc compose --views <registry>` or `Composer::load_view_registry()`, it makes
+every composition say `SELECT * FROM <name>` for each template it registers. Composed as a template,
+it gives the `CREATE VIEW` statements to run. A registered template that binds a parameter or leaves
+a slot open is refused, since a view takes no argument. Where a statement defines a name for a
+template that is also a view, the statement's name is the one used.
 
-Directories can be configured via environment variables:
+`--with` takes the place of both. It cannot be combined with `--views`, and a `:define` met under
+`--with` is refused.
 
-```sh
-export SQLC_SOURCE_DIR=src/queries
-export SQLC_TARGET_DIR=generated/.sql
+### A union of arms that read one roster: `--respell`
 
-# Now just:
-cargo sqlc compose
+`cargo sqlc compose --respell` writes one shape of union another way, in the composed file: a
+union whose arms each read one roster, cut to their own row of it, and left joined `ON true` to
+what each arm reads. The brick example's checks make such a union: a roster of them in
+[`checks/roster.sqlc`][examples/brick/sqlc/checks/roster.sqlc], and each check an arm of
+[`checks/all.sqlc`][examples/brick/sqlc/checks/all.sqlc]. One of them,
+[`checks/sets_without_lines.sqlc`][examples/brick/sqlc/checks/sets_without_lines.sqlc]:
+
+```sql
+# The sets with no inventory line, under the roster's row for this check: one row per set, keyed
+# by set_num, with its name. A set whose inventories hold no line is one, and so is a set with no
+# inventory. Where every set has a line, the roster's row comes back alone.
+SELECT r.rule, p.set_num, p.detail
+FROM (
+    :compose(checks/roster.sqlc)
+) r
+LEFT JOIN (
+    SELECT s.set_num, s.name AS detail
+    FROM lego_sets s
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM lego_inventories i
+        WHERE i.set_num = s.set_num
+          AND EXISTS (SELECT 1 FROM lego_inventory_parts ip WHERE ip.inventory_id = i.id)
+    )
+) p ON true
+WHERE r.slug = 'sets_without_lines'
 ```
 
-Priority: CLI arg > env var > default (`sqlc` / `.sql`).
-
-### Library usage
-
-Add `sql-composer` to your `Cargo.toml`:
-
-```toml
-[dependencies]
-sql-composer = "0.0.4"
+```sql
+# Every check's findings, one row each, and a row with no set_num for a check that finds nothing.
+:union(ALL checks/lines_uncatalogued.sqlc, checks/sets_without_lines.sqlc)
 ```
 
-Parse a template and compose it into final SQL:
+It saves the roster read again for every arm. As composed, each arm holds the roster's body and
+reads it; respelled, the roster is read once, each of its rows paired with the arms whose cut it
+passes, and every arm's own rows are read in one union, each tagged with its arm's number. Inside
+its outer `SELECT * FROM (`, the composed file reads:
+
+```sql
+SELECT r.rule, p.set_num, p.detail
+FROM (SELECT * FROM (VALUES
+    ('lines_uncatalogued', 'a line whose part is not in the parts catalogue'),
+    ('sets_without_lines', 'a set with no inventory line')
+) AS roster (slug, rule)
+
+) r
+JOIN (VALUES (1), (2)) AS a(arm)
+  ON (a.arm = 1 AND (r.slug = 'lines_uncatalogued'))
+  OR (a.arm = 2 AND (r.slug = 'sets_without_lines'))
+LEFT JOIN (
+SELECT * FROM (
+SELECT 1 AS arm, p.set_num AS set_num, p.detail AS detail
+```
+
+`EXPLAIN` shows the roster scanned once, where the statement as composed scans it once for each
+arm, and both return the same rows: the brick example's `fit` holds each file to the scans of its
+plan, and its `laws` hold the rows. Each file respelled gets a line,
+`Respelled sqlc/checks/all.sqlc: 1 union(s), of 2 arms`, the last line counts the unions
+respelled, and the manifest records the flag, so `--verify` reads it from there.
+
+This is the one place composing parses SQL: sqlparser reads each composed statement, checks
+nothing, and a statement it cannot read is written as composed, with a line on standard error,
+`Unparsed sqlc/script.sqlc: statement(s) 1 of 2, written as composed`. Every other byte of the
+file is written as composed. It respells for PostgreSQL alone, and is refused for every other
+dialect. It rests on the composed text alone, with no catalog, key or collation, so it holds
+only where every arm reads the same roster, joins it `ON true`, cuts it by a `WHERE` that reads the
+roster alone, and returns roster columns that are the same in every arm or plain columns of its
+own rows. What rests on the catalog's keys is respelled while PostgreSQL plans, by
+[warren-surveyor's speller][speller].
+
+### Comments
+
+A `#` begins a template comment anywhere on a line, and the comment runs to the end of the line.
+Comments are where a template says what its rows are: their key, what they keep, and what they
+leave out.
+
+They save the copies a `--` comment makes. A `--` comment is SQL, so it passes into every statement
+that composes the template. A `#` comment stays in the template.
+
+They are stripped at composition and never reach the database. The newline goes with them, so the
+next line joins the one the comment was on.
+
+Inside a string, a quoted identifier, a `--` or `/* */` comment or a psql meta-command, a `#` is
+SQL, and so is a directive: `'#1'` stays `'#1'`, and `-- :bind(id)` reaches the database as the
+comment it is. The jsonb operators `#>`, `#>>` and `#-` are SQL wherever they stand, and `#--`
+begins a comment. PostgreSQL's operators `#` and `##` still begin one, so write the function behind
+them, as `pg_operator.oprcode` names it: `int4xor(a, b)` for `a # b` between integers.
+
+The composer reads those quotes and comments as each dialect's database reads them, and refuses a
+template that two databases would read differently at a `#`, a directive, a `;` or its end, naming
+both readings. `E'it\'s' # note` is a string and a comment on PostgreSQL. On SQLite, whose strings
+read no backslash escapes, the `#` stands inside a string still open.
+
+A template written for some dialects only says so at its head, `:dialect(postgres)` or
+`:dialect(postgres, duckdb)`, and is then read by their databases alone and composed for no other.
+One that says nothing is written for every dialect. In a template written for PostgreSQL, a dollar
+quote (a function's body, a `DO` block) holds SQL as a string does, `#variable_conflict` and all,
+except that a directive composes there. A `:bind` written there or composed into it is refused,
+since no value reaches it.
+
+### Five databases
+
+`cargo sqlc compose --dialect` composes the same templates for one of five databases: `postgres`
+(the default), `mysql`, `mariadb`, `sqlite` or `duckdb`, each as it reads SQL at its default
+settings. In the library, `Dialect` names them.
+
+It saves a copy of each template for each database. The dialect decides four things in the
+composed statement: the placeholders `:bind` writes; the names `--with` refuses, each database's
+own reserved words, read from PostgreSQL 16 and 18, MySQL 9.7, MariaDB 12.3, SQLite 3.53 and
+DuckDB 1.5; where each quote, comment and statement ends; and how a mock table writes its values.
+Composed for each of the five, the brick example's files differ in their placeholders alone.
+
+A template that only some of the databases read alike says so with `:dialect(…)`, and is composed
+for no other. A setting that moves where a quote ends, such as PostgreSQL's
+`standard_conforming_strings` turned off or MySQL's `ANSI_QUOTES`, has no dialect of its own.
+`--respell` writes for PostgreSQL alone.
+
+## Mock tables: a template on rows of your own
+
+A mock gives a table rows of your own. Every statement composed after it that names the table reads
+the mock's rows instead, so a template can be checked on exactly the rows a case needs, the ones the
+real data never holds among them:
 
 ```rust,ignore
-use sql_composer::parser::parse_template;
+use sql_composer::MockTable;
+
+composer.add_mock_table(
+    MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("year", "integer")
+        .row(&[Some("100-1"), Some("1990")])
+        .row(&[Some("200-1"), Some("1992")]),
+);
+```
+
+It saves the test tables created, filled and dropped around each case, and the copy of a query
+written again to read them.
+
+In the composed statement, the mock stands at the head of each statement that names the table, in
+its `WITH`: `lego_sets AS (SELECT CAST('100-1' AS varchar) AS set_num, … UNION ALL …)`. A `WITH`
+name stands for the table of the same name wherever the statement names it bare, so the composer
+still parses none of the SQL. A statement with its own `WITH` takes the mock as its first entry, and
+a mock with no rows keeps its columns and returns nothing. Each value is cast to its column's type,
+written as the dialect spells it, and `None` is `NULL`.
+
+A mock stops where the bare name does not reach. A schema-qualified name such as `lego.lego_sets`
+and a view read the table itself, and so does a statement that names the table only in double
+quotes. A statement that writes the table writes the table itself. MySQL takes no `WITH` before an
+`INSERT`.
+
+## Spellings: each template written the way you pick
+
+A template can be written several ways that return the same rows: a condition in an inner join's
+`ON` or in the `WHERE`, a `NOT` over an `AND` or pushed onto each operand, a relation read once
+written where it is read or as a WITH query. `cargo sqlc spellings <template>` lays out a template's
+spellings, counted before any is written, an axis at a time. You pick one spelling on each axis in
+`spellings.toml`, at the root of the source, and `cargo sqlc spell` writes every template in your
+picks, as `cargo fmt` writes code.
+
+It saves the house style explained again to each person, and each agent, who writes a template:
+the templates show it. `cargo sqlc spell --check` reports each template not in the picks and
+writes nothing, so a check in CI keeps them there.
+
+For the listing of a set's parts, `cargo sqlc spellings sets/select_set_parts.sqlc` counts first:
+
+```text
+sqlc/sets/select_set_parts.sqlc: 2 spelling(s), counted an axis at a time
+  join order: 1, laid out to be read: cargo sqlc spell writes no join order, since an order can change the plan PostgreSQL makes
+  how a relation read once is named: 2
+    the relation set_part_details (a WITH query): 2
+  where a condition sits: 1
+  negation: 1
+  a semi-join's form: 1
+```
+
+Then it writes each spelling out whole, the first as written. The second reads the same relation
+from the `FROM`, as a template of its own:
+
+```sql
+FROM (
+    :compose(shared/set_part_details.sqlc)
+) set_part_details
+```
+
+`naming = "template"` in `spellings.toml` picks it. `cargo sqlc spell --check` then names each
+brick template not written so, and `cargo sqlc spell` writes them. A spelling shows in the
+template's diff, and in the text of its composed file; the brick example's `fit` checks that every
+spelling `spell` writes leaves the plan PostgreSQL makes for each composed file as it was.
+
+sqlparser reads each template as PostgreSQL's SQL, every directive standing in as SQL of its own
+kind, and nothing is read from a catalog. Join orders are laid out to be read and never written,
+since an order can change the plan. A template another template takes in keeps its head as
+written. A template written for other databases only, and a statement sqlparser cannot read, are
+left as written, and so is every template where nothing is picked.
+
+## The walk
+
+The [brick example][examples/brick/README.md] walks the relational algebra one template at a time,
+on the tables above, with a subcommand for each step. It runs through selection, projection and
+join, composition, a relation passed as an argument, the theme closure, and union, intersection and
+difference. Then it goes on into more of PostgreSQL's SQL: window functions, `DISTINCT ON`,
+`LATERAL`, `ROLLUP`, `percentile_cont`, `generate_series`, an anti-join, division, `array_agg`,
+`jsonb` and `MERGE`.
+
+It searches with the indexes sqlc-brickgen builds: by the words of a name (`websearch_to_tsquery`,
+ranked with `ts_rank` and marked with `ts_headline`), by a regular expression (`~*`, and
+`regexp_match` to read a brick's size out of its name), and by place (`earth_box` and
+`earth_distance` for a radius, `<->` for the nearest first). Each search fills a slot as any filter
+does: words and patterns take `@filter`, and the builders near a city or in a postcode district take
+`@area`.
+
+It checks the catalogue itself with a roster of checks, and their rows in one union, which
+`--respell` writes to read the roster once. It ends at `laws`: every promise the example makes,
+each checked against a second spelling of the same answer in direct SQL, and three run on mock
+tables. `fit` holds every composed file to the plan PostgreSQL makes for it, and runs none. Each
+exits 1 if any of its laws fails.
+
+[process-modulus][process-modulus] composes the queries that check its documents the same way: a
+larger tree, with a walk of its own, composed with `--with`. Its walk in European Portuguese
+composes the English tree's relations, found through `--search-path`.
+
+## Reference
+
+### `cargo sqlc compose`
+
+```sh
+cargo sqlc compose                                  # sqlc/ into .sql/, then cargo sqlx prepare
+cargo sqlc compose --source assets/sqlc --target assets/.sql
+cargo sqlc compose --search-path ../shared/sqlc     # more templates, read after --source
+cargo sqlc compose --dialect mysql                  # one of five, postgres by default
+cargo sqlc compose --skip-prepare                   # leave out cargo sqlx prepare
+cargo sqlc compose --verify                         # compare, write nothing
+cargo sqlc compose --with                           # each relation named once per statement
+cargo sqlc compose --views sqlc/views.sqlc          # a view registry
+cargo sqlc compose --respell                        # a roster's arms read as one join
+```
+
+- **`--source`** is the directory of templates, `sqlc` by default, or `SQLC_SOURCE_DIR` when the
+  flag is left out. Every `.sqlc` under it is composed, at any depth, and `:compose` paths are read
+  under it.
+- **`--target`** is where the composed files go, `.sql` by default, or `SQLC_TARGET_DIR`. Each
+  template's file keeps its path: `sqlc/sets/select_set_parts.sqlc` becomes
+  `.sql/sets/select_set_parts.sql`. Composition writes to a temporary directory first and puts it in
+  the target's place only once every template has composed. The target is replaced whole, so a
+  template removed or moved leaves no file behind, and a file written into the target by hand is
+  gone after the next compose. Point `--target` at a directory that holds nothing else. Beside the
+  files goes `manifest.json` (below).
+- **`--search-path`** is one more directory `:compose` paths are read under, after `--source`, so a
+  template can compose a relation another tree holds. Nothing is composed for the templates there
+  themselves, and under `--with` a relation found there is named after its path there. Repeat it to
+  search more than one.
+- **`--dialect`** chooses the dialect: `postgres` (the default), `mysql`, `mariadb`, `sqlite` or
+  `duckdb`. It decides the placeholders, and the names the dialect reserves.
+- **`--skip-prepare`** leaves out `cargo sqlx prepare`, which otherwise runs once the files are
+  written. If it fails, the command exits 1, and the files are written all the same.
+- **`--verify`** composes in memory and compares with the target, its `manifest.json` included. It
+  reports each file `CHANGED`, `MISSING` or `STALE`, exits 1 on any, and writes nothing, as
+  `cargo fmt --check` does. It composes with the flags the manifest records: a flag left out is
+  read from the manifest, and one given that the manifest records otherwise is refused, with both.
+  A skipped template is reported as a compose reports it.
+- **`--with`** names each relation a statement reads once, at the head of the statement. It cannot
+  be combined with `--views`.
+- **`--views`** loads a view registry, and every template the registry names is read as its view.
+- **`--respell`** writes a union of a roster's arms as one join, for PostgreSQL (*A union of arms
+  that read one roster*). It is refused for every other dialect.
+
+Every template under `--source` gets a line: `Composed`; `Shape`, with the slots it leaves open; or
+`Skipped`, on standard error, with the slot left open and the template it stands in. The last line
+counts them: `Composed 51 of 55 template(s) into .sql: 4 shape(s), 0 skipped`. Under `--respell`,
+each file respelled gets a `Respelled` line, each statement sqlparser cannot read an `Unparsed`
+line on standard error, and the last line ends with the unions respelled, `, 1 union(s) respelled`.
+
+`manifest.json`, at the root of the target, records how its files were composed: the flags
+(`dialect`, `with`, `views`, `search_path`, `respell`), and for each composed file its bind names
+in placeholder order (`bind_params`) and where each statement's names begin (`statement_starts`).
+The brick example's says of one of its files:
+
+```json
+    "sets/select_colored_parts.sql": {
+      "bind_params": [
+        "color_name",
+        "set_num"
+      ],
+      "statement_starts": [
+        0
+      ]
+    },
+```
+
+So a program in any language runs a composed file by its names: `$1` is `color_name` and `$2` is
+`set_num`. On MySQL and MariaDB each `?` takes the name in its place in `bind_params`, where a name
+used twice is listed twice.
+
+### `cargo sqlc tree`
+
+```sh
+cargo sqlc tree                                     # every composed file's templates
+cargo sqlc tree reports/shared_moulds.sqlc          # one composed file's
+cargo sqlc tree --invert shared/theme_closure.sqlc  # the files that hold one template
+```
+
+It prints each composed file's templates as `cargo tree` prints a crate's dependencies: every
+template the file holds, once for every path that leads to it, with the slot each filling stands
+in, and the name written wherever a name stands for a body. A template held more than once gets a
+line with its copies:
+
+```text
+reports/shared_moulds.sqlc
+├── queries/technic_moulds.sqlc
+│   └── shared/scope_moulds.sqlc
+│       └── scopes/technic.sqlc (@scope)
+│           └── shared/theme_closure.sqlc
+└── queries/city_moulds.sqlc
+    └── shared/scope_moulds.sqlc
+        └── scopes/city.sqlc (@scope)
+            └── shared/theme_closure.sqlc
+shared/scope_moulds.sqlc: 2 copies
+shared/theme_closure.sqlc: 2 copies
+```
+
+With `--with` the closure is named once at the head of the statement,
+`shared/theme_closure.sqlc (WITH shared_theme_closure)`, and each place that composed it reads the
+name. Whether the database then reads a copy once or twice is its plan's to say, in `EXPLAIN`: the
+brick example's `fit` checks every composed file's copies against the scans of its plan, where a
+scan may be missing only for a `LEFT JOIN` the database removed.
+`--invert` (`-i`) prints, for one template, each composed file that holds it with its copies: every
+statement a change to it reaches. `cargo sqlc tree` takes `--source`, `--dialect`, `--with`,
+`--views` and `--search-path` as `compose` does.
+
+### `cargo sqlc spellings` and `cargo sqlc spell`
+
+```sh
+cargo sqlc spellings sets/select_set_parts.sqlc               # every axis counted and written
+cargo sqlc spellings shared/scope_sets.sqlc --axis conditions # every axis counted, one written
+cargo sqlc spell --check                                      # report, write nothing
+cargo sqlc spell                                              # write the templates in the picks
+```
+
+Both take `--source`, where `spellings.toml` stands at the root, and `--search-path`, as `compose`
+does. `spellings` takes the template by its path under the source, and lays out each spelling at
+each place, those no pick writes among them, such as a condition in a later `ON`; `spell` writes
+every template under the source. `spell --check` exits 1 if any template is not in the picks. A
+join list of more than 8 relations is left as written, its orders not laid out.
+
+`spellings.toml` holds one key for each axis, and an axis left out is written as each template
+writes it:
+
+| key | picks | what each writes |
+|---|---|---|
+| `conditions` | `on`, `where` | a condition in the first inner join's `ON` where every relation it names is joined, or in the `WHERE` |
+| `negation` | `pushed`, `over` | each `NOT` over an `AND` or an `OR` pushed onto its operands, or one `NOT` over operands that are each a `NOT`; `NOT NOT p` as `p` either way |
+| `naming` | `inline`, `with`, `template` | a relation read once written where it is read, as a WITH query at the statement's head, or as the `:compose` of its own template |
+| `semi_join` | `in`, `exists` | `x IN (SELECT y …)`, or `EXISTS (SELECT … WHERE x = y)` |
+| `join_order` | a table: `template`, `order` | nothing: the order of one template's join list, which `spell` checks against the rule outermost first, and reports |
+
+```toml
+conditions = "where"
+naming = "template"
+
+[join_order]
+template = "shared/scope_sets.sqlc"
+order = ["s", "sc", "scope"]
+```
+
+A key no axis has is refused with the axes there are, and a pick its axis lacks with the picks the
+axis has. A condition moves only where its text says which relations it reads, every column named
+with its relation, and only between inner joins and the `WHERE`. `NOT (a = b)` is never written
+`a <> b`, nor `NOT IN` as `NOT EXISTS`, and a semi-join under a `NOT` stays as written.
+
+### Directives
+
+| directive | composes to |
+|---|---|
+| `:compose(path)` | the relation in `path`, where the directive stands |
+| `:compose(path, @slot = other)` | the same, with `@slot` filled by `other`; several slots are separated by commas |
+| `:compose(@slot)` | the relation a caller fills `@slot` with |
+| `:define(path)` | the relation's body, and the name in front of its `AS` stands for it below |
+| `:bind(name)` | the dialect's placeholder; one per value for a name bound to a list |
+| `:bind(name EXPECTING n..m)`, `:bind(name NULL)` | the same; a count outside `n..m` is refused, and, except on PostgreSQL, a NULL where `NULL` is not written |
+| `:union(a, b, …)` | the sources joined by `UNION`, each wrapped, the whole wrapped; `ALL` or `DISTINCT` first, inside the parentheses |
+| `:intersect(a, b, …)` | the sources joined by `INTERSECT`, each wrapped, the whole wrapped |
+| `:except(a, b, …)` | `a` less every later source, each wrapped, the whole wrapped |
+| `:count(a)`, `:count(DISTINCT col OF a)` | `SELECT COUNT(…) FROM (…) AS _count_sub` |
+| `:dialect(postgres, duckdb)` | nothing: the dialects the template is written for, at its head; it is composed for no other |
+| `# …` | nothing: a template comment, to the end of the line |
+
+A slot name is letters, digits, `-` and `_`.
+
+### The library
+
+```rust,ignore
 use sql_composer::composer::Composer;
+use sql_composer::parser::parse_template;
 use sql_composer::types::{Dialect, TemplateSource};
 
 let input = "SELECT set_num, name, year FROM lego_sets WHERE year = :bind(year) AND theme_id = :bind(theme_id)";
@@ -450,160 +832,68 @@ let template = parse_template(input, TemplateSource::Literal("example".into())).
 let composer = Composer::new(Dialect::Postgres);
 let result = composer.compose(&template).unwrap();
 
-// Bind params are alphabetically ordered for numbered dialects
 assert_eq!(result.sql, "SELECT set_num, name, year FROM lego_sets WHERE year = $2 AND theme_id = $1");
 assert_eq!(result.bind_params, vec!["theme_id", "year"]);
 ```
 
-## Template Syntax
+`parse_template_file` reads a template from a file. `Composer::add_search_path` adds a directory
+`:compose` paths are read under. `compose_with_values` takes each binding's values and writes one
+placeholder for each value. `load_view_registry` loads a view registry, `add_mock_table` gives a
+table rows of your own, and `name_relations = true` composes as `--with` does.
+`source::compose_all` composes every template under a directory as `cargo sqlc compose` does, with
+the flags a `source::Flags` holds, and says what it made of each: `Standing::Written`, with its
+`ComposedSql`; `Standing::Shape`; or `Standing::Skipped`. `Dialect::ALL` lists the dialects, and
+`"mysql".parse::<Dialect>()` reads one by the name `--dialect` takes.
+`Composer::tree` gives what composing a template writes, as `cargo sqlc tree` prints it.
 
-All macros use the syntax `:command()`. SQL outside of macros is passed through unchanged. Lines starting with `#` are template comments and are stripped during composition.
+| type | what it is |
+|---|---|
+| `Template` | a parsed template: its elements, and where it came from |
+| `Element` | literal SQL, a `:bind`, a `:compose` or `:define`, or a command |
+| `Binding` | a `:bind`: its name, the values it expects, and whether it takes `NULL` |
+| `ComposeRef` | a `:compose()` or `:define()`, with its slot arguments |
+| `ComposeTarget` | a path, a slot (`@name`) or a `:define` path |
+| `SlotAssignment` | an `@name = path` inside `:compose()` |
+| `Command` | a `:count()`, `:union()`, `:intersect()` or `:except()`, with its modifier and sources |
+| `CommandKind` | `Count`, `Union`, `Intersect` or `Except` |
+| `Composer` | composes templates into SQL for one dialect |
+| `ComposedSql` | the composed statements, and their bind names in placeholder order |
+| `Held` | a template as a composed statement holds it: how it is reached, the name written for it, and what it holds |
+| `Reach` | how a template is reached: `Root`, `Compose`, `Slot`, `Define`, `Source` or `Head` |
+| `source::Flags` | the dialect, `--with`, `--views`, `--search-path` and, under the feature `respell`, `--respell` a directory is composed with |
+| `source::Standing` | what composing made of one template: written, a shape, or skipped |
+| `source::Manifest` | what `manifest.json` holds, under the feature `serde` |
+| `respell::Respelled` | a file as respelled: its text, its statements, those not read and the unions respelled, under the feature `respell` |
+| `spellings::Layout` | a template's spellings, axis by axis and place by place, as `cargo sqlc spellings` prints them, under the feature `spellings` |
+| `spellings::Picks` | what `spellings.toml` holds, under the feature `spellings` |
+| `Dialect` | `Postgres`, `Mysql`, `Mariadb`, `Sqlite` or `Duckdb` |
+| `MockTable` | rows of your own for a table: its name, its columns in order, and its rows |
+| `MockColumn` | a mock table's column: its name, and its type as the dialect spells it |
 
-### `:bind(name)`
+The feature `serde` derives `Serialize` and `Deserialize` for the core types, and `std` (on by
+default) builds with the standard library. `respell` brings in sqlparser and `respell::respell`,
+which respells a composed file as `--respell` does. `spellings` brings in sqlparser and
+`spellings::lay_out` and `spellings::spell`, which lay out a template's spellings and write it in
+the picks, as `cargo sqlc spellings` and `cargo sqlc spell` do.
 
-Creates one or more dialect-specific placeholders and adds the name to the bind parameter list.
-
-```sql
-SELECT set_num, name, year
-FROM lego_sets
-WHERE theme_id = :bind(theme_id) AND year >= :bind(min_year)
--- Postgres: ... WHERE theme_id = $2 AND year >= $1
--- MySQL:    ... WHERE theme_id = ? AND year >= ?
--- SQLite:   ... WHERE theme_id = ?2 AND year >= ?1
+```toml
+sql-composer = { version = "0.1.0", features = ["serde"] }
 ```
 
-For multi-value bindings (e.g. `IN` clauses), pass multiple values for the same name at compose time:
+### Driver crates
 
-```sql
-SELECT name, rgb FROM lego_colors WHERE id IN (:bind(color_ids))
--- With 3 values -> Postgres: ... WHERE id IN ($1, $2, $3)
-```
+Each driver wraps its database crate's connection in a type of its own, which implements
+`ComposerConnection` (sync) or `ComposerConnectionAsync` (async). Its `compose` composes a template
+and puts the values in placeholder order, in one step. The type dereferences to the connection it
+wraps, so the database crate's own methods are still there. The same templates compose for every
+dialect; only the placeholders change.
 
-#### Validation options
-
-`:bind()` supports optional validation constraints:
-
-```sql
--- Require at least 1 value
-:bind(color_ids EXPECTING 1)
-
--- Require between 1 and 10 values
-:bind(color_ids EXPECTING 1..10)
-
--- Allow NULL values
-:bind(parent_theme_id NULL)
-```
-
-### `:compose(path)` and `:compose(path, @slot = path)`
-
-Include another complete SQL template, resolved from configured search paths.
-
-```sql
-# Compose the shared part details into a CTE, then query a specific category
-WITH set_part_details AS (
-    :compose(shared/set_part_details.sqlc)
-)
-SELECT part_name, color_name, quantity
-FROM set_part_details
-WHERE category_name = :bind(category_name)
-ORDER BY quantity DESC
-```
-
-Compose targets can be SQL fragments (like a CTE without a `SELECT`) — they just need to produce valid SQL when composed into the calling template. Compose references are resolved against the search paths added via `Composer::add_search_path()`. Circular references are detected and produce an error.
-
-#### Slot arguments
-
-Templates can declare **slots** — named placeholders that the caller fills with concrete file paths:
-
-```sql
-# In the shared template: declare a slot
-:compose(@filter)
-
-# At the call site: fill the slot
-:compose(shared/base.sqlc, @filter = filters/by_color.sqlc)
-
-# Multiple slots
-:compose(shared/report.sqlc, @source = data.sqlc, @filter = filters/active.sqlc)
-
-# The target can itself be a slot
-:compose(@slot)
-:compose(@slot, @inner = detail.sqlc)
-```
-
-**Design rules:**
-- `@` is only special inside `:compose()`. In regular SQL, `@anything` passes through unchanged.
-- Slots are **explicitly scoped**. Child templates do NOT inherit parent slots. Pass them explicitly.
-- Missing slots are a compile error.
-- Slot names: alphanumeric, hyphens, underscores. No dots.
-
-### `:define(path)`
-
-`:define` composes a template's body where `:compose` would name it. The name in front of its `AS` stands for that template everywhere under the statement that defines it: every `:compose` of the same template below, at any depth, says `SELECT * FROM <name>` instead of repeating the body. A statement can so name its relations once, in a `WITH` clause:
-
-```sql
-# The theme closure's body appears once, here. The count's source composes
-# shared/theme_closure.sqlc too, and reads it as SELECT * FROM theme_closure.
-WITH theme_closure AS (
-    :define(shared/theme_closure.sqlc)
-)
-:compose(reports/count_theme_parts.sqlc)
-```
-
-The name is the statement's own, and composing any other statement is unaffected. `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` names a template the same way, and a template of such statements is a view registry: loaded with `Composer::load_view_registry()` or `cargo sqlc compose --views`, it makes every composition say `SELECT * FROM <name>` for each template it registers. Where a statement defines a name for a template that is also a view, the statement's name is the one used. `:define` takes slot arguments as `:compose` does.
-
-### `:union(sources...)` and `:count(sources...)`
-
-Combine multiple template sources:
-
-```sql
--- Union queries across different set types
-:union(queries/technic_sets.sqlc, queries/city_sets.sqlc)
-
--- With DISTINCT or ALL modifiers
-:union(DISTINCT queries/technic_sets.sqlc, queries/city_sets.sqlc)
-
--- Count rows from a template
-:count(queries/star_wars_sets.sqlc)
-
--- Count specific columns
-:count(set_num, name OF queries/star_wars_sets.sqlc)
-```
-
-### `:intersect(sources...)` and `:except(first, rest...)`
-
-The other two set operations:
-
-```sql
--- Rows every source holds
-:intersect(queries/technic_sets.sqlc, queries/sets_since_2010.sqlc)
-
--- Rows of the first source that no later source holds: the first is the minuend,
--- so order matters, and :except(a, b, c) is a less everything in b or c
-:except(queries/technic_sets.sqlc, queries/city_sets.sqlc)
-
--- With ALL (bag semantics) or DISTINCT modifiers, as for :union
-:except(ALL queries/technic_sets.sqlc, queries/city_sets.sqlc)
-```
-
-Each source is wrapped in a derived table (`SELECT * FROM (...) AS _except_1`), and so is the whole
-(`AS _except`). The composer does not parse the SQL it splices, and `INTERSECT` binds more tightly
-than `UNION` and `EXCEPT`. A source that is itself a union would otherwise regroup:
-`a EXCEPT b UNION c` means `(a EXCEPT b) UNION c`, which returns a plausible table and raises no
-error. Closing the whole also lets an `:intersect` or `:except` be a `:union` member.
-
-`:intersect` and `:except` take no `columns OF` list. They compare whole rows, so a list is refused
-rather than ignored. SQLite accepts neither `ALL` nor `DISTINCT` after `INTERSECT` or `EXCEPT`.
-
-## Driver Crates
-
-Each driver crate wraps a database connection with a `ComposerConnection` (sync) or `ComposerConnectionAsync` (async) trait implementation that composes templates and resolves bind values in one step.
-
-### rusqlite
+#### rusqlite
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-rusqlite = "0.0.4"
+sql-composer = "0.1.0"
+sql-composer-rusqlite = "0.1.0"
 ```
 
 ```rust,ignore
@@ -629,12 +919,12 @@ let mut stmt = conn.prepare(&sql).unwrap();
 let _rows = stmt.query(refs.as_slice()).unwrap();
 ```
 
-### DuckDB
+#### DuckDB
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-duckdb = "0.0.4"
+sql-composer = "0.1.0"
+sql-composer-duckdb = "0.1.0"
 ```
 
 ```rust,ignore
@@ -648,30 +938,30 @@ use sql_composer_duckdb::DuckDbConnection;
 let conn = DuckDbConnection::open_in_memory().unwrap();
 let input = "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)";
 let template = parse_template(input, TemplateSource::Literal("example".into())).unwrap();
-// DuckDB uses Postgres-style $N placeholders
-let composer = Composer::new(Dialect::Postgres);
+let composer = Composer::new(Dialect::Duckdb);
 
 let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn duckdb::ToSql>]);
 let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 ```
 
-### PostgreSQL (sync + async)
+#### PostgreSQL (sync and async)
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-postgres = "0.0.4"  # both sync and async enabled by default
-# sql-composer-postgres = { version = "0.0.4", default-features = false, features = ["async"] }
+sql-composer = "0.1.0"
+sql-composer-postgres = "0.1.0"  # sync and async, both on by default
+# sql-composer-postgres = { version = "0.1.0", default-features = false, features = ["async"] }
 ```
 
-**Features:** `sync` (enables `postgres` crate), `async` (enables `tokio-postgres`). Both enabled by default.
+The feature `sync` brings in the `postgres` crate and the sync type. `async` turns on the async
+type, built on `tokio-postgres`, which the driver always depends on.
 
 ```rust,ignore
 // Async (tokio-postgres)
 use sql_composer_postgres::{PgClient, boxed_params};
 use sql_composer::driver::ComposerConnectionAsync;
 
-let (client, connection) = tokio_postgres::connect("host=localhost dbname=lego", tokio_postgres::NoTls).await?;
+let (client, connection) = tokio_postgres::connect("host=localhost dbname=sqlc_brick", tokio_postgres::NoTls).await?;
 tokio::spawn(connection);
 let client = PgClient::from_client(client);
 
@@ -686,30 +976,34 @@ let rows = client.query(&sql as &str, &refs).await?;
 use sql_composer_postgres::{PgConnection, boxed_params_sync};
 use sql_composer::driver::ComposerConnection;
 
-let client = postgres::Client::connect("host=localhost dbname=lego", postgres::NoTls)?;
+let client = postgres::Client::connect("host=localhost dbname=sqlc_brick", postgres::NoTls)?;
 let conn = PgConnection::from_client(client);
 
 let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn postgres::types::ToSql + Sync>]);
 let (sql, params) = conn.compose(&composer, &template, values)?;
 ```
 
-### MySQL (sync + async)
+#### MySQL (sync and async)
 
 ```toml
 [dependencies]
-sql-composer = "0.0.4"
-sql-composer-mysql = "0.0.4"  # both sync and async enabled by default
-# sql-composer-mysql = { version = "0.0.4", default-features = false, features = ["async"] }
+sql-composer = "0.1.0"
+sql-composer-mysql = "0.1.0"  # sync and async, both on by default
+# sql-composer-mysql = { version = "0.1.0", default-features = false, features = ["async"] }
 ```
 
-**Features:** `sync` (enables `mysql` crate), `async` (enables `mysql_async`). Both enabled by default.
+The feature `sync` brings in the `mysql` crate and the sync type. `async` turns on the async type,
+built on `mysql_async`, which the driver always depends on.
+
+A name used twice is two placeholders on MySQL, and each takes the name's values again from the
+first.
 
 ```rust,ignore
 // Async (mysql_async)
 use sql_composer_mysql::MysqlConn;
 use sql_composer::driver::ComposerConnectionAsync;
 
-let pool = mysql_async::Pool::new("mysql://root@localhost/lego");
+let pool = mysql_async::Pool::new("mysql://root@localhost/sqlc_brick");
 let conn = pool.get_conn().await?;
 let conn = MysqlConn::from_conn(conn);
 
@@ -722,101 +1016,112 @@ let (sql, params) = conn.compose(&composer, &template, values).await?;
 use sql_composer_mysql::MysqlConnection;
 use sql_composer::driver::ComposerConnection;
 
-let conn = mysql::Conn::new("mysql://root@localhost/lego")?;
+let conn = mysql::Conn::new("mysql://root@localhost/sqlc_brick")?;
 let conn = MysqlConnection::from_conn(conn);
 
 let values = bind_values!("year" => [mysql::Value::from(2017i32)]);
 let (sql, params) = conn.compose(&composer, &template, values)?;
 ```
 
-### sqlx (verification + validation)
+#### sqlx: checking composed statements
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.0.4"                                        # postgres verification (default)
-# sql-composer-sqlx = { version = "0.0.4", features = ["validate"] } # add offline syntax checking
-# sql-composer-sqlx = { version = "0.0.4", features = ["mysql"] }    # mysql instead of postgres
+sql-composer-sqlx = "0.1.0"                                        # checks against PostgreSQL (the default)
+# sql-composer-sqlx = { version = "0.1.0", features = ["validate"] } # adds an offline syntax check
 ```
 
-**Features:** `postgres` (default, enables live verification against PostgreSQL), `mysql` (live verification against MySQL), `validate` (offline syntax checking via `sqlparser`).
+`verify_postgres`, under the feature `postgres` (on by default), prepares each statement on a live
+PostgreSQL and deallocates it again. That checks its syntax, and that its tables and columns exist.
+`verify_mysql`, under the feature `mysql`, does the same on a live MySQL. `validate_syntax`, under
+the feature `validate`, parses a statement offline with `sqlparser`, every placeholder read as `1`.
+It checks syntax only.
 
 ```rust,ignore
 use sql_composer_sqlx::verify_postgres;
 
-// Verify composed queries against a live database
+// Check composed statements against a live database
 let stmts = vec![&composed_sql];
-verify_postgres("postgres://localhost/lego", &stmts).await?;
+verify_postgres("postgres://localhost/sqlc_brick", &stmts).await?;
 ```
 
 ```rust,ignore
 use sql_composer_sqlx::validate_syntax;
 use sql_composer::Dialect;
 
-// Offline syntax validation (no database needed, requires "validate" feature)
+// Check syntax offline, with no database (the "validate" feature)
 validate_syntax("SELECT set_num, name FROM lego_sets WHERE year = $1", Dialect::Postgres)?;
 ```
 
-## Workspace Structure
+### C and Python
+
+Two crates give the composer to programs that are not written in Rust. `sql-composer-ffi` is its
+C ABI, with the header `sql_composer.h`. `sql-composer-py` is the Python module `sql_composer`,
+distributed as `sql-composer`. Each parses a template, composes it for any of the five dialects,
+with search paths, named relations, a view registry, mock tables and a count of values for each
+binding, and gives back the SQL, its bind names in placeholder order and where each statement's
+names begin. Each composes a whole directory as `cargo sqlc compose` does, `--respell` among its
+flags, with each template's standing and the text of `manifest.json`.
+
+They save a second composer written for another language, and a program that calls
+`cargo sqlc` to compose. Composed through either, with `--respell` or without, the brick example's
+templates give the files `cargo sqlc compose` writes, byte for byte, the union of its checks
+respelled among them.
+
+The values stay the calling program's: it binds them with its own database library, in the order
+the names are listed. Neither lays out spellings, which `cargo sqlc` and the core's feature
+`spellings` do. The calls are in
+[sql-composer-ffi's README][crates/sql-composer-ffi/README.md] and
+[sql-composer-py's][crates/sql-composer-py/README.md].
+
+### The workspace
 
 ```
 crates/
-  sql-composer/           # Core: parser (winnow), types, composer
+  sql-composer/           # the core: parser (winnow), types, composer
   sql-composer-rusqlite/  # rusqlite driver (ComposerConnection)
   sql-composer-duckdb/    # DuckDB driver (ComposerConnection)
-  sql-composer-postgres/  # PostgreSQL driver (sync + async)
-  sql-composer-mysql/     # MySQL driver (sync + async)
+  sql-composer-postgres/  # PostgreSQL driver (sync and async)
+  sql-composer-mysql/     # MySQL driver (sync and async)
   sql-composer-sqlx/      # sqlx integration (verify, validate)
-  cargo-sqlc/             # CLI pre-compiler
+  sql-composer-ffi/       # the C ABI (sql_composer.h)
+  sql-composer-py/        # the Python module sql_composer
+  cargo-sqlc/             # the cargo sqlc command
 examples/
-  lego/                   # Runnable example: every template feature on the Lego database
-  lego-generator/         # sqlc-brickgen: a large catalogue built from the Lego database, for Postgres
+  brick/                  # every directive but :define, and more of PostgreSQL's SQL, on sqlc-brickgen's database
+  sqlc-brickgen/          # sqlc-brickgen: a large catalogue built from a real one, for PostgreSQL
 ```
 
-## Core Library Features
+## Licence
 
-The `sql-composer` core crate has the following optional features:
+MIT, copyright Kenneth Allen Flegal: see [LICENSE][LICENSE]. Each published crate carries the same
+file.
 
-| Feature | Description |
-|---------|-------------|
-| `std` | Standard library support (enabled by default) |
-| `serde` | Derive `Serialize`/`Deserialize` for core types (`Template`, `Element`, etc.) |
+The brick example's tables are built from a real catalogue of building-brick sets, which its README
+credits. LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this
+project.
 
-```toml
-# With serde support
-sql-composer = { version = "0.0.4", features = ["serde"] }
-```
-
-## Core Types
-
-| Type | Description |
-|------|-------------|
-| `Template` | A parsed SQL template containing elements |
-| `Element` | SQL literal, bind macro, compose reference, or command |
-| `Binding` | A `:bind()` with name, optional value count constraints, and nullable flag |
-| `ComposeRef` | A `:compose()` or `:define()` reference with optional slot arguments |
-| `ComposeTarget` | Path, slot reference (`@name`) or `:define` path in a compose target |
-| `SlotAssignment` | A `@name = path` slot binding in `:compose()` |
-| `Command` | A `:count()`, `:union()`, `:intersect()` or `:except()` combinator |
-| `Composer` | Transforms templates into final SQL with placeholders |
-| `ComposedSql` | The result: final SQL string + ordered bind param names |
-| `Dialect` | Target database: `Postgres`, `Mysql`, `Sqlite` |
-
-## How Bind Parameter Ordering Works
-
-Numbered dialects (Postgres, SQLite) use a two-pass approach:
-
-1. **Collect** — scan all `:bind()` names into a deduplicated, alphabetically sorted set
-2. **Assign** — give each unique name a 1-based index (`$1`, `$2`, ...)
-3. **Emit** — replace each `:bind()` with its assigned placeholder
-
-This means the same bind name always gets the same placeholder number, regardless of where it appears in the template. Alphabetical ordering provides deterministic, predictable parameter positions.
-
-MySQL uses document-order positional `?` placeholders with no deduplication, matching its native parameter style.
-
-## Project Status
-
-This project is under active development. The core API (`Template`, `Composer`, `ComposedSql`) is stabilizing, but may still change before 0.1.0. Several crates in this workspace are being production tested to flush out remaining API issues.
-
-## License
-
-MIT, copyright Kenneth Allen Flegal: see [LICENSE](LICENSE). Each crate carries the same file.
+[README.pt.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/README.pt.md
+[warren-surveyor]: https://github.com/soulstompp/warren-surveyor
+[warren-snail]: https://github.com/soulstompp/warren-snail
+[speller]: https://github.com/soulstompp/warren-surveyor/blob/HEAD/warren-pg-speller/README.md
+[docs/without-rust.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/docs/without-rust.md
+[crates/sql-composer-ffi/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-ffi/README.md
+[crates/sql-composer-py/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/crates/sql-composer-py/README.md
+[examples/brick/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/brick
+[examples/sqlc-brickgen/]: https://github.com/soulstompp/sql-composer/tree/HEAD/examples/sqlc-brickgen
+[examples/brick/sqlc/shared/set_part_details.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/shared/set_part_details.sqlc
+[examples/brick/sqlc/sets/select_set_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/sets/select_set_parts.sqlc
+[examples/brick/.sql/sets/select_set_parts.sql]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/.sql/sets/select_set_parts.sql
+[examples/brick/sqlc/shared/filtered_set_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/shared/filtered_set_parts.sqlc
+[examples/brick/sqlc/filters/by_color.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/filters/by_color.sqlc
+[examples/brick/sqlc/sets/select_colored_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/sets/select_colored_parts.sqlc
+[examples/brick/sqlc/reports/city_only_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/city_only_moulds.sqlc
+[examples/brick/sqlc/reports/count_theme_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/count_theme_parts.sqlc
+[examples/brick/sqlc/reports/shared_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/shared_moulds.sqlc
+[examples/brick/sqlc/checks/roster.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/roster.sqlc
+[examples/brick/sqlc/checks/all.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/all.sqlc
+[examples/brick/sqlc/checks/sets_without_lines.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/sets_without_lines.sqlc
+[examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
+[process-modulus]: https://github.com/soulstompp/process-modulus
+[LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE

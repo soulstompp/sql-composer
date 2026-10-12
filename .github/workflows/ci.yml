@@ -94,6 +94,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p cargo-sqlc
 
+  test-ffi:
+    name: Test sql-composer-ffi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p sql-composer-ffi
+
+  test-py:
+    name: Test sql-composer-py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      # The tests embed Python, so they link libpython and load it from where setup-python put it.
+      - run: cargo test -p sql-composer-py
+        env:
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
+
   test-sqlc-brickgen:
     name: Test sqlc-brickgen
     runs-on: ubuntu-latest
@@ -102,10 +124,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test -p sqlc-brickgen
 
-  verify-lego:
-    name: Verify the lego example's composed SQL
+  verify-brick:
+    name: Verify the brick example's composed SQL
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo run -p cargo-sqlc -- sqlc compose --source examples/lego/sqlc --target examples/lego/.sql --verify
+      - run: cargo run -p cargo-sqlc -- sqlc compose --source examples/brick/sqlc --target examples/brick/.sql --verify

@@ -1,0 +1,3 @@
+# The moulds City sets use and no Technic set does: one row per part_num. The order of the sources
+# matters: the first is the one the second is taken from.
+:except(queries/city_moulds.sqlc, queries/technic_moulds.sqlc)

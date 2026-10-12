@@ -1,0 +1,9 @@
+# The builders whose postcode matches a regular expression: one row per builder, keyed by
+# builder_id. A builder lives on a street, and the street lies in a postcode. A pattern that starts
+# with ^ and a fixed prefix is served by the postcodes' pattern index, which walks only the codes
+# that begin with the prefix.
+SELECT b.builder_id
+FROM lego_builders b
+JOIN lego_streets st ON st.street_id = b.street_id
+JOIN lego_postcodes pc ON pc.postcode_id = st.postcode_id
+WHERE pc.code ~ :bind(pattern)

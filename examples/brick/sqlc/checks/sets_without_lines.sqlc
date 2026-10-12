@@ -1,0 +1,18 @@
+# The sets with no inventory line, under the roster's row for this check: one row per set, keyed
+# by set_num, with its name. A set whose inventories hold no line is one, and so is a set with no
+# inventory. Where every set has a line, the roster's row comes back alone.
+SELECT r.rule, p.set_num, p.detail
+FROM (
+    :compose(checks/roster.sqlc)
+) r
+LEFT JOIN (
+    SELECT s.set_num, s.name AS detail
+    FROM lego_sets s
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM lego_inventories i
+        WHERE i.set_num = s.set_num
+          AND EXISTS (SELECT 1 FROM lego_inventory_parts ip WHERE ip.inventory_id = i.id)
+    )
+) p ON true
+WHERE r.slug = 'sets_without_lines'

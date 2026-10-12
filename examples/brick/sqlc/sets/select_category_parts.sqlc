@@ -1,0 +1,3 @@
+# A set's lines whose part is in the category category_name, one row per line, keyed by the line:
+# the set's lines with the category's filter in the @filter slot.
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)

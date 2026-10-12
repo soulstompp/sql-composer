@@ -1,0 +1,15 @@
+# A set's piece totals per version and category: one row per (version, category_name), the pieces
+# that are not spares and the spares apart. A category with no spare lines has a spare total of 0,
+# and one with only spare lines a part total of 0. A line with no category (its part is not in the
+# catalogue) is not totalled here; the parts listing shows it.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    version,
+    category_name,
+    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0) AS total_parts,
+    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0) AS total_spare
+FROM set_part_details
+WHERE category_name IS NOT NULL
+GROUP BY version, category_name

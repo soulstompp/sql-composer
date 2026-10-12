@@ -1,0 +1,18 @@
+# Sync the spare counts in inventory_tracking with the set's lines, version by version: a tracked
+# part's spare count is the sum of its spare lines across colours in that version, and 0 where it
+# has none. A tracked part the set's lines no longer hold keeps its count.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+UPDATE inventory_tracking it
+SET
+    spare_count = COALESCE(spd.total_spare, 0),
+    updated_at = NOW()
+FROM (
+    SELECT version, part_num, SUM(quantity) FILTER (WHERE is_spare) AS total_spare
+    FROM set_part_details
+    GROUP BY version, part_num
+) spd
+WHERE it.set_num = :bind(set_num)
+  AND it.version = spd.version
+  AND it.part_num = spd.part_num

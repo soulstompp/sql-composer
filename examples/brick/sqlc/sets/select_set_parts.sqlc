@@ -1,0 +1,29 @@
+# A set's parts, one row per line, version by version, each line with its part, category and
+# colour. The ORDER BY ends on the line key, so the order is total and a truncated listing is always
+# the same rows. A line with no category, part name or colour name comes after the named ones; the
+# ORDER BY says so, because databases disagree on where a NULL sorts.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    inventory_id,
+    version,
+    part_num,
+    color_id,
+    is_spare,
+    part_status,
+    part_name,
+    category_name,
+    color_name,
+    color_rgb,
+    quantity
+FROM set_part_details
+ORDER BY
+    version,
+    inventory_id,
+    category_name IS NULL, category_name,
+    part_name IS NULL, part_name,
+    color_name IS NULL, color_name,
+    part_num,
+    color_id,
+    is_spare

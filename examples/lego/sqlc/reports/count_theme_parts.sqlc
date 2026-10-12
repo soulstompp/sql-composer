@@ -1,3 +1,0 @@
-# Count the distinct moulds (part numbers) across every set in a theme scope.
-# Demonstrates :count(DISTINCT col OF source).
-:count(DISTINCT part_num OF queries/theme_set_parts.sqlc)

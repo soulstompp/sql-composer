@@ -1,23 +1,31 @@
 [package]
 name = "sql-composer"
-version = "0.0.4"
-description = "SQL template engine that composes reusable SQL fragments with parameterized bindings"
+version.workspace = true
+description = "Compose SQL templates: each query written once, in plain SQL, and composed into every statement that needs it"
 keywords = ["sql", "template", "composer", "parser", "winnow"]
 categories = ["parser-implementations", "database"]
-repository = "https://github.com/soulstompp/sql-composer"
-license = "MIT"
-readme = "../../README.md"
-edition = "2021"
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-winnow = "0.7"
-thiserror = "2"
+winnow = "1"
+thiserror.workspace = true
+walkdir.workspace = true
 serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+sqlparser = { workspace = true, optional = true, features = ["visitor"] }
+toml = { version = "1.1", optional = true, default-features = false, features = ["std", "serde", "parse"] }
 
 [dev-dependencies]
-tempfile = "3.26.0"
+tempfile.workspace = true
+postgres = "0.19"
 
 [features]
 default = ["std"]
 std = ["winnow/std"]
-serde = ["dep:serde"]
+serde = ["dep:serde", "dep:serde_json"]
+respell = ["dep:sqlparser"]
+spellings = ["dep:sqlparser", "dep:serde", "dep:toml"]

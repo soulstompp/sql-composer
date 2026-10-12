@@ -15,16 +15,16 @@
 //! use sql_composer::bind_values;
 //! use sql_composer_postgres::{PgClient, boxed_params};
 //!
-//! let (client, connection) = tokio_postgres::connect("host=localhost", tokio_postgres::NoTls).await?;
+//! let (client, connection) = tokio_postgres::connect("host=localhost dbname=sqlc_brick", tokio_postgres::NoTls).await?;
 //! tokio::spawn(connection);
 //! let client = PgClient::from_client(client);
 //!
 //! let template = sql_composer::parser::parse_template(
-//!     "SELECT * FROM users WHERE id = :bind(user_id)",
+//!     "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)",
 //!     TemplateSource::Literal("example".into()),
 //! )?;
 //! let composer = Composer::new(Dialect::Postgres);
-//! let values = bind_values!("user_id" => [Box::new(1i32) as Box<dyn tokio_postgres::types::ToSql + Sync + Send>]);
+//! let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn tokio_postgres::types::ToSql + Sync + Send>]);
 //! let (sql, params) = client.compose(&composer, &template, values).await?;
 //! let refs = boxed_params(&params);
 //! let rows = client.query(&sql as &str, &refs).await?;
@@ -39,15 +39,15 @@
 //! use sql_composer::bind_values;
 //! use sql_composer_postgres::{PgConnection, boxed_params_sync};
 //!
-//! let mut client = postgres::Client::connect("host=localhost", postgres::NoTls)?;
+//! let mut client = postgres::Client::connect("host=localhost dbname=sqlc_brick", postgres::NoTls)?;
 //! let conn = PgConnection::from_client(client);
 //!
 //! let template = sql_composer::parser::parse_template(
-//!     "SELECT * FROM users WHERE id = :bind(user_id)",
+//!     "SELECT set_num, name FROM lego_sets WHERE year = :bind(year)",
 //!     TemplateSource::Literal("example".into()),
 //! )?;
 //! let composer = Composer::new(Dialect::Postgres);
-//! let values = bind_values!("user_id" => [Box::new(1i32) as Box<dyn postgres::types::ToSql + Sync>]);
+//! let values = bind_values!("year" => [Box::new(2017i32) as Box<dyn postgres::types::ToSql + Sync>]);
 //! let (sql, params) = conn.compose(&composer, &template, values)?;
 //! let refs = boxed_params_sync(&params);
 //! let rows = conn.query(&sql as &str, &refs)?;

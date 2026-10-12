@@ -1,0 +1,6 @@
+# The example's checks, one row per check, keyed by slug: the slug each check is cut to, and the
+# rule it finds rows against. Each check reads its rule from here, so a rule is written once.
+SELECT * FROM (VALUES
+    ('lines_uncatalogued', 'a line whose part is not in the parts catalogue'),
+    ('sets_without_lines', 'a set with no inventory line')
+) AS roster (slug, rule)

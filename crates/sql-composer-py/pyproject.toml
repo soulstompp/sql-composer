@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "sql-composer"
+description = "Compose SQL templates for a dialect, and get the SQL and its bind names back"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Database",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+# maturin sets PYO3_BUILD_EXTENSION_MODULE itself, so no feature is named here: the
+# `pyo3/extension-module` feature would drop the libpython link for `cargo test` too.
+module-name = "sql_composer"
+manifest-path = "Cargo.toml"
+strip = true

@@ -70,6 +70,30 @@
         0
       ]
     },
+    "checks/all.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/lines_uncatalogued.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/roster.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
+    "checks/sets_without_lines.sql": {
+      "bind_params": [],
+      "statement_starts": [
+        0
+      ]
+    },
     "filters/by_category.sql": {
       "bind_params": [
         "category_name"

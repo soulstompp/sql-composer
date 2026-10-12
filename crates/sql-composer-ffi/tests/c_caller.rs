@@ -55,7 +55,7 @@ fn test_a_c_program_writes_the_committed_brick_files() {
     let dir = tempfile::tempdir().unwrap();
     let program = compose_tree(dir.path());
 
-    // Without `--respell` and with it: the brick templates hold no union it rewrites.
+    // Without `--respell` and with it: it rewrites the union of the checks, `checks/all.sql`.
     for respell in [false, true] {
         let target = dir
             .path()

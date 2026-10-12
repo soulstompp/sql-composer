@@ -150,8 +150,8 @@ fn composed_files(source: &Path, flags: *const SqlComposerFlags) -> BTreeMap<Str
 #[test]
 fn test_the_brick_templates_compose_to_the_committed_files() {
     // Composing for PostgreSQL without `--with`, as the committed files were composed, and with
-    // `--respell` too: the brick templates hold no union it rewrites, so it writes the same files
-    // and a manifest that records it.
+    // `--respell` too: it rewrites the union of the checks, `checks/all.sql`, writes every other
+    // file the same, and a manifest that records it.
     for respell in [false, true] {
         let postgres = flags("postgres", false, respell);
         let composed = composed_files(&brick("sqlc"), postgres);

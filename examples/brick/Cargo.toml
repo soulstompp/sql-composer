@@ -9,7 +9,7 @@ name = "brick"
 path = "src/main.rs"
 
 [dependencies]
-sql-composer = { workspace = true, features = ["spellings"] }
+sql-composer = { workspace = true, features = ["respell", "spellings"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
 # sqlx-postgres 0.9.0 builds whoami without `std`, so a URL that names no user connects as
 # `anonymous`; whoami's default features have it read the operating system's user again.

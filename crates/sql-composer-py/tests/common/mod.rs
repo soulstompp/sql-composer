@@ -53,9 +53,19 @@ pub fn differences(
     differences
 }
 
+/// The brick example's composed file that respelling rewrites: the union of its checks, whose
+/// arms each read the roster.
+pub const CHECKS: &str = "checks/all.sql";
+
+/// How many times `sql` reads the brick example's roster of checks.
+pub fn brick_roster_reads(sql: &str) -> usize {
+    sql.matches(") AS roster (slug, rule)").count()
+}
+
 /// The brick example's committed files, by their paths under the target, as composing with or
-/// without `--respell` writes them. The brick templates hold no union the respelling rewrites, so
-/// the files are the same either way, and the manifest says which.
+/// without `--respell` writes them. Respelled, `checks/all.sql`, the union of the example's
+/// checks, reads the roster once, its text what `respell::respell` gives for the committed text;
+/// every other file is the same either way, and the manifest says which.
 pub fn committed_brick(respell: bool) -> BTreeMap<String, Vec<u8>> {
     let mut committed = files_under(&brick(".sql"));
     assert!(
@@ -71,6 +81,13 @@ pub fn committed_brick(respell: bool) -> BTreeMap<String, Vec<u8>> {
         );
         let respelled = manifest.replace(r#""respell": false"#, r#""respell": true"#);
         committed.insert("manifest.json".to_string(), respelled.into_bytes());
+
+        let checks = String::from_utf8(committed[CHECKS].clone()).unwrap();
+        let respelled = sql_composer::respell::respell(&checks);
+        assert_eq!(respelled.unions, vec![2], "{}", respelled.sql);
+        assert_eq!(brick_roster_reads(&checks), 2, "{checks}");
+        assert_eq!(brick_roster_reads(&respelled.sql), 1, "{}", respelled.sql);
+        committed.insert(CHECKS.to_string(), respelled.sql.into_bytes());
     }
     committed
 }

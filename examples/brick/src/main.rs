@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use sql_composer::composer::{ComposedSql, Composer};
 use sql_composer::parser::parse_template_file;
+use sql_composer::respell;
 use sql_composer::types::Dialect;
 use sql_composer::MockTable;
 use sqlx::postgres::{PgArguments, PgPoolOptions, PgRow};
@@ -143,6 +144,8 @@ enum Commands {
         #[arg(default_value_t = 5)]
         top: i32,
     },
+    /// Every check's rows, each under its rule from one roster (:union ALL over a roster)
+    Checks,
     /// Check the example's laws; exits 1 if any fails
     Laws,
     /// Check the fit's laws, from EXPLAIN alone, running nothing; exits 1 if any fails
@@ -393,6 +396,7 @@ async fn main() {
         Commands::BoughtNear { city_id, km } => cmd_bought_near(&pool, dir, city_id, km).await,
         Commands::BoughtIn { pattern } => cmd_bought_in(&pool, dir, &pattern).await,
         Commands::Nearest { city_id, top } => cmd_nearest(&pool, dir, city_id, top).await,
+        Commands::Checks => cmd_checks(&pool, dir).await,
         Commands::Laws => {
             if !cmd_laws(&pool, dir).await {
                 std::process::exit(1);
@@ -1145,6 +1149,57 @@ async fn cmd_nearest(pool: &PgPool, sqlc_dir: &Path, city_id: i32, top: i32) {
             row.get::<i32, _>("builder_id"),
             row.get::<f64, _>("metres"),
         );
+    }
+}
+
+// ── a roster of checks ──────────────────────────────────────────────
+
+/// A check's row: its rule, and the set and the detail of what it found, both absent on the
+/// roster's row a check that finds nothing returns alone.
+type CheckRow = (String, Option<String>, Option<String>);
+
+fn check_row(row: &PgRow) -> CheckRow {
+    (row.get("rule"), row.get("set_num"), row.get("detail"))
+}
+
+/// The rows a composed check returns, sorted.
+async fn check_rows(pool: &PgPool, sql: &str) -> Result<Vec<CheckRow>, sqlx::Error> {
+    let mut rows: Vec<CheckRow> = sqlx::query(AssertSqlSafe(sql))
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(check_row)
+        .collect();
+    rows.sort();
+    Ok(rows)
+}
+
+async fn cmd_checks(pool: &PgPool, sqlc_dir: &Path) {
+    let result = compose(sqlc_dir, "checks/all.sqlc");
+    print_header("checks/all", &result);
+
+    let rows = check_rows(pool, &result.sql).await.expect("query failed");
+    let mut by_rule: BTreeMap<&str, Vec<&CheckRow>> = BTreeMap::new();
+    for row in &rows {
+        by_rule.entry(row.0.as_str()).or_default().push(row);
+    }
+    println!("{} checks:", by_rule.len());
+    for (rule, found) in &by_rule {
+        if let [(_, None, None)] = found[..] {
+            println!("  {rule}: finds nothing, its roster row alone");
+            continue;
+        }
+        println!("  {rule}: {} rows", found.len());
+        for (_, set_num, detail) in found.iter().take(10) {
+            println!(
+                "    {:<15} {}",
+                shown(set_num.as_ref()),
+                shown(detail.as_ref())
+            );
+        }
+        if found.len() > 10 {
+            println!("    ... and {} more", found.len() - 10);
+        }
     }
 }
 
@@ -2150,7 +2205,109 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         ),
     );
 
-    // 27. On rows of the example's own, the division keeps a builder who owns every set of a
+    // 27. Each check's rows are what a second spelling finds in the tables, each under the rule
+    //     the roster gives it, or the roster's row alone where it finds nothing.
+    let roster: BTreeMap<String, String> = bound(&compose(sqlc_dir, "checks/roster.sqlc"), &[])
+        .fetch_all(pool)
+        .await
+        .expect("query failed")
+        .iter()
+        .map(|r| (r.get("slug"), r.get("rule")))
+        .collect();
+    let mut one_by_one: Vec<CheckRow> = Vec::new();
+    for (slug, found, examined, what) in [
+        (
+            "lines_uncatalogued",
+            "SELECT i.set_num, format('inventory %s, version %s: part %s in colour %s%s', \
+               ip.inventory_id, i.version, ip.part_num, ip.color_id, \
+               CASE WHEN ip.is_spare THEN ', a spare' ELSE '' END) \
+             FROM lego_inventory_parts ip \
+             JOIN lego_inventories i ON i.id = ip.inventory_id \
+             LEFT JOIN lego_parts pt ON pt.part_num = ip.part_num \
+             WHERE pt.part_num IS NULL",
+            "SELECT count(*) FROM lego_inventory_parts",
+            "lines",
+        ),
+        (
+            "sets_without_lines",
+            "SELECT s.set_num, s.name FROM lego_sets s \
+             JOIN (SELECT set_num FROM lego_sets \
+                   EXCEPT \
+                   SELECT i.set_num FROM lego_inventories i \
+                   JOIN lego_inventory_parts ip ON ip.inventory_id = i.id) bare \
+               ON bare.set_num = s.set_num",
+            "SELECT count(*) FROM lego_sets",
+            "sets",
+        ),
+    ] {
+        let check = compose(sqlc_dir, &format!("checks/{slug}.sqlc"));
+        let rows = check_rows(pool, &check.sql).await.expect("query failed");
+        let found: Vec<(String, String)> = sqlx::query_as(AssertSqlSafe(found))
+            .fetch_all(pool)
+            .await
+            .expect("query failed");
+        let examined: i64 = sqlx::query_scalar(AssertSqlSafe(examined))
+            .fetch_one(pool)
+            .await
+            .expect("query failed");
+        let rule = roster.get(slug).cloned().unwrap_or_default();
+        let mut expected: Vec<CheckRow> = found
+            .iter()
+            .map(|(set_num, detail)| (rule.clone(), Some(set_num.clone()), Some(detail.clone())))
+            .collect();
+        if expected.is_empty() {
+            expected.push((rule.clone(), None, None));
+        }
+        expected.sort();
+        let elsewhere = rows.iter().filter(|(r, _, _)| *r != rule).count();
+        all_hold &= verdict(
+            &format!("{slug}'s rows are what it finds in the tables, under its rule"),
+            roster.contains_key(slug) && rows == expected,
+            &format!(
+                "{} rows, {elsewhere} of them under another rule; {} found in the tables, of \
+                 {examined} {what}",
+                rows.len(),
+                found.len()
+            ),
+        );
+        one_by_one.extend(rows);
+    }
+    one_by_one.sort();
+
+    // 28. The union of the checks is every check's rows, each as often as the check returns it.
+    let all = compose(sqlc_dir, "checks/all.sqlc");
+    let union = check_rows(pool, &all.sql).await.expect("query failed");
+    all_hold &= verdict(
+        "checks/all.sqlc is every check's rows, each as often",
+        !union.is_empty() && union == one_by_one,
+        &format!(
+            "{} rows, {} from the checks one by one",
+            union.len(),
+            one_by_one.len()
+        ),
+    );
+
+    // 29. Respelled, the union of the checks is one union, an arm for each check of the roster,
+    //     and returns the rows it returns as composed, each as often.
+    let respelled = respell::respell(&all.sql);
+    let law = "checks/all.sqlc, respelled, returns its rows as composed";
+    all_hold &= match check_rows(pool, &respelled.sql).await {
+        Ok(rows) => verdict(
+            law,
+            respelled.unions == vec![roster.len()] && rows == union,
+            &format!(
+                "unions respelled, by their arms: {:?}, for {} checks; {} rows respelled, {} as \
+                 composed",
+                respelled.unions,
+                roster.len(),
+                rows.len(),
+                union.len()
+            ),
+        ),
+        Err(e) => verdict(law, false, &format!("the respelled statement failed: {e}")),
+    };
+
+    // 30. On rows of the example's own, the division keeps a builder who owns every set of a
     //     scope, drops one missing a set, and keeps nobody for a scope with no sets, which the
     //     catalogue never has.
     let themes = MockTable::new("lego_themes")
@@ -2203,7 +2360,7 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         ),
     );
 
-    // 28. On rows of the example's own, a year with no release between two that have one is
+    // 31. On rows of the example's own, a year with no release between two that have one is
     //     listed with 0.
     let releases = MockTable::new("lego_sets")
         .column("set_num", "varchar")
@@ -2224,6 +2381,78 @@ async fn cmd_laws(pool: &PgPool, sqlc_dir: &Path) -> bool {
         listed == vec![(1990, 1), (1991, 0), (1992, 2)],
         &format!("{listed:?}"),
     );
+
+    // 32. On rows of the example's own, where every line's part is catalogued and two sets have
+    //     no line, the check that finds nothing returns its roster row alone, composed and
+    //     respelled; with the respelling's arms joined inner, the row is lost.
+    let parts = MockTable::new("lego_parts")
+        .column("part_num", "varchar")
+        .row(&[Some("3001")]);
+    let sets = MockTable::new("lego_sets")
+        .column("set_num", "varchar")
+        .column("name", "varchar")
+        .row(&[Some("100-1"), Some("A line")])
+        .row(&[Some("200-1"), Some("An inventory with no line")])
+        .row(&[Some("300-1"), Some("No inventory")]);
+    let inventories = MockTable::new("lego_inventories")
+        .column("id", "integer")
+        .column("version", "integer")
+        .column("set_num", "varchar")
+        .row(&[Some("1"), Some("1"), Some("100-1")])
+        .row(&[Some("2"), Some("1"), Some("200-1")]);
+    let lines = MockTable::new("lego_inventory_parts")
+        .column("inventory_id", "integer")
+        .column("part_num", "varchar")
+        .column("color_id", "integer")
+        .column("is_spare", "boolean")
+        .row(&[Some("1"), Some("3001"), Some("0"), Some("false")]);
+    let mocked = compose_mocked(
+        sqlc_dir,
+        "checks/all.sqlc",
+        vec![parts, sets, inventories, lines],
+    );
+    let respelled = respell::respell(&mocked.sql);
+    let tagged = "LEFT JOIN (\nSELECT * FROM (\nSELECT 1 AS arm";
+    let inner = respelled.sql.replacen(tagged, &tagged["LEFT ".len()..], 1);
+    let rule = |slug: &str| roster.get(slug).cloned().unwrap_or_default();
+    let mut expected: Vec<CheckRow> = vec![
+        (rule("lines_uncatalogued"), None, None),
+        (
+            rule("sets_without_lines"),
+            Some("200-1".into()),
+            Some("An inventory with no line".into()),
+        ),
+        (
+            rule("sets_without_lines"),
+            Some("300-1".into()),
+            Some("No inventory".into()),
+        ),
+    ];
+    expected.sort();
+    let law = "on mocked rows, a check that finds nothing returns its roster row alone, composed \
+               and respelled";
+    let mut found = Vec::new();
+    for sql in [&mocked.sql, &respelled.sql, &inner] {
+        found.push(check_rows(pool, sql).await);
+    }
+    all_hold &= match &found[..] {
+        [Ok(composed), Ok(spelled), Ok(joined)] => verdict(
+            law,
+            *composed == expected
+                && respelled.unions == vec![roster.len()]
+                && spelled == composed
+                && joined != composed,
+            &format!(
+                "composed {composed:?}; respelled, unions by their arms {:?}, {} rows, the same: \
+                 {}; the respelling's arms joined inner, {} rows",
+                respelled.unions,
+                spelled.len(),
+                spelled == composed,
+                joined.len()
+            ),
+        ),
+        _ => verdict(law, false, &format!("a statement failed: {found:?}")),
+    };
 
     println!(
         "=== Laws: {} ===",
@@ -2284,6 +2513,7 @@ async fn cmd_all(pool: &PgPool, sqlc_dir: &Path) -> bool {
     cmd_bought_near(pool, sqlc_dir, DEFAULT_CITY_ID, DEFAULT_KM).await;
     cmd_bought_in(pool, sqlc_dir, DEFAULT_POSTCODES).await;
     cmd_nearest(pool, sqlc_dir, DEFAULT_CITY_ID, 5).await;
+    cmd_checks(pool, sqlc_dir).await;
 
     println!("\n=== All examples complete ===");
     cmd_laws(pool, sqlc_dir).await

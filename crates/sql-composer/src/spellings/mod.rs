@@ -557,13 +557,13 @@ mod census {
     fn every_brick_template_reads_and_is_written_back_byte_for_byte() {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/brick/sqlc");
         let census = census(&source, std::slice::from_ref(&source));
-        assert_eq!(census.templates, 51);
+        assert_eq!(census.templates, 55);
         assert!(census.unread.is_empty(), "{census:?}");
-        assert_eq!(census.statements, 51);
+        assert_eq!(census.statements, 55);
         assert!(census.unparsed.is_empty(), "{census:?}");
         assert!(census.not_read_back.is_empty(), "{census:?}");
         assert!(census.not_written_back.is_empty(), "{census:?}");
-        assert_eq!((census.join_lists, census.using), (21, 0), "{census:?}");
+        assert_eq!((census.join_lists, census.using), (24, 0), "{census:?}");
     }
 
     /// The census of the tree `SQLC_CENSUS_SOURCE` names, its composed templates read under it

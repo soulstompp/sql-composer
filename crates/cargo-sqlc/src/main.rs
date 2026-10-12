@@ -1594,7 +1594,7 @@ mod tests {
         let (out, refused) = printed(&["spell", "--source", &src, "--check"]);
         assert_eq!(refused, None, "{out}");
         assert!(
-            out.ends_with("Spell check OK: all 51 template(s) in the picks\n"),
+            out.ends_with("Spell check OK: all 55 template(s) in the picks\n"),
             "{out}"
         );
 
@@ -1614,7 +1614,7 @@ mod tests {
         assert_eq!(
             refused.unwrap(),
             format!(
-                "{} of 51 template(s) not in the picks — run `cargo sqlc spell` to write them",
+                "{} of 55 template(s) not in the picks — run `cargo sqlc spell` to write them",
                 reported.len()
             )
         );
@@ -1631,7 +1631,7 @@ mod tests {
         assert_eq!(refused, None);
         assert!(
             out.ends_with(&format!(
-                "Spelled {} of 51 template(s) under {src} in the picks\n",
+                "Spelled {} of 55 template(s) under {src} in the picks\n",
                 reported.len()
             )),
             "{out}"
@@ -1650,7 +1650,7 @@ mod tests {
             }
         }
         let composed = compose_all(&source, &postgres(false, &[])).unwrap();
-        assert_eq!(composed.len(), 51);
+        assert_eq!(composed.len(), 55);
     }
 
     #[test]

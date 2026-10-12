@@ -1,7 +1,17 @@
 # Brick example
 
-sql-composer's directives at work, and more of PostgreSQL's SQL, on the database sqlc-brickgen
-builds.
+This example walks sql-composer's template language one template at a time, on a catalogue of
+building-brick sets. Each step asks the catalogue a question and answers it with a template. Its
+subcommand composes the template, prints the statement it composes to, and runs it.
+
+The walk starts at a set's lines and builds on them. They are listed, written into tables, and
+narrowed by a filter passed in. Then the themes the sets belong to are gathered into scopes, the
+scopes combined as sets and counted, and each relation named once. The walk goes on into more of
+PostgreSQL's SQL, and into searches that read the indexes the catalogue is built with. It ends at
+`laws`, which checks what the steps promise against a second spelling of the same answer.
+
+The catalogue is the database sqlc-brickgen builds from a real one: sets, their inventories and
+parts, colours and themes, and the builders who buy the sets.
 
 ## Setup
 
@@ -19,7 +29,8 @@ cargo run -p brick-example -- migrate
 
 1. `createdb` makes the example's database.
 2. `psql` loads Neon's sample dump into `public`: the real catalogue the generator reads. The load
-   stops at the first failed statement.
+   stops at the first failed statement. The dump's source and licences are at the end of this
+   page.
 3. The generator writes the catalogue and 20 thousand synthesized sets, with their builders,
    collections and purchases, into the schema `lego`, which it drops and recreates on every run.
    `--traps none` leaves out the traps it plants. `--indexes keys,composite,search` builds the keys,
@@ -38,7 +49,1048 @@ The queries search the schema `lego`, then the schemas that hold the three exten
 `lego`. Extensions the database already held in `public` stay there, out of the queries' reach, and
 the searches by place then stop at their first call to `ll_to_earth`.
 
-### Connecting
+*Connecting*, at the end of this page, says how to reach a database other than `sqlc_brick`.
+
+## The walk
+
+Every command runs from the repository root. The templates are in `examples/brick/sqlc`, and the
+files they compose to are committed beside them, in `examples/brick/.sql`, each at its template's
+path. This command checks that every composed file is still what its template composes to, and
+writes nothing:
+
+```sh
+cargo sqlc compose --source examples/brick/sqlc --target examples/brick/.sql --skip-prepare --verify
+```
+
+Without `--verify`, it writes them again.
+
+A subcommand composes its template as it runs. It prints the composed statement and the names of
+its bind parameters, binds its values by name, and prints the rows. A value given under a name the
+statement does not bind is refused, so a value never lands on another parameter.
+
+### 1. A set's lines
+
+What parts are in a set? Every line of each of the set's inventories, with its part, the part's
+category and its colour. [`shared/set_part_details.sqlc`][shared/set_part_details.sqlc] states it
+once:
+
+```sql
+# What parts are in a set: every line of every inventory the set has, one row per line, keyed by the
+# line (inventory_id, part_num, color_id, is_spare). A set sold in more than one version has one
+# inventory per version, and each line carries its version. Nothing here adds two versions
+# together: a caller that totals a set totals it per version.
+#
+# A line is never dropped for what the catalogue lacks. A line whose part is not in the parts
+# catalogue keeps its row, with part_status 'uncatalogued' and no part name or category.
+SELECT
+    ip.inventory_id,
+    i.version,
+    ip.part_num,
+    ip.color_id,
+    ip.is_spare,
+    ip.quantity,
+    CASE WHEN p.part_num IS NULL THEN 'uncatalogued' ELSE 'catalogued' END AS part_status,
+    p.name AS part_name,
+    pc.name AS category_name,
+    c.name AS color_name,
+    c.rgb AS color_rgb,
+    c.is_trans
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+LEFT JOIN lego_parts p ON p.part_num = ip.part_num
+LEFT JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+LEFT JOIN lego_colors c ON c.id = ip.color_id
+WHERE i.set_num = :bind(set_num)
+```
+
+Its `WHERE` is a selection: it keeps one set's rows, by the value bound to `set_num`. Its `SELECT`
+list is a projection, the columns kept. Its joins match each line with its inventory, its part, the
+part's category and its colour, and the `LEFT JOIN`s keep a line the catalogue cannot name.
+
+A listing composes it, [`sets/select_set_parts.sqlc`][sets/select_set_parts.sqlc]:
+
+```sql
+# A set's parts, one row per line, version by version, each line with its part, category and
+# colour. The ORDER BY ends on the line key, so the order is total and a truncated listing is always
+# the same rows. A line with no category, part name or colour name comes after the named ones; the
+# ORDER BY says so, because databases disagree on where a NULL sorts.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    inventory_id,
+    version,
+    part_num,
+    color_id,
+    is_spare,
+    part_status,
+    part_name,
+    category_name,
+    color_name,
+    color_rgb,
+    quantity
+FROM set_part_details
+ORDER BY
+    version,
+    inventory_id,
+    category_name IS NULL, category_name,
+    part_name IS NULL, part_name,
+    color_name IS NULL, color_name,
+    part_num,
+    color_id,
+    is_spare
+```
+
+It composes to [`.sql/sets/select_set_parts.sql`][.sql/sets/select_set_parts.sql]. The join's body
+stands in the `WITH` where `:compose` was, `$1` stands where `:bind(set_num)` was, and the `#`
+lines of both templates are gone.
+
+```sh
+cargo run -p brick-example -- parts 10182-1
+cargo run -p brick-example -- parts 75053-1      # a set sold in two versions
+```
+
+Each prints the set's lines version by version: each version's inventory, its lines and its
+pieces, spares left out. Every line of the set's inventories comes back, and none twice. A set sold
+in two versions is listed and totalled per version. For both sets, each version's pieces are the
+figure the catalogue files for the set, `num_parts`.
+
+The next step takes the same relation, unchanged, into statements that write.
+
+### 2. The same relation in an INSERT, an UPDATE and a MERGE
+
+How many pieces of each category does a set hold, version by version, kept in a table?
+[`shared/set_category_totals.sqlc`][shared/set_category_totals.sqlc] reduces a set's lines to one
+row per version and category:
+
+```sql
+# A set's piece totals per version and category: one row per (version, category_name), the pieces
+# that are not spares and the spares apart. A category with no spare lines has a spare total of 0,
+# and one with only spare lines a part total of 0. A line with no category (its part is not in the
+# catalogue) is not totalled here; the parts listing shows it.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    version,
+    category_name,
+    COALESCE(SUM(quantity) FILTER (WHERE NOT is_spare), 0) AS total_parts,
+    COALESCE(SUM(quantity) FILTER (WHERE is_spare), 0) AS total_spare
+FROM set_part_details
+WHERE category_name IS NOT NULL
+GROUP BY version, category_name
+```
+
+[`reports/insert_set_summary.sqlc`][reports/insert_set_summary.sqlc] writes those rows into
+`set_category_summary`, one of the tables `migrate` creates:
+
+```sql
+# Populate the per-category part summary for a set: one row per (set, version, category). A set
+# sold in several versions gets one summary per version, never a sum across them. The totals are
+# the shared ones, so they always agree with the parts listing. Running it again updates each
+# category's row rather than adding a second; a category the set no longer has keeps its row.
+INSERT INTO set_category_summary (set_num, version, category_name, total_parts, total_spare)
+SELECT
+    :bind(set_num),
+    version,
+    category_name,
+    total_parts,
+    total_spare
+FROM (
+    :compose(shared/set_category_totals.sqlc)
+) t
+ON CONFLICT (set_num, version, category_name) DO UPDATE
+SET total_parts = EXCLUDED.total_parts,
+    total_spare = EXCLUDED.total_spare
+```
+
+It composes to [`.sql/reports/insert_set_summary.sql`][.sql/reports/insert_set_summary.sql]. The
+totals stand in its `FROM`, and the set's lines inside them, two levels down. `set_num` is bound
+twice, as the value inserted and as the set the lines are selected by, and both are `$1`.
+
+```sh
+cargo run -p brick-example -- summary 10182-1
+```
+
+It prints how many rows it wrote, then each version's categories, parts and spares, read back from
+the table. Run twice, it leaves one row per version and category, each the totals of the set's
+lines.
+
+[`inventory/update_spare_counts.sqlc`][inventory/update_spare_counts.sqlc] composes the set's lines
+into an `UPDATE`:
+
+```sql
+# Sync the spare counts in inventory_tracking with the set's lines, version by version: a tracked
+# part's spare count is the sum of its spare lines across colours in that version, and 0 where it
+# has none. A tracked part the set's lines no longer hold keeps its count.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+UPDATE inventory_tracking it
+SET
+    spare_count = COALESCE(spd.total_spare, 0),
+    updated_at = NOW()
+FROM (
+    SELECT version, part_num, SUM(quantity) FILTER (WHERE is_spare) AS total_spare
+    FROM set_part_details
+    GROUP BY version, part_num
+) spd
+WHERE it.set_num = :bind(set_num)
+  AND it.version = spd.version
+  AND it.part_num = spd.part_num
+```
+
+The rows it updates are put in first by
+[`inventory/track_set_parts.sqlc`][inventory/track_set_parts.sqlc], an `INSERT … SELECT DISTINCT`
+over the same lines that leaves a part already tracked as it is. `spares` runs both, in that order:
+
+```sh
+cargo run -p brick-example -- spares 10182-1
+```
+
+It prints how many parts it started tracking, then how many rows it updated.
+
+[`reports/merge_set_summary.sqlc`][reports/merge_set_summary.sqlc] keeps the summary with `MERGE`,
+over the same totals. It updates a row the totals still have, inserts a missing one, and deletes
+nothing:
+
+```sh
+cargo run -p brick-example -- merge 75053-1
+```
+
+It prints how many rows it merged. A summary whose rows were changed or removed by hand comes back,
+after the merge, to what the `INSERT` writes.
+
+Four statements write from a set's lines, and none of their templates spells the join. The composer
+writes these statements and runs none of them. `ON CONFLICT` needs the unique key each
+table is created with, and the database checks that when the statement runs.
+
+The next step keeps the set's lines and narrows them, by a filter each caller chooses.
+
+### 3. A filter passed as a slot
+
+Which of a set's lines are plates, and which are black? One base answers both, with the filter left
+open as a slot. [`shared/filtered_set_parts.sqlc`][shared/filtered_set_parts.sqlc] is a set's
+lines, kept by whatever relation a caller passes as `@filter`:
+
+```sql
+# A set's lines that match a filter. The caller decides which filter to use (the @filter slot).
+#
+# A filter returns patterns with two columns, part_num and color_id, in which NULL means "any
+# value". A line matches when some pattern agrees with it on every column the pattern names, and it
+# comes back once however many patterns it matches.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+),
+filter AS (
+    :compose(@filter)
+)
+SELECT p.*
+FROM set_part_details p
+WHERE EXISTS (
+    SELECT 1
+    FROM filter f
+    WHERE (f.part_num IS NULL OR f.part_num = p.part_num)
+      AND (f.color_id IS NULL OR f.color_id = p.color_id)
+)
+```
+
+A filter is a relation of patterns. [`filters/by_category.sqlc`][filters/by_category.sqlc] gives a
+pattern for each part in a category, with any colour:
+
+```sql
+# A part category, as filter patterns: (this part, any colour) for every part in the category. A
+# category belongs to the part, so the patterns come from the parts catalogue and not from any
+# inventory. A filter's contract is in shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
+JOIN lego_part_categories pc ON pc.id = p.part_cat_id
+WHERE pc.name = :bind(category_name)
+```
+
+[`sets/select_category_parts.sqlc`][sets/select_category_parts.sqlc] fills the slot with it:
+
+```sql
+# A set's lines whose part is in the category category_name, one row per line, keyed by the line:
+# the set's lines with the category's filter in the @filter slot.
+:compose(shared/filtered_set_parts.sqlc, @filter = filters/by_category.sqlc)
+```
+
+It composes to [`.sql/sets/select_category_parts.sql`][.sql/sets/select_category_parts.sql]. The
+filter's body stands in the `WITH` where `:compose(@filter)` was. `category_name` is `$1` and
+`set_num` is `$2`, in the order of their names. The base, with its slot open, is not a query, so
+`.sql/shared` holds no file for it.
+
+```sh
+cargo run -p brick-example -- by-category 10182-1 "Plates"
+cargo run -p brick-example -- by-color 10182-1 "Black"
+```
+
+`by-color` fills the same slot with [`filters/by_color.sqlc`][filters/by_color.sqlc], a colour with
+any part, in [`sets/select_colored_parts.sqlc`][sets/select_colored_parts.sqlc]. Each prints the
+set's lines that match, each line once. A category belongs to a part and a colour to a line, so
+each filter names only the column it is about. The base is spelled once, whatever the filter.
+
+The searches of steps 15 and 16 fill the same slot. The next step turns from a set's lines to the
+themes the sets belong to.
+
+### 4. The theme closure
+
+Which themes lie under a theme? A theme has a parent, and its parent a parent of its own. A theme
+scope is a theme and every theme below it, at any depth.
+[`shared/theme_closure.sqlc`][shared/theme_closure.sqlc] pairs every theme with every theme at or
+below it:
+
+```sql
+# Every theme paired with every theme at or below it: one row per (ancestor_id, theme_id), each
+# theme its own ancestor at depth 0. A theme scope is a theme's whole subtree, so a scope joins this
+# relation on theme_id and picks its ancestor_id. It never matches one theme id alone, and never a
+# name, which several themes can share.
+# The CYCLE clause guarantees the walk ends even if a parent_id ever pointed back into its own
+# subtree; such a theme would be marked, and left out.
+WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
+    SELECT t.id, t.id, 0
+    FROM lego_themes t
+  UNION ALL
+    SELECT c.ancestor_id, t.id, c.depth + 1
+    FROM lego_themes t
+    JOIN closure c ON t.parent_id = c.theme_id
+) CYCLE theme_id SET in_cycle USING walked
+SELECT ancestor_id, theme_id, depth
+FROM closure
+WHERE NOT in_cycle
+```
+
+It binds nothing, so it composes to itself with its `#` lines gone,
+[`.sql/shared/theme_closure.sql`][.sql/shared/theme_closure.sql], and the composed file runs alone:
+
+```sh
+PGOPTIONS='-c search_path=lego' psql -d sqlc_brick -f examples/brick/.sql/shared/theme_closure.sql
+```
+
+The rows of one `ancestor_id` are one scope: that theme, and every theme below it, each at its
+depth.
+
+The steps that follow compose it.
+
+### 5. A list of ids
+
+Which sets from 2010 on lie in Technic, City or Star Wars, or in any theme below them?
+[`sets/select_sets_by_themes.sqlc`][sets/select_sets_by_themes.sqlc] takes the themes as one list,
+bound to an `IN`:
+
+```sql
+# Find sets in any of the given theme scopes: each given theme and every theme below it. One row per
+# set, however many of the given scopes contain it. The ORDER BY ends on set_num, so the order is
+# total. Within a year, a set with no part count comes before the counted ones; the ORDER BY says
+# so, because databases disagree on where a NULL sorts. A set with no year is never at or after
+# min_year, so the year needs no such term. The given themes are one list, bound to an IN.
+SELECT
+    s.set_num,
+    s.name,
+    s.year,
+    t.name AS theme_name,
+    s.num_parts
+FROM lego_sets s
+JOIN lego_themes t ON t.id = s.theme_id
+WHERE EXISTS (
+    SELECT 1
+    FROM (
+        :compose(shared/theme_closure.sqlc)
+    ) tc
+    WHERE tc.theme_id = s.theme_id
+      AND tc.ancestor_id IN (:bind(theme_ids EXPECTING 1..20))
+)
+  AND s.year >= :bind(min_year)
+ORDER BY s.year DESC, s.num_parts IS NULL DESC, s.num_parts DESC, s.set_num
+```
+
+The `EXISTS` asks only whether a set's theme lies in one of the scopes, and adds none of the
+closure's rows to the set's. `EXPECTING 1..20` says the list holds from one to twenty ids.
+
+The committed file, [`.sql/sets/select_sets_by_themes.sql`][.sql/sets/select_sets_by_themes.sql],
+has one placeholder for the list, `IN ($2)`. The subcommand composes the template with its values,
+one placeholder for each id. For three ids, the `IN` is `IN ($2, $3, $4)`, and the bind parameters
+are `min_year`, then `theme_ids` three times. Given twenty-one, composing refuses the list:
+`binding 'theme_ids' was given 21 value(s), and expects 1..20`.
+
+```sh
+cargo run -p brick-example -- themes 2010 1 52 158
+```
+
+1 is Technic, 52 City and 158 Star Wars. It prints the sets, newest first, each with the name of
+its own theme.
+
+The next step takes one scope at a time, as a relation of its own, and combines scopes as sets.
+
+### 6. Scopes, and their union
+
+Which sets from 2010 on are Technic's, and which are City's, each labelled with its scope? A scope
+is a relation of its own. [`scopes/technic.sqlc`][scopes/technic.sqlc] is Technic's: each theme in
+it, with Technic's own id as `scope_id`.
+
+```sql
+# The Technic scope: the theme technic_theme_id and every theme below it, one row per theme_id, each
+# with the scope's own theme as scope_id.
+SELECT tc.ancestor_id AS scope_id, tc.theme_id
+FROM (
+    :compose(shared/theme_closure.sqlc)
+) tc
+WHERE tc.ancestor_id = :bind(technic_theme_id)
+```
+
+[`scopes/city.sqlc`][scopes/city.sqlc] is City's, the same with `city_theme_id`. Each scope is
+spelled once, and every question about it composes it.
+[`shared/scope_sets.sqlc`][shared/scope_sets.sqlc] takes a scope in its `@scope` slot, and labels
+each set with the name of the scope's own theme:
+
+```sql
+# The sets of a theme scope released in min_year or later: one row per set, keyed by set_num, each
+# labelled with the name of the scope's own theme. The caller decides the scope (the @scope slot):
+# one row per theme_id, with the scope's theme as scope_id. The label is read through scope_id, so
+# it always names the scope that chose the rows.
+SELECT s.set_num, s.name, s.year, s.num_parts, scope.name AS theme_group
+FROM lego_sets s
+JOIN (
+    :compose(@scope)
+) sc ON sc.theme_id = s.theme_id
+JOIN lego_themes scope ON scope.id = sc.scope_id
+WHERE s.year >= :bind(min_year)
+```
+
+[`queries/technic_sets.sqlc`][queries/technic_sets.sqlc] and
+[`queries/city_sets.sqlc`][queries/city_sets.sqlc] fill the slot, one scope each.
+[`reports/combined_theme_sets.sqlc`][reports/combined_theme_sets.sqlc] is their union:
+
+```sql
+# Technic's sets and City's, each released in min_year or later and labelled with its scope: one row
+# per (theme_group, set_num). A set in both scopes comes back once under each label.
+:union(queries/technic_sets.sqlc, queries/city_sets.sqlc)
+```
+
+It composes to [`.sql/reports/combined_theme_sets.sql`][.sql/reports/combined_theme_sets.sql].
+Each source is wrapped in a derived table of its own, `_union_1` and `_union_2`, and so is the
+whole, `_union`. Both sources read `min_year`, and it is one placeholder, `$2`. City's theme is `$1`
+and Technic's `$3`. A bare `:union` writes `UNION`, which removes duplicate rows. The label is part
+of the row, so a set in both scopes is two rows, and both stay.
+
+```sh
+cargo run -p brick-example -- combined 2010
+```
+
+It prints each set with its scope's name. Each scope's sets from that year on are there, each
+under its scope's name, and no row comes twice.
+
+The next step asks the same two scopes for their moulds, and takes their intersection and their
+difference.
+
+### 7. Intersection and difference
+
+Which moulds do Technic and City sets share, and which does City use alone? A mould is a part
+number. [`shared/scope_moulds.sqlc`][shared/scope_moulds.sqlc] is the moulds any set of a scope
+uses, the scope in its `@scope` slot:
+
+```sql
+# The moulds (part numbers) used by any set in a theme scope: one row per part_num. The caller
+# decides the scope (the @scope slot): one row per theme_id, with the scope's own theme as scope_id.
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        :compose(@scope)
+    ) sc
+)
+```
+
+[`queries/technic_moulds.sqlc`][queries/technic_moulds.sqlc] and
+[`queries/city_moulds.sqlc`][queries/city_moulds.sqlc] fill it, one scope each.
+[`reports/shared_moulds.sqlc`][reports/shared_moulds.sqlc] is their intersection:
+
+```sql
+# The moulds both Technic and City sets use: one row per part_num.
+:intersect(queries/technic_moulds.sqlc, queries/city_moulds.sqlc)
+```
+
+and [`reports/city_only_moulds.sqlc`][reports/city_only_moulds.sqlc] their difference, City's less
+Technic's:
+
+```sql
+# The moulds City sets use and no Technic set does: one row per part_num. The order of the sources
+# matters: the first is the one the second is taken from.
+:except(queries/city_moulds.sqlc, queries/technic_moulds.sqlc)
+```
+
+Both compose as the union does, each source wrapped and the whole wrapped:
+[`.sql/reports/shared_moulds.sql`][.sql/reports/shared_moulds.sql] and
+[`.sql/reports/city_only_moulds.sql`][.sql/reports/city_only_moulds.sql]. Each source composes its
+scope, and each scope the theme closure, so each file holds the closure twice.
+
+```sh
+cargo run -p brick-example -- shared-moulds
+cargo run -p brick-example -- city-only-moulds
+```
+
+Each prints how many moulds it found. The two split City's moulds: none is in both, and together
+they are all of them.
+
+The next step reduces a relation to one figure.
+
+### 8. Count
+
+How many distinct moulds do the sets of Star Wars use, the sets of every theme below it among them?
+[`queries/theme_set_parts.sqlc`][queries/theme_set_parts.sqlc] is every line of every set in a
+scope:
+
+```sql
+# Every line of every inventory of every set in a theme scope (the theme and every theme below it),
+# one row per line, keyed by the line.
+SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+JOIN (
+    :compose(shared/theme_closure.sqlc)
+) tc ON tc.theme_id = s.theme_id
+WHERE tc.ancestor_id = :bind(theme_id)
+```
+
+[`reports/count_theme_parts.sqlc`][reports/count_theme_parts.sqlc] counts its distinct part
+numbers:
+
+```sql
+# How many distinct moulds (part numbers) the sets of a theme scope use, the theme and every theme
+# below it: one row, one count.
+:count(DISTINCT part_num OF queries/theme_set_parts.sqlc)
+```
+
+It composes to [`.sql/reports/count_theme_parts.sql`][.sql/reports/count_theme_parts.sql]:
+
+```sql
+SELECT COUNT(DISTINCT part_num) FROM (
+SELECT ip.inventory_id, ip.part_num, ip.color_id, ip.is_spare
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+JOIN (
+    WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
+    SELECT t.id, t.id, 0
+    FROM lego_themes t
+  UNION ALL
+    SELECT c.ancestor_id, t.id, c.depth + 1
+    FROM lego_themes t
+    JOIN closure c ON t.parent_id = c.theme_id
+) CYCLE theme_id SET in_cycle USING walked
+SELECT ancestor_id, theme_id, depth
+FROM closure
+WHERE NOT in_cycle
+
+) tc ON tc.theme_id = s.theme_id
+WHERE tc.ancestor_id = $1
+
+) AS _count_sub
+```
+
+```sh
+cargo run -p brick-example -- count 158
+```
+
+It prints one figure. Its scope is every theme under Star Wars, at any depth, and no other.
+
+Each statement above holds the closure once for every path that leads to it. The next step names
+it once.
+
+### 9. Every relation named once
+
+Can the moulds Technic and City share be composed with the closure written once? `--with` names
+each relation a statement reads once, at the head of the statement. Composed into a directory of
+its own:
+
+```sh
+cargo sqlc compose --source examples/brick/sqlc --target target/brick-with --skip-prepare --with
+```
+
+`target/brick-with/reports/shared_moulds.sql` is:
+
+```sql
+WITH shared_theme_closure AS (
+WITH RECURSIVE closure (ancestor_id, theme_id, depth) AS (
+    SELECT t.id, t.id, 0
+    FROM lego_themes t
+  UNION ALL
+    SELECT c.ancestor_id, t.id, c.depth + 1
+    FROM lego_themes t
+    JOIN closure c ON t.parent_id = c.theme_id
+) CYCLE theme_id SET in_cycle USING walked
+SELECT ancestor_id, theme_id, depth
+FROM closure
+WHERE NOT in_cycle
+)
+SELECT * FROM (
+SELECT * FROM (
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        SELECT tc.ancestor_id AS scope_id, tc.theme_id
+FROM (
+    SELECT * FROM shared_theme_closure
+) tc
+WHERE tc.ancestor_id = $2
+
+    ) sc
+)
+) AS _intersect_1
+INTERSECT
+SELECT * FROM (
+SELECT DISTINCT ip.part_num
+FROM lego_inventory_parts ip
+JOIN lego_inventories i ON i.id = ip.inventory_id
+JOIN lego_sets s ON s.set_num = i.set_num
+WHERE s.theme_id IN (
+    SELECT sc.theme_id
+    FROM (
+        SELECT tc.ancestor_id AS scope_id, tc.theme_id
+FROM (
+    SELECT * FROM shared_theme_closure
+) tc
+WHERE tc.ancestor_id = $1
+
+    ) sc
+)
+) AS _intersect_2
+) AS _intersect
+```
+
+The closure binds nothing, so it is named once, `shared_theme_closure`, and each scope reads it as
+`SELECT * FROM shared_theme_closure`. The scopes bind their theme ids, so each is still written
+where it is composed. Nothing is created on the database. It is step 7's statement, with each
+relation it reads written once.
+
+The subcommands compose without `--with`, so `shared-moulds` runs step 7's spelling. The steps from
+here go further into PostgreSQL's SQL.
+
+## Further into PostgreSQL's SQL
+
+The templates from here compose as the steps above show, and each subcommand prints the composed
+statement before its rows.
+
+### 10. Purchases, read through their collection row
+
+What did a builder buy, and when? A purchase names a row of its builder's collection, and the set
+is that row's. [`shared/purchase_sets.sqlc`][shared/purchase_sets.sqlc] reads the set through the
+row, once:
+
+```sql
+# Every purchase with its builder and the set it bought, one row per purchase, keyed by
+# purchase_id. A purchase names a row of its builder's collection, and the set is that row's: the
+# purchase never carries the set itself, so the set is read through the collection row.
+SELECT
+    p.purchase_id,
+    p.builder_id,
+    c.set_num,
+    p.ordered_at,
+    p.delivered_at
+FROM lego_purchases p
+JOIN lego_collection c ON c.builder_id = p.builder_id AND c.row_no = p.row_no
+```
+
+[`builders/purchase_history.sqlc`][builders/purchase_history.sqlc] numbers one builder's purchases
+in the order they were placed, with the pieces bought so far, through window functions:
+
+```sql
+# A builder's purchases in the order they were placed, each numbered, with the pieces bought so far.
+# One row per purchase, keyed by purchase_id. The window's order ends on purchase_id, so it is
+# total: two purchases placed at the same instant still take a place each, and the running total
+# moves one purchase at a time.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+)
+SELECT
+    row_number() OVER w AS nth,
+    ps.purchase_id,
+    ps.ordered_at,
+    ps.set_num,
+    s.name,
+    s.num_parts,
+    sum(s.num_parts) OVER w AS pieces_so_far
+FROM purchase_sets ps
+JOIN lego_sets s ON s.set_num = ps.set_num
+WHERE ps.builder_id = :bind(builder_id)
+WINDOW w AS (ORDER BY ps.ordered_at, ps.purchase_id)
+ORDER BY nth
+```
+
+```sh
+cargo run -p brick-example -- history 3326
+```
+
+It prints the builder's purchases in order, each numbered, with its pieces and the pieces so far.
+The last running total is every piece the builder bought.
+
+Two more questions compose the purchases.
+[`builders/latest_purchases.sqlc`][builders/latest_purchases.sqlc] keeps each builder's latest
+purchase with `DISTINCT ON`, which keeps the first row of each builder in its `ORDER BY`.
+[`sets/never_bought.sqlc`][sets/never_bought.sqlc] keeps, with `NOT EXISTS`, the sets no purchase
+reaches.
+
+```sh
+cargo run -p brick-example -- latest
+cargo run -p brick-example -- never-bought
+```
+
+`latest` prints one row for each builder who bought anything. `never-bought` prints the sets never
+bought: with the sets bought, they are every set, and no set is both.
+
+The next step reads each set's root theme, through the closure.
+
+### 11. Each set's root theme
+
+Which root theme does a set belong to? A root theme has no parent.
+[`shared/set_roots.sqlc`][shared/set_roots.sqlc] joins each set to the root above its theme:
+
+```sql
+# Every set with the root theme at the top of its theme's tree, one row per set, keyed by set_num.
+# A root theme has no parent, and the theme closure pairs each theme with every theme above it, so
+# each set meets exactly one root.
+SELECT
+    s.set_num,
+    s.name,
+    s.year,
+    s.num_parts,
+    r.id AS root_id,
+    r.name AS root_name
+FROM lego_sets s
+JOIN (
+    :compose(shared/theme_closure.sqlc)
+) tc ON tc.theme_id = s.theme_id
+JOIN lego_themes r ON r.id = tc.ancestor_id
+WHERE r.parent_id IS NULL
+```
+
+Three questions read the root themes:
+
+- [`reports/theme_set_sizes.sqlc`][reports/theme_set_sizes.sqlc]: the median set size of each root
+  theme, with the smallest and the largest. `percentile_cont(0.5)` takes the middle size, or
+  halfway between the two middle ones.
+- [`reports/purchases_by_year_theme.sqlc`][reports/purchases_by_year_theme.sqlc]: the purchases per
+  year and root theme, composing the purchases and the roots. `ROLLUP` adds each year's subtotal
+  and the grand total, and `GROUPING` labels those rows, so a subtotal is never read as a theme
+  with no name.
+- [`themes/newest_sets.sqlc`][themes/newest_sets.sqlc]: each root theme's three newest sets, from
+  anywhere below it, through the closure. `LATERAL` lets the subquery read the theme of the row it
+  is joined to, so `LIMIT 3` keeps three for each theme.
+
+```sh
+cargo run -p brick-example -- sizes
+cargo run -p brick-example -- rollup 2016 2017
+cargo run -p brick-example -- newest
+```
+
+`sizes` prints each root theme's sets, how many of them have a size, and the smallest, median and
+largest. `rollup` prints how many rows it found, then each year's subtotal and the grand total: a
+year's themes add up to its subtotal, and the years to the total. `newest` prints up to three sets
+for each root theme, newest first.
+
+The next step counts the sets of every year, the years with none among them.
+
+### 12. Every year, the empty ones kept
+
+Which years saw no release? [`reports/release_years.sqlc`][reports/release_years.sqlc] writes the
+calendar with `generate_series` and counts the sets against it:
+
+```sql
+# Every year from the first release to the last, with the number of sets released in it: one row
+# per year, keyed by year. generate_series writes the calendar and the sets are counted against it,
+# so a year with no release is a year examined and found empty, with 0, and never a year left out.
+SELECT y.year, count(s.set_num) AS sets
+FROM (
+    SELECT min(year) AS first_year, max(year) AS last_year
+    FROM lego_sets
+) span
+CROSS JOIN generate_series(span.first_year, span.last_year) AS y(year)
+LEFT JOIN lego_sets s ON s.year = y.year
+GROUP BY y.year
+ORDER BY y.year
+```
+
+```sh
+cargo run -p brick-example -- years
+```
+
+It prints the span of years, and the years with no release. Every year from the first release to
+the last is listed once, a year with no release with 0.
+
+The next step asks which builders hold every set of a scope.
+
+### 13. The builders who own a whole scope
+
+Who owns every set of a theme scope? "Every" is a division: a builder is kept when the scope's sets,
+less the sets in the builder's collection, leave nothing.
+[`builders/complete_scope.sqlc`][builders/complete_scope.sqlc]:
+
+```sql
+# The builders who own every set of a theme scope (the theme and every theme below it): one row per
+# builder, keyed by builder_id. A builder is kept when the scope's sets, less the sets in the
+# builder's collection, leave nothing. A scope with no sets would keep every builder, so the scope
+# must hold at least one set.
+WITH scope_sets AS (
+    SELECT s.set_num
+    FROM lego_sets s
+    JOIN (
+        :compose(shared/theme_closure.sqlc)
+    ) tc ON tc.theme_id = s.theme_id
+    WHERE tc.ancestor_id = :bind(theme_id)
+)
+SELECT b.builder_id, b.name
+FROM lego_builders b
+WHERE EXISTS (SELECT 1 FROM scope_sets)
+  AND NOT EXISTS (
+    SELECT set_num FROM scope_sets
+    EXCEPT
+    SELECT c.set_num FROM lego_collection c WHERE c.builder_id = b.builder_id
+)
+ORDER BY b.builder_id
+```
+
+```sh
+cargo run -p brick-example -- complete 463      # 463 is Spybiotics
+```
+
+It prints the builders who own every set of the scope. A scope with no sets keeps nobody, through
+the template's first `EXISTS`, and the laws give the template such a scope on rows of their own.
+
+The next step gathers a set's rows into a single value.
+
+### 14. A set as arrays, and as one document
+
+What colours does a set use, and what does a set look like as one value?
+[`sets/set_colors.sqlc`][sets/set_colors.sqlc] gathers each version's colours into an array:
+
+```sql
+# A set's colours, version by version: one row per version, keyed by version, with every colour
+# once, in name order. A line whose colour is missing from the catalogue has no colour name; it is
+# counted in unnamed_lines and kept out of the array, where it would be a NULL.
+WITH set_part_details AS (
+    :compose(shared/set_part_details.sqlc)
+)
+SELECT
+    version,
+    array_agg(DISTINCT color_name ORDER BY color_name)
+        FILTER (WHERE color_name IS NOT NULL) AS colors,
+    count(*) FILTER (WHERE color_name IS NULL) AS unnamed_lines
+FROM set_part_details
+GROUP BY version
+ORDER BY version
+```
+
+[`sets/set_document.sqlc`][sets/set_document.sqlc] builds the set as one `jsonb` document: its
+number, name, year and theme, and each version with its lines.
+
+```sh
+cargo run -p brick-example -- colors 75053-1
+cargo run -p brick-example -- document 10182-1
+```
+
+`colors` prints each version's colours, and how many lines have no colour name. Each version holds
+as many colours as its lines name. `document` prints the document, and every line of the set is in
+it once.
+
+The steps from here search.
+
+## Searching with the generator's indexes
+
+The searches read the search indexes the setup builds. Each search is a relation like any other,
+and fills a slot as the filters of step 3 do.
+
+### 15. By words
+
+Which of a set's lines are windows? [`filters/by_words.sqlc`][filters/by_words.sqlc] is the parts
+whose names match a search, as filter patterns:
+
+```sql
+# The parts whose names match a search, as filter patterns: (this part, any colour). The search is
+# written as a web search engine takes one (websearch_to_tsquery): words that must all be there,
+# "a phrase", or, and -a word to leave out, each word taken to its English stem. The parts' words
+# index serves it. A filter's contract is in shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
+WHERE to_tsvector('english', p.name) @@ websearch_to_tsquery('english', :bind(words))
+```
+
+[`sets/select_parts_by_words.sqlc`][sets/select_parts_by_words.sqlc] fills step 3's `@filter` with
+it. [`parts/search_parts.sqlc`][parts/search_parts.sqlc] searches every part's name, best match
+first: `ts_rank` scores how well a name matches, and `ts_headline` marks the matched words.
+
+```sh
+cargo run -p brick-example -- by-words 10182-1 "window"
+cargo run -p brick-example -- search "technic beam"
+```
+
+`by-words` prints the set's lines whose part names hold the words, each line once. `search` prints
+the parts that hold every word, best first, each with its score and its name, the matched words
+between asterisks.
+
+### 16. By pattern
+
+Which of a set's lines are plates or tiles one stud wide?
+[`filters/by_pattern.sqlc`][filters/by_pattern.sqlc] is the parts whose names match a regular
+expression, case aside:
+
+```sql
+# The parts whose names match a regular expression, as filter patterns: (this part, any colour). The
+# match ignores case (~*), and the parts' trigram index serves it. A filter's contract is in
+# shared/filtered_set_parts.sqlc.
+SELECT DISTINCT
+    p.part_num,
+    NULL::integer AS color_id
+FROM lego_parts p
+WHERE p.name ~* :bind(pattern)
+```
+
+[`sets/select_parts_by_pattern.sqlc`][sets/select_parts_by_pattern.sqlc] fills the same slot with
+it. [`parts/brick_sizes.sqlc`][parts/brick_sizes.sqlc] reads a brick's size out of its name, as
+`Brick 2 x 4`, with `regexp_match`.
+
+```sh
+cargo run -p brick-example -- by-pattern 10182-1 '^(plate|tile) 1 x \d+$'
+cargo run -p brick-example -- brick-sizes
+```
+
+`by-pattern` prints the set's lines whose part names match, each line once. `brick-sizes` prints
+each brick named by its size, with its width and its length.
+
+### 17. By place
+
+What did the builders near a city buy? [`shared/area_purchases.sqlc`][shared/area_purchases.sqlc]
+is what the builders in an area bought, by root theme, the area in its `@area` slot:
+
+```sql
+# What the builders in an area bought, by the root theme of the set: one row per root theme, keyed
+# by root_id, with the purchases and the builders who made them, most purchases first. The caller
+# decides the area (the @area slot): builders, with one column, builder_id. A builder the area
+# names twice still counts once, since the area only decides who is in it.
+WITH purchase_sets AS (
+    :compose(shared/purchase_sets.sqlc)
+),
+set_roots AS (
+    :compose(shared/set_roots.sqlc)
+),
+area AS (
+    :compose(@area)
+)
+SELECT
+    sr.root_id,
+    sr.root_name,
+    count(*) AS purchases,
+    count(DISTINCT ps.builder_id) AS builders
+FROM purchase_sets ps
+JOIN set_roots sr ON sr.set_num = ps.set_num
+WHERE ps.builder_id IN (SELECT a.builder_id FROM area a)
+GROUP BY sr.root_id, sr.root_name
+ORDER BY purchases DESC, sr.root_id
+```
+
+[`areas/near_city.sqlc`][areas/near_city.sqlc] is the builders within a radius of a city:
+
+```sql
+# The builders whose homes lie within km kilometres of a city, on the earth's surface: one row per
+# builder, keyed by builder_id, with the distance in metres. The city is chosen by its city_id.
+# earth_box is the cube that holds the circle, and the builders' home index serves it;
+# earth_distance then keeps the homes inside the circle itself, since the cube's corners lie
+# outside it.
+SELECT
+    b.builder_id,
+    earth_distance(ll_to_earth(c.latitude, c.longitude), ll_to_earth(b.latitude, b.longitude))
+        AS metres
+FROM lego_cities c
+JOIN lego_builders b
+  ON earth_box(ll_to_earth(c.latitude, c.longitude), :bind(km) * 1000)
+     @> ll_to_earth(b.latitude, b.longitude)
+WHERE c.city_id = :bind(city_id)
+  AND earth_distance(ll_to_earth(c.latitude, c.longitude), ll_to_earth(b.latitude, b.longitude))
+      <= :bind(km) * 1000
+```
+
+[`builders/bought_near.sqlc`][builders/bought_near.sqlc] fills `@area` with it.
+[`areas/postcodes.sqlc`][areas/postcodes.sqlc] is the builders whose postcode matches a regular
+expression, and [`builders/bought_in_postcodes.sqlc`][builders/bought_in_postcodes.sqlc] fills
+`@area` with them. [`builders/nearest.sqlc`][builders/nearest.sqlc] is the builders nearest a city,
+nearest first: inside a `LATERAL`, `<->` orders the homes by distance, the homes' index walks them
+in that order, and only the nearest are read.
+
+```sh
+cargo run -p brick-example -- bought-near 67 5      # 67 is London; within 5 km
+cargo run -p brick-example -- bought-in '^SW'       # London's SW district
+cargo run -p brick-example -- nearest 67
+```
+
+`bought-near` and `bought-in` print, for each root theme, the purchases and the builders who made
+them, most purchases first. The builders within the radius are the builders the distance on the
+earth's surface puts there, and the purchases add up to every purchase they made of a set with a
+theme. The builders of a postcode pattern anchored on a prefix are the builders whose postcode
+begins with it. `nearest` prints the five builders nearest the city, with their distance in metres,
+as near as any.
+
+The walk ends at the laws.
+
+## The laws
+
+```sh
+cargo run -p brick-example -- laws
+```
+
+`laws` checks the walk's promises against a second spelling of the same answer, written in
+direct SQL in [`src/main.rs`][src/main.rs]. Each law prints `HOLDS` or `FAILS`, with the figures on
+both sides, and `laws` exits 1 if any fails. A law that writes runs inside a transaction that is
+rolled back, so checking leaves nothing behind. `cargo run -p brick-example -- all` runs every
+step with the values above, then the laws.
+
+| step | the promise | checked against |
+|---|---|---|
+| 1 | a set's parts are its lines, per version (10182-1, and 75053-1) | the set's lines counted in the tables; each version's pieces against `num_parts` |
+| 2 | the summary of 75053-1, run twice, is one row per version and category | inside a transaction: the categories and pieces counted in the tables |
+| 2 | `MERGE` of 75053-1 repairs its summary to what `INSERT` writes | inside a transaction: every total put wrong and one row removed, then `MERGE` twice |
+| 3 | `by-color` and `by-category` keep the set's lines in that colour, or category | the set's lines chosen by a condition on the tables |
+| 6 | Technic's and City's sets from 2000 are each scope's, labelled by it | a walk down the themes from the two scopes' own themes |
+| 7 | shared and City-only moulds together are City's, none in both | City's moulds, `queries/city_moulds.sqlc` |
+| 8 | a theme scope is the theme's whole subtree | the moulds of the sets found by a walk up, from each set's theme to its root |
+| 10 | builder 3326's history is their purchases in order, with running totals | the purchases ordered by time, then by id; the pieces summed in the tables |
+| 10 | each builder's latest purchase is the first of their purchases, latest first | `row_number()` over each builder's purchases, latest first |
+| 10 | the sets never bought and the sets bought are every set, none in both | the sets bought, read through their collection rows, and every set |
+| 11 | the median size of Star Wars is the middle of its sizes | its sizes listed by a walk up, sorted, and the middle one taken |
+| 11 | purchases 2016 to 2017 add up by theme, by year and in total | each year's themes summed, the years summed, and the purchases of those years counted in the tables |
+| 11 | each root theme's newest sets are its first three, newest first | a walk up, and `row_number()` over each root's sets, newest first |
+| 12 | every year from first release to last is listed once, the empty ones with 0 | the first and last years, the sets with a year, and the years they have |
+| 13 | the builders owning all of Spybiotics hold as many of its sets as it has | each builder's distinct sets of the scope, counted against the scope's |
+| 14 | the colours of 75053-1 are the colours its lines name, per version | the distinct colour names counted in the tables |
+| 14 | the document of 10182-1 holds each of its lines once | the lines in the document's arrays, against the set's lines in the tables |
+| 15 | `by-words` keeps the set's lines whose part names hold the words ('window', 'door frame') | the parts whose names hold every word's stem |
+| 15 | the search for 'technic beam' lists every part holding its words, best first | the same parts, ordered by `ts_rank`, then `part_num` |
+| 16 | `by-pattern` keeps the set's lines whose part names match | `regexp_like`, case aside |
+| 16 | the brick sizes are the bricks named by their width and length | each name cut at ` x ` with `split_part`, both parts all digits |
+| 17 | the builders within 5 km of London are the haversine's | the haversine distance, every home measured |
+| 17 | the builders in `^SW` are those whose postcode begins with it | `LIKE 'SW%'` |
+| 17 | the 5 builders nearest London are as near as any | every home measured with `earth_distance`, the nearest five |
+| 17 | what the builders near London bought adds up to their purchases | the purchases of the builders within the haversine distance |
+| 12 | on mock rows, 1991 between releases in 1990 and 1992 is listed with 0 | the rows `1990, 1`, `1991, 0`, `1992, 2` |
+| 13 | on mock rows, the division keeps the owner of every set, and nobody for an empty scope | the one owner of both sets, and nobody |
+
+The last two run their template on mock tables: rows of the example's own, in place of the
+catalogue's. The calendar gets a year with no release between two that have one. The division gets
+a theme with a theme below it, a builder who owns both its sets, one who owns one of them, and a
+theme with no sets.
+
+## Connecting
 
 The database is the one `--database-url` names, or `SQLC_BRICK_DATABASE_URL` when the flag is left
 out. With neither, it is `postgres:///sqlc_brick`: the database `sqlc_brick` on the local server,
@@ -56,142 +1108,9 @@ names. With no `sslmode`, a connection tries TLS and falls back to plain when th
 offer it.
 
 The subcommands read the templates from `--sqlc-dir`, `examples/brick/sqlc` by default. That path is
-relative to the directory the command runs in, so run them from the repository root, or name the
-directory.
+relative to the directory the command runs in, so a subcommand run elsewhere names the directory.
 
-### Data and licences
-
-The example ships none of the catalogue: the `curl` above downloads it to your machine. It is Neon's
-sample dump, `lego.sql` in
-[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
-repository under the MIT licence, whose README gives the data's source as Kaggle's
-[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
-public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
-terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
-use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
-you use it. The same terms forbid using any Rebrickable content to train AI models.
-
-LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
-
-### Compose templates (optional)
-
-Generate `.sql` files from `.sqlc` templates to see the composed output:
-
-```sh
-cargo sqlc compose --source examples/brick/sqlc --target examples/brick/.sql --skip-prepare
-```
-
-### Run examples
-
-Each subcommand runs one template, for a feature of sql-composer or of PostgreSQL. Every query
-returns a set of rows with their keys, never a bag: a line of an inventory is
-`(inventory_id, part_num, color_id, is_spare)`, and a set is its `set_num`.
-
-```sh
-# :compose() + :bind() — list parts for a set, version by version
-cargo run -p brick-example -- parts 10182-1
-cargo run -p brick-example -- parts 75053-1      # a set sold in two versions
-
-# :compose() in INSERT SELECT — populate the summary table, one row per (set, version, category)
-cargo run -p brick-example -- summary 10182-1
-
-# :compose() in INSERT … ON CONFLICT, then in UPDATE — track a set's parts and sync spare counts
-cargo run -p brick-example -- spares 10182-1
-
-# @slot composition — filter parts by color, or by category
-cargo run -p brick-example -- by-color 10182-1 "Black"
-cargo run -p brick-example -- by-category 10182-1 "Plates"
-
-# Multi-value :bind() IN clause — find sets in theme scopes (each theme and every theme below it)
-cargo run -p brick-example -- themes 2010 1 52 158
-
-# :union() — combine Technic and City sets, each labelled with its scope
-cargo run -p brick-example -- combined 2010
-
-# :count(DISTINCT) — count distinct moulds in a theme scope (158 is Star Wars)
-cargo run -p brick-example -- count 158
-
-# :intersect() and :except() — moulds Technic and City share, and moulds only City uses
-cargo run -p brick-example -- shared-moulds
-cargo run -p brick-example -- city-only-moulds
-
-# Window functions — a builder's purchases in order, numbered, with the pieces bought so far
-cargo run -p brick-example -- history 3326
-
-# DISTINCT ON — each builder's latest purchase
-cargo run -p brick-example -- latest
-
-# LATERAL — each root theme's three newest sets
-cargo run -p brick-example -- newest
-
-# ROLLUP — purchases per year and root theme, with each year's subtotal and the grand total
-cargo run -p brick-example -- rollup 2016 2017
-
-# percentile_cont — the median set size of each root theme
-cargo run -p brick-example -- sizes
-
-# generate_series — every year from the first release to the last, the years with none kept
-cargo run -p brick-example -- years
-
-# NOT EXISTS — the sets no builder ever bought
-cargo run -p brick-example -- never-bought
-
-# Division — the builders who own every set of a theme scope (463 is Spybiotics)
-cargo run -p brick-example -- complete 463
-
-# array_agg — a set's colours, version by version
-cargo run -p brick-example -- colors 75053-1
-
-# jsonb — a set as one JSON document
-cargo run -p brick-example -- document 10182-1
-
-# MERGE — keep a set's summary in step with its totals
-cargo run -p brick-example -- merge 75053-1
-
-# Full text in the @filter slot — a set's lines whose part names hold the words
-cargo run -p brick-example -- by-words 10182-1 "window"
-
-# Full text, ranked — the parts that best match a search, the matched words marked
-cargo run -p brick-example -- search "technic beam"
-
-# Regular expressions — a set's lines whose part names match, and bricks' sizes read from names
-cargo run -p brick-example -- by-pattern 10182-1 '^(plate|tile) 1 x \d+$'
-cargo run -p brick-example -- brick-sizes
-
-# earthdistance in the @area slot — what the builders within 5 km of London (67) bought
-cargo run -p brick-example -- bought-near 67 5
-
-# A regular expression on postcodes in the @area slot — what London's SW district bought
-cargo run -p brick-example -- bought-in '^SW'
-
-# <-> in a LATERAL — the five builders nearest London, walked nearest first
-cargo run -p brick-example -- nearest 67
-
-# Check the example's laws (exits 1 if any fails)
-cargo run -p brick-example -- laws
-
-# Run all examples with default values, then the laws
-cargo run -p brick-example -- all
-```
-
-### What the queries promise
-
-- **A set's parts are listed version by version.** Some sets were sold in more than one version,
-  each with its own inventory. The parts of such a set come back labelled with their version, and
-  no total adds two versions together.
-- **No line is dropped.** A line whose part is missing from the parts catalogue is kept, marked
-  `uncatalogued`.
-- **A theme scope is a theme and every theme below it,** chosen by id (`shared/theme_closure.sqlc`).
-  Several themes can share a name, so a name never chooses a scope.
-- **A filter is a set of `(part_num, color_id)` patterns** in which `NULL` means "any value". A
-  category belongs to a part and a color belongs to a line, so each filter names only the column
-  it is about, and each matching line comes back once.
-- **Bind values are matched by name,** so a value can never land on the wrong parameter.
-
-The `laws` subcommand checks each promise against the same answer computed directly in SQL, and
-runs two templates on mock tables: rows of its own, which the catalogue never holds.
-
-## Template Structure
+## The templates
 
 ```
 sqlc/
@@ -259,34 +1178,78 @@ sqlc/
     city_moulds.sqlc               # @scope = city (for intersect and except)
 ```
 
-## Feature Coverage
+## The data and its licences
 
-| Feature | Template(s) |
-|---------|------------|
-| `:bind(name)` | Every template that takes a value |
-| `:bind(name EXPECTING n..m)` | `select_sets_by_themes.sqlc` |
-| `:compose(path)` | `select_set_parts`, `insert_set_summary`, `track_set_parts`, `update_spare_counts`, `theme_closure` users |
-| `:compose(path, @slot = path)` | `select_colored_parts`, `select_category_parts`, `select_parts_by_words`, `select_parts_by_pattern`, `technic_moulds`, `city_moulds`, `technic_sets`, `city_sets`, `bought_near`, `bought_in_postcodes` |
-| `:compose(@slot)` | `filtered_set_parts.sqlc`, `scope_moulds.sqlc`, `scope_sets.sqlc`, `area_purchases.sqlc` |
-| `:union(src, src)` | `combined_theme_sets.sqlc` |
-| `:count(DISTINCT col OF src)` | `count_theme_parts.sqlc` |
-| `:intersect(src, src)` | `shared_moulds.sqlc` |
-| `:except(src, src)` | `city_only_moulds.sqlc` |
-| `#` comments | All `.sqlc` files |
-| Multi-value bind (IN) | `select_sets_by_themes.sqlc` |
-| Window functions | `purchase_history.sqlc` |
-| `DISTINCT ON` | `latest_purchases.sqlc` |
-| `LATERAL` | `newest_sets.sqlc` |
-| `GROUPING SETS` (`ROLLUP`) | `purchases_by_year_theme.sqlc` |
-| `percentile_cont … WITHIN GROUP` | `theme_set_sizes.sqlc` |
-| `generate_series` | `release_years.sqlc` |
-| Anti-join (`NOT EXISTS`) | `never_bought.sqlc` |
-| Division (`NOT EXISTS … EXCEPT`) | `complete_scope.sqlc` |
-| Arrays (`array_agg`) | `set_colors.sqlc` |
-| `jsonb` | `set_document.sqlc` |
-| `MERGE` | `merge_set_summary.sqlc` |
-| Full text (`websearch_to_tsquery`, `ts_rank`, `ts_headline`) | `by_words.sqlc`, `search_parts.sqlc` |
-| Regular expressions (`~*`, `~`, `regexp_match`) | `by_pattern.sqlc`, `brick_sizes.sqlc`, `postcodes.sqlc` |
-| `earthdistance` (`earth_box`, `earth_distance`) | `near_city.sqlc` |
-| Nearest first (`<->` in a `LATERAL`) | `nearest.sqlc` |
-| Mock tables | two laws, on `complete_scope.sqlc` and `release_years.sqlc` |
+The example ships none of the catalogue: the `curl` of the setup downloads it to your machine. It
+is Neon's sample dump, `lego.sql` in
+[neondatabase/postgres-sample-dbs](https://github.com/neondatabase/postgres-sample-dbs), a
+repository under the MIT licence, whose README gives the data's source as Kaggle's
+[LEGO Database](https://www.kaggle.com/datasets/rtatman/lego-database) (rtatman), under CC0,
+public domain. The data comes originally from [Rebrickable](https://rebrickable.com). Rebrickable's
+terms (effective 2026-07-09, as read on 2026-10-04) allow it to be used for any purpose, commercial
+use included, and ask that it be credited as sourced from Rebrickable: credit Rebrickable wherever
+you use it. The same terms forbid using any Rebrickable content to train AI models.
+
+LEGO® is a trademark of the LEGO Group, which does not sponsor, authorise or endorse this project.
+
+[shared/set_part_details.sqlc]: sqlc/shared/set_part_details.sqlc
+[sets/select_set_parts.sqlc]: sqlc/sets/select_set_parts.sqlc
+[.sql/sets/select_set_parts.sql]: .sql/sets/select_set_parts.sql
+[shared/set_category_totals.sqlc]: sqlc/shared/set_category_totals.sqlc
+[reports/insert_set_summary.sqlc]: sqlc/reports/insert_set_summary.sqlc
+[.sql/reports/insert_set_summary.sql]: .sql/reports/insert_set_summary.sql
+[inventory/update_spare_counts.sqlc]: sqlc/inventory/update_spare_counts.sqlc
+[inventory/track_set_parts.sqlc]: sqlc/inventory/track_set_parts.sqlc
+[reports/merge_set_summary.sqlc]: sqlc/reports/merge_set_summary.sqlc
+[shared/filtered_set_parts.sqlc]: sqlc/shared/filtered_set_parts.sqlc
+[filters/by_category.sqlc]: sqlc/filters/by_category.sqlc
+[sets/select_category_parts.sqlc]: sqlc/sets/select_category_parts.sqlc
+[.sql/sets/select_category_parts.sql]: .sql/sets/select_category_parts.sql
+[filters/by_color.sqlc]: sqlc/filters/by_color.sqlc
+[sets/select_colored_parts.sqlc]: sqlc/sets/select_colored_parts.sqlc
+[shared/theme_closure.sqlc]: sqlc/shared/theme_closure.sqlc
+[.sql/shared/theme_closure.sql]: .sql/shared/theme_closure.sql
+[sets/select_sets_by_themes.sqlc]: sqlc/sets/select_sets_by_themes.sqlc
+[.sql/sets/select_sets_by_themes.sql]: .sql/sets/select_sets_by_themes.sql
+[scopes/technic.sqlc]: sqlc/scopes/technic.sqlc
+[scopes/city.sqlc]: sqlc/scopes/city.sqlc
+[shared/scope_sets.sqlc]: sqlc/shared/scope_sets.sqlc
+[queries/technic_sets.sqlc]: sqlc/queries/technic_sets.sqlc
+[queries/city_sets.sqlc]: sqlc/queries/city_sets.sqlc
+[reports/combined_theme_sets.sqlc]: sqlc/reports/combined_theme_sets.sqlc
+[.sql/reports/combined_theme_sets.sql]: .sql/reports/combined_theme_sets.sql
+[shared/scope_moulds.sqlc]: sqlc/shared/scope_moulds.sqlc
+[queries/technic_moulds.sqlc]: sqlc/queries/technic_moulds.sqlc
+[queries/city_moulds.sqlc]: sqlc/queries/city_moulds.sqlc
+[reports/shared_moulds.sqlc]: sqlc/reports/shared_moulds.sqlc
+[reports/city_only_moulds.sqlc]: sqlc/reports/city_only_moulds.sqlc
+[.sql/reports/shared_moulds.sql]: .sql/reports/shared_moulds.sql
+[.sql/reports/city_only_moulds.sql]: .sql/reports/city_only_moulds.sql
+[queries/theme_set_parts.sqlc]: sqlc/queries/theme_set_parts.sqlc
+[reports/count_theme_parts.sqlc]: sqlc/reports/count_theme_parts.sqlc
+[.sql/reports/count_theme_parts.sql]: .sql/reports/count_theme_parts.sql
+[shared/purchase_sets.sqlc]: sqlc/shared/purchase_sets.sqlc
+[builders/purchase_history.sqlc]: sqlc/builders/purchase_history.sqlc
+[builders/latest_purchases.sqlc]: sqlc/builders/latest_purchases.sqlc
+[sets/never_bought.sqlc]: sqlc/sets/never_bought.sqlc
+[shared/set_roots.sqlc]: sqlc/shared/set_roots.sqlc
+[reports/theme_set_sizes.sqlc]: sqlc/reports/theme_set_sizes.sqlc
+[reports/purchases_by_year_theme.sqlc]: sqlc/reports/purchases_by_year_theme.sqlc
+[themes/newest_sets.sqlc]: sqlc/themes/newest_sets.sqlc
+[reports/release_years.sqlc]: sqlc/reports/release_years.sqlc
+[builders/complete_scope.sqlc]: sqlc/builders/complete_scope.sqlc
+[sets/set_colors.sqlc]: sqlc/sets/set_colors.sqlc
+[sets/set_document.sqlc]: sqlc/sets/set_document.sqlc
+[filters/by_words.sqlc]: sqlc/filters/by_words.sqlc
+[sets/select_parts_by_words.sqlc]: sqlc/sets/select_parts_by_words.sqlc
+[parts/search_parts.sqlc]: sqlc/parts/search_parts.sqlc
+[filters/by_pattern.sqlc]: sqlc/filters/by_pattern.sqlc
+[sets/select_parts_by_pattern.sqlc]: sqlc/sets/select_parts_by_pattern.sqlc
+[parts/brick_sizes.sqlc]: sqlc/parts/brick_sizes.sqlc
+[shared/area_purchases.sqlc]: sqlc/shared/area_purchases.sqlc
+[areas/near_city.sqlc]: sqlc/areas/near_city.sqlc
+[builders/bought_near.sqlc]: sqlc/builders/bought_near.sqlc
+[areas/postcodes.sqlc]: sqlc/areas/postcodes.sqlc
+[builders/bought_in_postcodes.sqlc]: sqlc/builders/bought_in_postcodes.sqlc
+[builders/nearest.sqlc]: sqlc/builders/nearest.sqlc
+[src/main.rs]: src/main.rs

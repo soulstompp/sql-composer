@@ -77,6 +77,7 @@
 
 ### examples
 
+- **A walk** — The brick example's README walks the template language one template at a time: each step a question asked of the catalogue, the template that answers it, the statement it composes to and the subcommand that runs it, from a set's lines to the laws.
 - **The brick example** — `examples/lego` is `examples/brick` (crate `brick-example`, binary `brick`, database `sqlc_brick`, `SQLC_BRICK_DATABASE_URL`), and runs on the database sqlc-brickgen builds, which already holds the composite indexes for its joins; the `setup` subcommand and its downloader are gone.
 - **The catalogue generator is `sqlc-brickgen`** — `examples/sqlc-brickgen/` builds the crate and binary `sqlc-brickgen`, formerly `lego-generator`, with its own version and its own changelog, [`examples/sqlc-brickgen/CHANGELOG.md`](examples/sqlc-brickgen/CHANGELOG.md).
 - **More of PostgreSQL's SQL** — Templates on the builders, collections and purchases: window functions, `DISTINCT ON`, `LATERAL`, `ROLLUP`, `percentile_cont`, `generate_series`, an anti-join, division, `array_agg`, `jsonb` and `MERGE`.

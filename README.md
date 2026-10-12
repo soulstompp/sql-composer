@@ -433,12 +433,15 @@ template that is also a view, the statement's name is the one used.
 
 `cargo sqlc compose --respell` writes one shape of union another way, in the composed file: a
 union whose arms each read one roster, cut to their own row of it, and left joined `ON true` to
-what each arm reads. The brick example holds no such union, so take two checks written on its
-tables for this page: a roster of them in `checks/roster.sqlc`, and each check an arm of
-`checks/all.sqlc`:
+what each arm reads. The brick example's checks make such a union: a roster of them in
+[`checks/roster.sqlc`][examples/brick/sqlc/checks/roster.sqlc], and each check an arm of
+[`checks/all.sqlc`][examples/brick/sqlc/checks/all.sqlc]. One of them,
+[`checks/sets_without_lines.sqlc`][examples/brick/sqlc/checks/sets_without_lines.sqlc]:
 
 ```sql
-# The sets with no inventory line, under the roster's row for this check.
+# The sets with no inventory line, under the roster's row for this check: one row per set, keyed
+# by set_num, with its name. A set whose inventories hold no line is one, and so is a set with no
+# inventory. Where every set has a line, the roster's row comes back alone.
 SELECT r.rule, p.set_num, p.detail
 FROM (
     :compose(checks/roster.sqlc)
@@ -446,7 +449,12 @@ FROM (
 LEFT JOIN (
     SELECT s.set_num, s.name AS detail
     FROM lego_sets s
-    WHERE NOT EXISTS (SELECT 1 FROM lego_inventories i WHERE i.set_num = s.set_num)
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM lego_inventories i
+        WHERE i.set_num = s.set_num
+          AND EXISTS (SELECT 1 FROM lego_inventory_parts ip WHERE ip.inventory_id = i.id)
+    )
 ) p ON true
 WHERE r.slug = 'sets_without_lines'
 ```
@@ -465,7 +473,7 @@ its outer `SELECT * FROM (`, the composed file reads:
 SELECT r.rule, p.set_num, p.detail
 FROM (SELECT * FROM (VALUES
     ('lines_uncatalogued', 'a line whose part is not in the parts catalogue'),
-    ('sets_without_lines', 'a set with no inventory')
+    ('sets_without_lines', 'a set with no inventory line')
 ) AS roster (slug, rule)
 
 ) r
@@ -478,7 +486,8 @@ SELECT 1 AS arm, p.set_num AS set_num, p.detail AS detail
 ```
 
 `EXPLAIN` shows the roster scanned once, where the statement as composed scans it once for each
-arm, and both return the same rows. Each file respelled gets a line,
+arm, and both return the same rows: the brick example's `fit` holds each file to the scans of its
+plan, and its `laws` hold the rows. Each file respelled gets a line,
 `Respelled sqlc/checks/all.sqlc: 1 union(s), of 2 arms`, the last line counts the unions
 respelled, and the manifest records the flag, so `--verify` reads it from there.
 
@@ -683,9 +692,9 @@ cargo sqlc compose --respell                        # a roster's arms read as on
 
 Every template under `--source` gets a line: `Composed`; `Shape`, with the slots it leaves open; or
 `Skipped`, on standard error, with the slot left open and the template it stands in. The last line
-counts them: `Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped`. Under `--respell`,
+counts them: `Composed 51 of 55 template(s) into .sql: 4 shape(s), 0 skipped`. Under `--respell`,
 each file respelled gets a `Respelled` line, each statement sqlparser cannot read an `Unparsed`
-line on standard error, and the last line ends with the unions respelled, `, 0 union(s) respelled`.
+line on standard error, and the last line ends with the unions respelled, `, 1 union(s) respelled`.
 
 `manifest.json`, at the root of the target, records how its files were composed: the flags
 (`dialect`, `with`, `views`, `search_path`, `respell`), and for each composed file its bind names
@@ -1049,8 +1058,8 @@ flags, with each template's standing and the text of `manifest.json`.
 
 They save a second composer written for another language, and a program that calls
 `cargo sqlc` to compose. Composed through either, with `--respell` or without, the brick example's
-templates give the files `cargo sqlc compose` writes, byte for byte; a union of a roster's arms,
-which the brick templates hold none of, comes back as `--respell` writes it.
+templates give the files `cargo sqlc compose` writes, byte for byte, the union of its checks
+respelled among them.
 
 The values stay the calling program's: it binds them with its own database library, in the order
 the names are listed. Neither lays out spellings, which `cargo sqlc` and the core's feature
@@ -1103,5 +1112,8 @@ project.
 [examples/brick/sqlc/reports/city_only_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/city_only_moulds.sqlc
 [examples/brick/sqlc/reports/count_theme_parts.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/count_theme_parts.sqlc
 [examples/brick/sqlc/reports/shared_moulds.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/reports/shared_moulds.sqlc
+[examples/brick/sqlc/checks/roster.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/roster.sqlc
+[examples/brick/sqlc/checks/all.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/all.sqlc
+[examples/brick/sqlc/checks/sets_without_lines.sqlc]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/sqlc/checks/sets_without_lines.sqlc
 [examples/brick/README.md]: https://github.com/soulstompp/sql-composer/blob/HEAD/examples/brick/README.md
 [LICENSE]: https://github.com/soulstompp/sql-composer/blob/HEAD/LICENSE

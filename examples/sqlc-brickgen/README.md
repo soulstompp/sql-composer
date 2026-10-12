@@ -6,7 +6,7 @@ trademark of the LEGO Group, which does not sponsor, authorise or endorse this p
 
 The real catalogue is the eight `lego_*` tables (colours, themes, part categories, parts, sets,
 inventories, inventory parts and inventory sets) in `--source-schema`. The generator reads them
-once, writes them through unchanged but for the release years of the years with no release (see
+once, writes them through unchanged but for the sets the dump dates in a year with no release (see
 Years) and a few root themes (see Traps), and adds synthesized sets modelled on them: each
 synthesized set takes its root theme, year and contents from a real set, with its own set number
 and name. The generated tables go to `--schema`, which is dropped and recreated on every run.
@@ -53,11 +53,10 @@ The database URL can also come from `SQLC_BRICKGEN_DATABASE_URL`, never from the
 purpose.
 
 The generator speaks TLS (rustls), as a managed PostgreSQL server usually requires. Ask for it in
-the URL:
-`?sslmode=require` encrypts without checking the server's certificate, and `?sslmode=verify-full`
-also checks it, against Mozilla's root certificates, bundled, and any file `&sslrootcert=<file>`
-names. With no `sslmode`, a connection tries TLS and falls back to plain when the server does not
-offer it.
+the URL: `?sslmode=require` encrypts without checking the server's certificate, and
+`?sslmode=verify-full` also checks it, against Mozilla's root certificates, bundled, and any file
+`&sslrootcert=<file>` names. With no `sslmode`, a connection tries TLS and falls back to plain when
+the server does not offer it.
 
 ## Data and licences
 

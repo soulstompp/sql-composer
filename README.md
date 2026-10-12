@@ -186,12 +186,12 @@ The listing by colour further down composes the same file. So do the per-categor
 `INSERT` and a `MERGE` write, and the spare counts an `UPDATE` keeps. A change to the join is made
 once, and the next compose writes it into every one of them.
 
-The composer never parses the SQL it splices. A mistake in the SQL composes cleanly, and only the
-database refuses it. So the composed files are committed beside their templates, with the
-`manifest.json` the compose writes beside them: the flags they were composed with, and for each
-file the names its placeholders stand for. `cargo sqlc compose --verify` checks that the files are
-still what the templates compose to, with the flags the manifest records, and SQLx or a test runs
-them.
+The composer never parses the SQL it splices, `--respell` apart. A mistake in the SQL composes
+cleanly, and only the database refuses it. So the composed files are committed beside their
+templates, with the `manifest.json` the compose writes beside them: the flags they were composed
+with, and for each file the names its placeholders stand for. `cargo sqlc compose --verify` checks
+that the files are still what the templates compose to, with the flags the manifest records, and
+SQLx or a test runs them.
 
 ## The template language
 
@@ -585,10 +585,10 @@ quotes. A statement that writes the table writes the table itself. MySQL takes n
 
 A template can be written several ways that return the same rows: a condition in an inner join's
 `ON` or in the `WHERE`, a `NOT` over an `AND` or pushed onto each operand, a relation read once
-named inline or as a WITH query. `cargo sqlc spellings <template>` lays out a template's other
-spellings, counted before any is written, an axis at a time. You pick one spelling on each axis
-in `spellings.toml`, at the root of the source, and `cargo sqlc spell` writes every template in
-your picks, as `cargo fmt` writes code.
+written where it is read or as a WITH query. `cargo sqlc spellings <template>` lays out a template's
+spellings, counted before any is written, an axis at a time. You pick one spelling on each axis in
+`spellings.toml`, at the root of the source, and `cargo sqlc spell` writes every template in your
+picks, as `cargo fmt` writes code.
 
 It saves the house style explained again to each person, and each agent, who writes a template:
 the templates show it. `cargo sqlc spell --check` reports each template not in the picks and
@@ -784,7 +784,7 @@ writes it:
 | `negation` | `pushed`, `over` | each `NOT` over an `AND` or an `OR` pushed onto its operands, or one `NOT` over operands that are each a `NOT`; `NOT NOT p` as `p` either way |
 | `naming` | `inline`, `with`, `template` | a relation read once written where it is read, as a WITH query at the statement's head, or as the `:compose` of its own template |
 | `semi_join` | `in`, `exists` | `x IN (SELECT y …)`, or `EXISTS (SELECT … WHERE x = y)` |
-| `join_order` | a table: `template`, `order` | nothing: the order of one template's join list, which `spell` reads against outermost first and reports |
+| `join_order` | a table: `template`, `order` | nothing: the order of one template's join list, which `spell` checks against the rule outermost first, and reports |
 
 ```toml
 conditions = "where"
@@ -795,10 +795,10 @@ template = "shared/scope_sets.sqlc"
 order = ["s", "sc", "scope"]
 ```
 
-A key no axis has, or a pick its axis lacks, is refused with the picks it has. A condition moves
-only where its text says which relations it reads, every column named with its relation, and only
-between inner joins and the `WHERE`. `NOT (a = b)` is never written `a <> b`, nor `NOT IN` as
-`NOT EXISTS`, and a semi-join under a `NOT` stays as written.
+A key no axis has is refused with the axes there are, and a pick its axis lacks with the picks the
+axis has. A condition moves only where its text says which relations it reads, every column named
+with its relation, and only between inner joins and the `WHERE`. `NOT (a = b)` is never written
+`a <> b`, nor `NOT IN` as `NOT EXISTS`, and a semi-join under a `NOT` stays as written.
 
 ### Directives
 

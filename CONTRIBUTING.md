@@ -45,7 +45,7 @@ Thank you.
 2. Install the system libraries needed to interface with the database systems
    you wish to use (e.g. `libpq-dev` for PostgreSQL, `libmysqlclient-dev` for MySQL).
 
-3. Clone this repository and open it in your favorite editor.
+3. Clone this repository and open it in your favourite editor.
 
 4. The project uses a Cargo workspace of the crates under `crates/` and the examples under
    `examples/`:
@@ -185,7 +185,7 @@ A respelling of the composed file, as the last row is, goes in `respell.rs`, beh
 composed, and see a file with nothing to respell written byte for byte; its law holds the
 respelled statement to the rows the statement as composed returns, by `laws::holds`.
 
-### Coding Style
+### Coding style
 
 The code follows the
 [Rust Style Guide](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md),

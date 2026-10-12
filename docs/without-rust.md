@@ -59,7 +59,7 @@ it fails, as it does where SQLx is not installed; the files are written all the 
 Every template gets a line, and the last line counts them. For the brick example:
 
 ```text
-Composed 47 of 51 template(s) into .sql: 4 shape(s), 0 skipped
+Composed 51 of 55 template(s) into .sql: 4 shape(s), 0 skipped
 ```
 
 Each template's file keeps its path, so `sqlc/reports/release_years.sqlc` becomes

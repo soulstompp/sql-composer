@@ -5,6 +5,7 @@
 ### sql-composer
 
 - **A defined name stands where the database finds it** — A name a `WITH` entry `:define`s stands for its template in the rest of the query that holds the `WITH`, wherever the template that writes it is composed: from a template of one `:compose`, with its slots filled, inside a subquery, or as a command's source. It stood only where the template was composed itself, and everywhere else each reference spliced the body in again: the same rows, with each copy planned. A `WITH` entry further in that gives the name to something else hides it, and a view's unqualified name likewise, so the body is written out there; 0.1.0 wrote the name, which read the inner entry's rows. A path composed outside the query that holds the `WITH`, a later statement's among them, is written out; 0.1.0 wrote the name, which the database refused. Every other composition is byte for byte as 0.1.0 wrote it.
+- **DuckDB 2.0** — `--with` for DuckDB refuses a template named `recursive`, a name DuckDB 2.0 refuses; 0.1.0 wrote `WITH recursive AS (…)`, which 2.0 does not run. `sql-composer-duckdb`'s `duckdb = "1.4"` already reaches 2.0, whose crate is numbered 1.20000.
 
 ## 0.1.0
 

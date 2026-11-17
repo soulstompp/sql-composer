@@ -430,6 +430,11 @@ WITH theme_closure AS (
 A fonte da contagem também compõe `shared/theme_closure.sqlc` e, aí, lê-o como
 `SELECT * FROM theme_closure`.
 
+O nome vale onde a base de dados o encontraria, ou seja, no resto da consulta que contém o `WITH`,
+seja qual for o sítio onde o modelo que o escreve é, ele próprio, composto; já onde um `WITH` mais
+interior dá esse nome a outra coisa, o nome fica escondido, e aí o corpo volta a ser escrito por
+extenso.
+
 Um modelo feito de instruções `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` é um registo de
 vistas. Carregado com `cargo sqlc compose --views <registry>` ou com
 `Composer::load_view_registry()`, faz com que todas as composições digam `SELECT * FROM <name>` por

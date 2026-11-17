@@ -419,6 +419,10 @@ WITH theme_closure AS (
 The count's source composes `shared/theme_closure.sqlc` too, and reads it there as
 `SELECT * FROM theme_closure`.
 
+The name stands wherever the database would find it: in the rest of the query that holds the
+`WITH`, wherever the template that writes it is itself composed. A `WITH` further in that gives the
+name to something else hides it, and there the body is written out again.
+
 A template of `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` statements is a view registry.
 Loaded with `cargo sqlc compose --views <registry>` or `Composer::load_view_registry()`, it makes
 every composition say `SELECT * FROM <name>` for each template it registers. Composed as a template,

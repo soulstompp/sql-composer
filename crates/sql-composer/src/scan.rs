@@ -203,6 +203,25 @@ impl Scanner {
         true
     }
 
+    /// Read the bytes at the start of `bytes` that leave the scanner where it stands inside a
+    /// quoted span, a comment or a psql meta-command, and say how many; none where it stands
+    /// anywhere else. None of them is SQL itself.
+    pub(crate) fn pass_inside(&mut self, bytes: &[u8]) -> usize {
+        let run = match self.scan {
+            Scan::Quoted(quote) => bytes
+                .iter()
+                .position(|&b| b == quote.close || (quote.backslash && b == b'\\')),
+            Scan::LineComment | Scan::MetaCommand => bytes.iter().position(|&b| b == b'\n'),
+            Scan::BlockComment { .. } => bytes.iter().position(|&b| b == b'*' || b == b'/'),
+            _ => return 0,
+        }
+        .unwrap_or(bytes.len());
+        if let (Scan::BlockComment { last, .. }, 1..) = (&mut self.scan, run) {
+            *last = bytes[run - 1];
+        }
+        run
+    }
+
     /// Read `bytes`, which start at offset `at`, as [`Scanner::step`] does one at a time, without
     /// a word of which are SQL: each run that leaves the scanner where it stands is passed over
     /// whole.

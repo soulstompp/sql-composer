@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::mock::MockTable;
 use crate::parser;
 use crate::scan::{Regime, Scanner, Stand};
+use crate::scope::{hidden, Named, Reading, Reads};
 use crate::types::{
     Binding, Command, CommandKind, ComposeRef, ComposeTarget, Dialect, Element, Template,
     TemplateSource,
@@ -129,8 +130,10 @@ struct Gathered {
     open: HashSet<PathBuf>,
 }
 
-/// Composes one source of a command, standing alone, on the positional path.
-type ComposeSource<'a> = &'a dyn Fn(&Template, &mut HashSet<PathBuf>) -> Result<ComposedSql>;
+/// Composes one source of a command, standing alone, on the positional path, where the names
+/// given stand.
+type ComposeSource<'a> =
+    &'a dyn Fn(&Template, &mut HashSet<PathBuf>, &[Named]) -> Result<ComposedSql>;
 
 impl Composer {
     /// Create a new composer with the given dialect.
@@ -216,14 +219,87 @@ impl Composer {
         Ok(self.views.get(&resolved).cloned())
     }
 
-    /// The name a compose reference is written as, or `None` where the body is spliced in.
-    /// `:define` always splices: it is the definition, and a definition that referred to the
-    /// name being defined would define nothing.
-    fn reference(&self, compose_ref: &ComposeRef, path: &Path) -> Result<Option<String>> {
+    /// The name a compose reference is written as where `names` stand, or `None` where the body
+    /// is spliced in. `:define` always splices: it is the definition, and a definition that
+    /// referred to the name being defined would define nothing.
+    fn reference(
+        &self,
+        names: &[Named],
+        compose_ref: &ComposeRef,
+        path: &Path,
+    ) -> Result<Option<String>> {
         match compose_ref.target {
             ComposeTarget::Definition(_) => Ok(None),
-            _ => self.view_reference(path),
+            _ => self.name_for(names, path),
         }
+    }
+
+    /// The name the template at `path` is written as where `names` stand: the innermost name a
+    /// `WITH` declares for it that no entry further in hides, or else its view, unless an entry
+    /// hides the view's name.
+    fn name_for(&self, names: &[Named], path: &Path) -> Result<Option<String>> {
+        if self.views.is_empty() && names.iter().all(|named| named.path.is_none()) {
+            return Ok(None);
+        }
+        let resolved = std::fs::canonicalize(self.find_template(path)?)?;
+        for (at, named) in names.iter().enumerate().rev() {
+            if named.path.as_ref() == Some(&resolved) && !hidden(&names[at + 1..], &named.name) {
+                return Ok(Some(named.name.clone()));
+            }
+        }
+        Ok(self
+            .views
+            .get(&resolved)
+            .filter(|view| !hidden(names, view))
+            .cloned())
+    }
+
+    /// Read `element` into `reading`. A `:define` standing alone in a `WITH` entry declares the
+    /// entry's name for its template; any other directive there is the entry's own body.
+    fn read(&self, reading: &mut Reading, element: &Element) -> Result<()> {
+        match element {
+            Element::Sql(text) => reading.read_sql(text),
+            Element::Compose(ComposeRef {
+                target: ComposeTarget::Definition(path),
+                ..
+            }) => {
+                reading.read_directive();
+                if reading.in_entry() {
+                    reading.define(std::fs::canonicalize(self.find_template(path)?)?);
+                }
+            }
+            _ => {
+                reading.read_directive();
+                reading.close_entry();
+            }
+        }
+        Ok(())
+    }
+
+    /// A reading of `elements`, a template's, composed where `names` stand. It reads the names
+    /// only where one could stand for a template: a name standing for one where it is composed,
+    /// a view, or a `:define` of its own. It reads where the quotes stand when `quotes` asks.
+    fn reading(&self, names: &[Named], elements: &[Element], quotes: bool) -> Reading {
+        let views = !self.views.is_empty();
+        let defines = || {
+            elements.iter().any(|element| {
+                matches!(
+                    element,
+                    Element::Compose(ComposeRef {
+                        target: ComposeTarget::Definition(_),
+                        ..
+                    })
+                )
+            })
+        };
+        let reads = if views || names.iter().any(|named| named.path.is_some()) || defines() {
+            Reads::Names
+        } else if quotes {
+            Reads::Quotes
+        } else {
+            Reads::Nothing
+        };
+        Reading::new(self.dialect.regime(), names, views, reads)
     }
 
     /// Add a search path for resolving compose references.
@@ -237,10 +313,11 @@ impl Composer {
         self.mock_tables.insert(mock.name.clone(), mock);
     }
 
-    /// Compose a template into final SQL with placeholders. Any name the template `:define`s
-    /// stands for that relation everywhere underneath it, so a statement can put its vocabulary
-    /// in a `WITH` clause once and have every reference to it below say the name instead of
-    /// repeating the body.
+    /// Compose a template into final SQL with placeholders. A name a `WITH` entry `:define`s, in
+    /// this template or in any it composes, stands for that relation in the rest of the query
+    /// that holds the `WITH`, at any depth, so a statement can put its vocabulary in a `WITH`
+    /// clause once and have every reference to it below say the name instead of repeating the
+    /// body. A `WITH` entry further in of the same name hides it, as it does in the database.
     pub fn compose(&self, template: &Template) -> Result<ComposedSql> {
         self.written_for(template)?;
         let composed = if self.name_relations {
@@ -322,20 +399,30 @@ impl Composer {
         }
     }
 
-    /// The names a template declares for itself, by canonical path: one per `:define` that has a
-    /// name in front of it. A `:define` with no name still splices its body; it simply names
-    /// nothing, which is what the registry's own composition does.
+    /// The names a template declares for every statement it holds, by canonical path: one per
+    /// `:define` that creates something by a name, `CREATE VIEW <name> AS :define(path)` among
+    /// them. A `:define` with no name still splices its body; it simply names nothing, which is
+    /// what the registry's own composition does. A `WITH` entry's name stands only in its own
+    /// query, where [`Reading`] declares it.
     fn declared_names(&self, template: &Template) -> Result<HashMap<PathBuf, String>> {
         let mut names = HashMap::new();
         let mut preceding = String::new();
+        let mut reading = self.reading(&[], &template.elements, false);
         for element in &template.elements {
+            match element {
+                Element::Sql(text) => reading.read_sql(text),
+                _ => reading.read_directive(),
+            }
             match element {
                 Element::Sql(text) => preceding.push_str(text),
                 Element::Compose(compose_ref) => {
                     if let ComposeTarget::Definition(path) = &compose_ref.target {
-                        if let Some(name) =
-                            cte_name_before(&preceding).or_else(|| view_name_before(&preceding))
-                        {
+                        let created = (!reading.in_entry())
+                            .then(|| {
+                                cte_name_before(&preceding).or_else(|| view_name_before(&preceding))
+                            })
+                            .flatten();
+                        if let Some(name) = created {
                             let resolved = std::fs::canonicalize(self.find_template(path)?)?;
                             names.insert(resolved, name);
                         }
@@ -354,7 +441,7 @@ impl Composer {
             visited.insert(path.clone());
         }
         let slots = HashMap::new();
-        self.compose_inner(template, &slots, &mut visited)
+        self.compose_inner(template, &slots, &mut visited, &[])
     }
 
     /// Compose a template with value counts, expanding multi-value bindings
@@ -420,7 +507,7 @@ impl Composer {
         if let TemplateSource::File(ref path) = template.source {
             visited.insert(path.clone());
         }
-        for binding in self.collect_bindings(template, &HashMap::new(), &mut visited)? {
+        for binding in self.collect_bindings(template, &HashMap::new(), &mut visited, &[])? {
             let Some(given) = values.get(&binding.name) else {
                 continue;
             };
@@ -458,7 +545,7 @@ impl Composer {
             visited.insert(path.clone());
         }
         let slots = HashMap::new();
-        self.compose_with_values_inner(template, values, &slots, &mut visited)
+        self.compose_with_values_inner(template, values, &slots, &mut visited, &[])
     }
 
     // ── Named relations ───────────────────────────────────────────────
@@ -577,6 +664,7 @@ impl Composer {
                             &body.source,
                             &HashMap::new(),
                             &mut visited,
+                            &[],
                         )?,
                     });
                 }
@@ -585,6 +673,7 @@ impl Composer {
                     &template.source,
                     &HashMap::new(),
                     &mut visited,
+                    &[],
                 )?);
             }
         } else {
@@ -594,6 +683,7 @@ impl Composer {
                 &template.source,
                 &HashMap::new(),
                 &mut visited,
+                &[],
             )?;
         }
         Ok(Held {
@@ -604,16 +694,20 @@ impl Composer {
         })
     }
 
-    /// What `elements`, the elements of the template `within`, hold, as emitting them writes it.
+    /// What `elements`, the elements of the template `within`, composed where `names` stand,
+    /// hold, as emitting them writes it.
     fn held(
         &self,
         elements: &[Element],
         within: &TemplateSource,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<Vec<Held>> {
         let mut holds = Vec::new();
+        let mut reading = self.reading(names, elements, false);
         for element in elements {
+            self.read(&mut reading, element)?;
             match element {
                 Element::Sql(_) | Element::Bind(_) => {}
                 Element::Compose(compose_ref) => {
@@ -624,7 +718,7 @@ impl Composer {
                         ComposeTarget::Definition(_) => Reach::Define,
                     };
                     let template = self.shown(&path)?;
-                    if let Some(name) = self.reference(compose_ref, &path)? {
+                    if let Some(name) = self.reference(reading.names(), compose_ref, &path)? {
                         holds.push(Held {
                             template,
                             reach,
@@ -643,6 +737,7 @@ impl Composer {
                         &body.source,
                         &Self::build_child_slots(compose_ref),
                         visited,
+                        reading.names(),
                     )?;
                     visited.remove(&resolved);
                     holds.push(Held {
@@ -655,7 +750,7 @@ impl Composer {
                 Element::Command(command) => {
                     for source in &command.sources {
                         let template = self.shown(source)?;
-                        if let Some(name) = self.view_reference(source)? {
+                        if let Some(name) = self.name_for(reading.names(), source)? {
                             holds.push(Held {
                                 template,
                                 reach: Reach::Source,
@@ -665,8 +760,13 @@ impl Composer {
                             continue;
                         }
                         let body = self.parse_file(&self.find_template(source)?)?;
-                        let inner =
-                            self.held(&body.elements, &body.source, &HashMap::new(), visited)?;
+                        let inner = self.held(
+                            &body.elements,
+                            &body.source,
+                            &HashMap::new(),
+                            visited,
+                            reading.names(),
+                        )?;
                         holds.push(Held {
                             template,
                             reach: Reach::Source,
@@ -911,11 +1011,12 @@ impl Composer {
         template: &Template,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         if self.dialect.supports_numbered_placeholders() {
-            self.compose_inner_numbered(template, slots, visited)
+            self.compose_inner_numbered(template, slots, visited, names)
         } else {
-            self.compose_inner_positional(template, slots, visited)
+            self.compose_inner_positional(template, slots, visited, names)
         }
     }
 
@@ -925,11 +1026,12 @@ impl Composer {
         values: &BTreeMap<String, Vec<V>>,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         if self.dialect.supports_numbered_placeholders() {
-            self.compose_with_values_numbered(template, values, slots, visited)
+            self.compose_with_values_numbered(template, values, slots, visited, names)
         } else {
-            self.compose_with_values_positional(template, values, slots, visited)
+            self.compose_with_values_positional(template, values, slots, visited, names)
         }
     }
 
@@ -946,25 +1048,29 @@ impl Composer {
         template: &Template,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<BTreeSet<String>> {
         Ok(self
-            .collect_bindings(template, slots, visited)?
+            .collect_bindings(template, slots, visited, names)?
             .into_iter()
             .map(|binding| binding.name)
             .collect())
     }
 
-    /// Every `:bind` a template composes, through its compose references and commands, in
-    /// document order.
+    /// Every `:bind` a template composed where `names` stand composes, through its compose
+    /// references and commands, in document order.
     fn collect_bindings(
         &self,
         template: &Template,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<Vec<Binding>> {
         let mut bindings = Vec::new();
+        let mut reading = self.reading(names, &template.elements, false);
 
         for element in &template.elements {
+            self.read(&mut reading, element)?;
             match element {
                 Element::Sql(_) => {}
                 Element::Bind(binding) => {
@@ -972,15 +1078,23 @@ impl Composer {
                 }
                 Element::Compose(compose_ref) => {
                     let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
-                    if self.reference(compose_ref, &path)?.is_some() {
+                    if self
+                        .reference(reading.names(), compose_ref, &path)?
+                        .is_some()
+                    {
                         continue;
                     }
                     let child_slots = Self::build_child_slots(compose_ref);
-                    let sub = self.collect_compose_bindings(&path, &child_slots, visited)?;
+                    let sub = self.collect_compose_bindings(
+                        &path,
+                        &child_slots,
+                        visited,
+                        reading.names(),
+                    )?;
                     bindings.extend(sub);
                 }
                 Element::Command(command) => {
-                    let sub = self.collect_command_bindings(command, visited)?;
+                    let sub = self.collect_command_bindings(command, visited, reading.names())?;
                     bindings.extend(sub);
                 }
             }
@@ -995,6 +1109,7 @@ impl Composer {
         path: &Path,
         child_slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<Vec<Binding>> {
         let resolved = self.find_template(path)?;
 
@@ -1005,7 +1120,7 @@ impl Composer {
         }
 
         let template = self.parse_file(&resolved)?;
-        let bindings = self.collect_bindings(&template, child_slots, visited)?;
+        let bindings = self.collect_bindings(&template, child_slots, visited, names)?;
 
         visited.remove(&resolved);
         Ok(bindings)
@@ -1018,16 +1133,17 @@ impl Composer {
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<Vec<Binding>> {
         let mut bindings = Vec::new();
         let empty_slots = HashMap::new();
         for source in &command.sources {
-            if self.view_reference(source)?.is_some() {
+            if self.name_for(names, source)?.is_some() {
                 continue;
             }
             let resolved = self.find_template(source)?;
             let template = self.parse_file(&resolved)?;
-            let sub = self.collect_bindings(&template, &empty_slots, visited)?;
+            let sub = self.collect_bindings(&template, &empty_slots, visited, names)?;
             bindings.extend(sub);
         }
         Ok(bindings)
@@ -1066,18 +1182,19 @@ impl Composer {
         template: &Template,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         // Pass 1: collect
         let mut collect_visited = visited.clone();
-        let names = self.collect_bind_names(template, slots, &mut collect_visited)?;
+        let bind_names = self.collect_bind_names(template, slots, &mut collect_visited, names)?;
 
         // Allocate
-        let index_map = Self::build_index_map(&names);
-        let bind_params: Vec<String> = names.into_iter().collect();
+        let index_map = Self::build_index_map(&bind_names);
+        let bind_params: Vec<String> = bind_names.into_iter().collect();
 
         // Pass 2: emit
         let mut sql = String::new();
-        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
+        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited, names)?;
 
         Ok(ComposedSql {
             sql,
@@ -1093,17 +1210,18 @@ impl Composer {
         values: &BTreeMap<String, Vec<V>>,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         // Pass 1: collect
         let mut collect_visited = visited.clone();
-        let names = self.collect_bind_names(template, slots, &mut collect_visited)?;
+        let bind_names = self.collect_bind_names(template, slots, &mut collect_visited, names)?;
 
         // Allocate with value counts
-        let index_map = Self::build_index_map_with_values(&names, values);
+        let index_map = Self::build_index_map_with_values(&bind_names, values);
 
         // Build bind_params: each name repeated by its value count, alphabetical
         let mut bind_params = Vec::new();
-        for name in &names {
+        for name in &bind_names {
             let count = values
                 .get(name.as_str())
                 .map(|vs| vs.len())
@@ -1116,7 +1234,7 @@ impl Composer {
 
         // Pass 2: emit
         let mut sql = String::new();
-        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited)?;
+        self.emit_sql_numbered(template, &index_map, &mut sql, slots, visited, names)?;
 
         Ok(ComposedSql {
             sql,
@@ -1125,7 +1243,7 @@ impl Composer {
         })
     }
 
-    /// Pass 2: Emit SQL for a template using the global index map.
+    /// Pass 2: Emit SQL for a template composed where `names` stand, using the global index map.
     fn emit_sql_numbered(
         &self,
         template: &Template,
@@ -1133,10 +1251,12 @@ impl Composer {
         sql: &mut String,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<()> {
-        let mut quotes = Scanner::new(self.dialect.regime());
+        let mut reading = self.reading(names, &template.elements, true);
         for element in &template.elements {
-            self.bind_outside_dollar_quotes(&mut quotes, element, slots, visited)?;
+            self.read(&mut reading, element)?;
+            self.bind_outside_dollar_quotes(&reading, element, slots, visited)?;
             match element {
                 Element::Sql(text) => sql.push_str(text),
                 Element::Bind(binding) => {
@@ -1150,15 +1270,22 @@ impl Composer {
                 }
                 Element::Compose(compose_ref) => {
                     let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
-                    if let Some(view) = self.reference(compose_ref, &path)? {
+                    if let Some(view) = self.reference(reading.names(), compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
                     }
                     let child_slots = Self::build_child_slots(compose_ref);
-                    self.emit_compose_numbered(&path, &child_slots, index_map, sql, visited)?;
+                    self.emit_compose_numbered(
+                        &path,
+                        &child_slots,
+                        index_map,
+                        sql,
+                        visited,
+                        reading.names(),
+                    )?;
                 }
                 Element::Command(command) => {
-                    self.emit_command_numbered(command, index_map, sql, visited)?;
+                    self.emit_command_numbered(command, index_map, sql, visited, reading.names())?;
                 }
             }
         }
@@ -1173,6 +1300,7 @@ impl Composer {
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<()> {
         let resolved = self.find_template(path)?;
 
@@ -1183,7 +1311,7 @@ impl Composer {
         }
 
         let template = self.parse_file(&resolved)?;
-        self.emit_sql_numbered(&template, index_map, sql, child_slots, visited)?;
+        self.emit_sql_numbered(&template, index_map, sql, child_slots, visited, names)?;
 
         visited.remove(&resolved);
         Ok(())
@@ -1198,11 +1326,13 @@ impl Composer {
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<()> {
         match command.kind {
-            CommandKind::Union => self
-                .emit_set_operation_numbered(command, "UNION", "_union", index_map, sql, visited),
-            CommandKind::Count => self.emit_count_numbered(command, index_map, sql, visited),
+            CommandKind::Union => self.emit_set_operation_numbered(
+                command, "UNION", "_union", index_map, sql, visited, names,
+            ),
+            CommandKind::Count => self.emit_count_numbered(command, index_map, sql, visited, names),
             CommandKind::Intersect => self.emit_set_operation_numbered(
                 command,
                 "INTERSECT",
@@ -1210,9 +1340,11 @@ impl Composer {
                 index_map,
                 sql,
                 visited,
+                names,
             ),
-            CommandKind::Except => self
-                .emit_set_operation_numbered(command, "EXCEPT", "_except", index_map, sql, visited),
+            CommandKind::Except => self.emit_set_operation_numbered(
+                command, "EXCEPT", "_except", index_map, sql, visited, names,
+            ),
         }
     }
 
@@ -1223,6 +1355,7 @@ impl Composer {
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<()> {
         let columns = match &command.columns {
             Some(cols) => cols.join(", "),
@@ -1246,15 +1379,16 @@ impl Composer {
                 index_map,
                 sql,
                 visited,
+                names,
             )?;
         } else {
             let source = &command.sources[0];
-            if let Some(view) = self.view_reference(source)? {
+            if let Some(view) = self.name_for(names, source)? {
                 sql.push_str(&format!("SELECT * FROM {view}"));
             } else {
                 let resolved = self.find_template(source)?;
                 let template = self.parse_file(&resolved)?;
-                self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
+                self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited, names)?;
             }
         }
 
@@ -1268,6 +1402,7 @@ impl Composer {
     /// composer does not parse, so a source that is itself a set operation (or ends in an
     /// `ORDER BY`) would otherwise regroup with this operator; and the whole is closed so that it
     /// composes wherever a single query does, as another set operation's source included.
+    #[allow(clippy::too_many_arguments)]
     fn emit_set_operation_numbered(
         &self,
         command: &Command,
@@ -1276,6 +1411,7 @@ impl Composer {
         index_map: &BTreeMap<String, (usize, usize)>,
         sql: &mut String,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<()> {
         let operator = Self::set_operator(command, keyword)?;
         let empty_slots = HashMap::new();
@@ -1286,12 +1422,12 @@ impl Composer {
                 sql.push_str(&format!("\n{operator}\n"));
             }
             sql.push_str("SELECT * FROM (\n");
-            if let Some(view) = self.view_reference(source)? {
+            if let Some(view) = self.name_for(names, source)? {
                 sql.push_str(&format!("SELECT * FROM {view}"));
             } else {
                 let resolved = self.find_template(source)?;
                 let template = self.parse_file(&resolved)?;
-                self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited)?;
+                self.emit_sql_numbered(&template, index_map, sql, &empty_slots, visited, names)?;
             }
             let trimmed = sql.trim_end().len();
             sql.truncate(trimmed);
@@ -1312,13 +1448,15 @@ impl Composer {
         template: &Template,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         let mut sql = String::new();
         let mut bind_params = Vec::new();
 
-        let mut quotes = Scanner::new(self.dialect.regime());
+        let mut reading = self.reading(names, &template.elements, true);
         for element in &template.elements {
-            self.bind_outside_dollar_quotes(&mut quotes, element, slots, visited)?;
+            self.read(&mut reading, element)?;
+            self.bind_outside_dollar_quotes(&reading, element, slots, visited)?;
             match element {
                 Element::Sql(text) => {
                     sql.push_str(text);
@@ -1330,20 +1468,29 @@ impl Composer {
                 }
                 Element::Compose(compose_ref) => {
                     let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
-                    if let Some(view) = self.reference(compose_ref, &path)? {
+                    if let Some(view) = self.reference(reading.names(), compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
                     }
                     let child_slots = Self::build_child_slots(compose_ref);
-                    let composed = self.resolve_compose_positional(&path, &child_slots, visited)?;
+                    let composed = self.resolve_compose_positional(
+                        &path,
+                        &child_slots,
+                        visited,
+                        reading.names(),
+                    )?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
                 Element::Command(command) => {
-                    let composed =
-                        self.compose_command(command, visited, &|template, visited| {
-                            self.compose_inner(template, &HashMap::new(), visited)
-                        })?;
+                    let composed = self.compose_command(
+                        command,
+                        visited,
+                        reading.names(),
+                        &|template, visited, names| {
+                            self.compose_inner(template, &HashMap::new(), visited, names)
+                        },
+                    )?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -1363,13 +1510,15 @@ impl Composer {
         values: &BTreeMap<String, Vec<V>>,
         slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         let mut sql = String::new();
         let mut bind_params = Vec::new();
 
-        let mut quotes = Scanner::new(self.dialect.regime());
+        let mut reading = self.reading(names, &template.elements, true);
         for element in &template.elements {
-            self.bind_outside_dollar_quotes(&mut quotes, element, slots, visited)?;
+            self.read(&mut reading, element)?;
+            self.bind_outside_dollar_quotes(&reading, element, slots, visited)?;
             match element {
                 Element::Sql(text) => {
                     sql.push_str(text);
@@ -1392,7 +1541,7 @@ impl Composer {
                 }
                 Element::Compose(compose_ref) => {
                     let path = Self::resolve_compose_target(compose_ref, slots, &template.source)?;
-                    if let Some(view) = self.reference(compose_ref, &path)? {
+                    if let Some(view) = self.reference(reading.names(), compose_ref, &path)? {
                         sql.push_str(&format!("SELECT * FROM {view}"));
                         continue;
                     }
@@ -1402,20 +1551,26 @@ impl Composer {
                         &child_slots,
                         values,
                         visited,
+                        reading.names(),
                     )?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
                 Element::Command(command) => {
-                    let composed =
-                        self.compose_command(command, visited, &|template, visited| {
+                    let composed = self.compose_command(
+                        command,
+                        visited,
+                        reading.names(),
+                        &|template, visited, names| {
                             self.compose_with_values_inner(
                                 template,
                                 values,
                                 &HashMap::new(),
                                 visited,
+                                names,
                             )
-                        })?;
+                        },
+                    )?;
                     sql.push_str(&composed.sql);
                     bind_params.extend(composed.bind_params);
                 }
@@ -1435,6 +1590,7 @@ impl Composer {
         path: &Path,
         child_slots: &HashMap<String, PathBuf>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         let resolved = self.find_template(path)?;
 
@@ -1445,7 +1601,7 @@ impl Composer {
         }
 
         let template = self.parse_file(&resolved)?;
-        let result = self.compose_inner_positional(&template, child_slots, visited)?;
+        let result = self.compose_inner_positional(&template, child_slots, visited, names)?;
 
         visited.remove(&resolved);
 
@@ -1459,6 +1615,7 @@ impl Composer {
         child_slots: &HashMap<String, PathBuf>,
         values: &BTreeMap<String, Vec<V>>,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
     ) -> Result<ComposedSql> {
         let resolved = self.find_template(path)?;
 
@@ -1470,13 +1627,13 @@ impl Composer {
 
         let template = self.parse_file(&resolved)?;
         let result =
-            self.compose_with_values_positional(&template, values, child_slots, visited)?;
+            self.compose_with_values_positional(&template, values, child_slots, visited, names)?;
 
         visited.remove(&resolved);
         Ok(result)
     }
 
-    /// Compose a command (count/union) into SQL (positional path).
+    /// Compose a command (count/union) into SQL (positional path), where `names` stand.
     ///
     /// Command sources are standalone templates — they get empty slots. `compose_source`
     /// composes each one, with the statement's values when it is composed with them, so a list
@@ -1485,23 +1642,35 @@ impl Composer {
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
         compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         match command.kind {
-            CommandKind::Union => {
-                self.compose_set_operation(command, "UNION", "_union", visited, compose_source)
-            }
-            CommandKind::Count => self.compose_count(command, visited, compose_source),
+            CommandKind::Union => self.compose_set_operation(
+                command,
+                "UNION",
+                "_union",
+                visited,
+                names,
+                compose_source,
+            ),
+            CommandKind::Count => self.compose_count(command, visited, names, compose_source),
             CommandKind::Intersect => self.compose_set_operation(
                 command,
                 "INTERSECT",
                 "_intersect",
                 visited,
+                names,
                 compose_source,
             ),
-            CommandKind::Except => {
-                self.compose_set_operation(command, "EXCEPT", "_except", visited, compose_source)
-            }
+            CommandKind::Except => self.compose_set_operation(
+                command,
+                "EXCEPT",
+                "_except",
+                visited,
+                names,
+                compose_source,
+            ),
         }
     }
 
@@ -1510,6 +1679,7 @@ impl Composer {
         &self,
         command: &Command,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
         compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         let columns = match &command.columns {
@@ -1524,11 +1694,12 @@ impl Composer {
                 "UNION",
                 "_union",
                 visited,
+                names,
                 compose_source,
             )?
         } else {
             let source = &command.sources[0];
-            match self.view_reference(source)? {
+            match self.name_for(names, source)? {
                 Some(view) => ComposedSql {
                     sql: format!("SELECT * FROM {view}"),
                     ..Default::default()
@@ -1536,7 +1707,7 @@ impl Composer {
                 None => {
                     let resolved = self.find_template(source)?;
                     let template = self.parse_file(&resolved)?;
-                    compose_source(&template, visited)?
+                    compose_source(&template, visited, names)?
                 }
             }
         };
@@ -1564,6 +1735,7 @@ impl Composer {
         keyword: &str,
         alias: &str,
         visited: &mut HashSet<PathBuf>,
+        names: &[Named],
         compose_source: ComposeSource<'_>,
     ) -> Result<ComposedSql> {
         let operator = Self::set_operator(command, keyword)?;
@@ -1571,12 +1743,12 @@ impl Composer {
         let mut all_params = Vec::new();
 
         for (i, source) in command.sources.iter().enumerate() {
-            let body = match self.view_reference(source)? {
+            let body = match self.name_for(names, source)? {
                 Some(view) => format!("SELECT * FROM {view}"),
                 None => {
                     let resolved = self.find_template(source)?;
                     let template = self.parse_file(&resolved)?;
-                    let composed = compose_source(&template, visited)?;
+                    let composed = compose_source(&template, visited, names)?;
                     all_params.extend(composed.bind_params);
                     composed.sql
                 }
@@ -1656,22 +1828,17 @@ impl Composer {
         Ok(template)
     }
 
-    /// `element` read into `quotes`, which reads the template's own SQL, each directive a break
-    /// as the parser takes it. Refused where the element stands inside a dollar quote and binds a
+    /// Refused where `element`, just read into `reading`, which reads the template's own SQL,
+    /// each directive a break as the parser takes it, stands inside a dollar quote and binds a
     /// parameter, itself or through what it composes: no value reaches it there.
     fn bind_outside_dollar_quotes(
         &self,
-        quotes: &mut Scanner,
+        reading: &Reading,
         element: &Element,
         slots: &HashMap<String, PathBuf>,
         visited: &HashSet<PathBuf>,
     ) -> Result<()> {
-        if let Element::Sql(text) = element {
-            quotes.skim(0, text.as_bytes());
-            quotes.settle(&mut |_, _| {});
-            return Ok(());
-        }
-        if quotes.stands() != Stand::Dollar {
+        if matches!(element, Element::Sql(_)) || reading.stands() != Stand::Dollar {
             return Ok(());
         }
         let alone = Template {
@@ -1680,7 +1847,7 @@ impl Composer {
             dialects: Vec::new(),
         };
         match self
-            .collect_bindings(&alone, slots, &mut visited.clone())?
+            .collect_bindings(&alone, slots, &mut visited.clone(), reading.names())?
             .first()
         {
             Some(binding) => Err(Error::BindInDollarQuote {
@@ -2821,7 +2988,7 @@ mod tests {
         let mut slots = HashMap::new();
         slots.insert("source".into(), PathBuf::from("inner.sqlc"));
         let result = composer
-            .compose_inner(&template, &slots, &mut visited)
+            .compose_inner(&template, &slots, &mut visited, &[])
             .unwrap();
         assert_eq!(
             result.sql,
@@ -3185,6 +3352,192 @@ mod tests {
                 .compose(&file_template(&dir, "defined.sqlc"))
                 .unwrap()
                 .sql
+        );
+    }
+
+    /// `decl` names `core` in its `WITH` and composes `reader`, which composes `core`.
+    fn scope_fixture(dialect: Dialect) -> (TempDir, Composer) {
+        let dir = TempDir::new().unwrap();
+        write_temp_file(&dir, "core.sqlc", "SELECT 1 AS x");
+        write_temp_file(&dir, "other.sqlc", "SELECT 2 AS x");
+        write_temp_file(
+            &dir,
+            "reader.sqlc",
+            "SELECT r.x FROM (:compose(core.sqlc)) r",
+        );
+        write_temp_file(
+            &dir,
+            "decl.sqlc",
+            "WITH core AS (\n:define(core.sqlc)\n)\nSELECT a.x FROM (:compose(reader.sqlc)) a",
+        );
+        let mut composer = Composer::new(dialect);
+        composer.add_search_path(dir.path().to_path_buf());
+        (dir, composer)
+    }
+
+    fn composed(composer: &Composer, dir: &TempDir, name: &str, text: &str) -> String {
+        write_temp_file(dir, name, text);
+        composer.compose(&file_template(dir, name)).unwrap().sql
+    }
+
+    const DECL: &str =
+        "WITH core AS (\nSELECT 1 AS x\n)\nSELECT a.x FROM (SELECT r.x FROM (SELECT * FROM core) r) a";
+
+    #[test]
+    fn test_a_name_a_template_declares_stands_wherever_it_is_composed() {
+        let (dir, composer) = scope_fixture(Dialect::Postgres);
+        assert_eq!(
+            composed(&composer, &dir, "own.sqlc", ":compose(decl.sqlc)"),
+            DECL
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "sub.sqlc",
+                "SELECT s.x FROM (:compose(decl.sqlc)) s"
+            ),
+            format!("SELECT s.x FROM ({DECL}) s")
+        );
+        write_temp_file(
+            &dir,
+            "decl_slot.sqlc",
+            "WITH core AS (\n:define(core.sqlc)\n)\nSELECT a.x FROM (:compose(@part)) a",
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "filled.sqlc",
+                ":compose(decl_slot.sqlc, @part = reader.sqlc)"
+            ),
+            DECL
+        );
+        write_temp_file(
+            &dir,
+            "decl_union.sqlc",
+            "WITH core AS (\n:define(core.sqlc)\n)\n:union(reader.sqlc, core.sqlc)",
+        );
+        let union = composed(&composer, &dir, "union.sqlc", ":compose(decl_union.sqlc)");
+        assert_eq!(union.matches("SELECT 1 AS x").count(), 1, "{union}");
+        assert_eq!(union.matches("SELECT * FROM core").count(), 2, "{union}");
+    }
+
+    #[test]
+    fn test_a_name_stands_only_in_the_query_that_declares_it() {
+        let (dir, composer) = scope_fixture(Dialect::Postgres);
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "beside.sqlc",
+                "SELECT s.x FROM (:compose(decl.sqlc)) s, (:compose(core.sqlc)) t"
+            ),
+            format!("SELECT s.x FROM ({DECL}) s, (SELECT 1 AS x) t")
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "inner_with.sqlc",
+                "SELECT * FROM (WITH core AS (:define(core.sqlc)) SELECT x FROM core) s, \
+                 (:compose(core.sqlc)) t"
+            ),
+            "SELECT * FROM (WITH core AS (SELECT 1 AS x) SELECT x FROM core) s, \
+             (SELECT 1 AS x) t"
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "script.sqlc",
+                "WITH core AS (:define(core.sqlc)) SELECT x FROM core;\n\
+                 SELECT * FROM (:compose(core.sqlc)) t"
+            ),
+            "WITH core AS (SELECT 1 AS x) SELECT x FROM core;\nSELECT * FROM (SELECT 1 AS x) t"
+        );
+    }
+
+    #[test]
+    fn test_a_with_entry_further_in_hides_a_name_of_its_own() {
+        let (dir, mut composer) = scope_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "own_core.sqlc",
+            "WITH core AS (SELECT 2 AS x)\nSELECT i.x FROM (:compose(core.sqlc)) i",
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "hidden.sqlc",
+                "WITH core AS (:define(core.sqlc))\nSELECT a.x FROM (:compose(own_core.sqlc)) a"
+            ),
+            "WITH core AS (SELECT 1 AS x)\nSELECT a.x FROM (WITH core AS (SELECT 2 AS x)\n\
+             SELECT i.x FROM (SELECT 1 AS x) i) a"
+        );
+        // Two templates naming `core`, each for its own relation: inside the inner one, `core`
+        // is the inner one's.
+        write_temp_file(
+            &dir,
+            "other_core.sqlc",
+            "WITH core AS (:define(other.sqlc))\n\
+             SELECT i.x FROM (:compose(core.sqlc)) i, (:compose(other.sqlc)) o",
+        );
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "two.sqlc",
+                "WITH core AS (:define(core.sqlc))\nSELECT a.x FROM (:compose(other_core.sqlc)) a"
+            ),
+            "WITH core AS (SELECT 1 AS x)\nSELECT a.x FROM (WITH core AS (SELECT 2 AS x)\n\
+             SELECT i.x FROM (SELECT 1 AS x) i, (SELECT * FROM core) o) a"
+        );
+        // A view's unqualified name is hidden the same way.
+        composer.add_view(Path::new("core.sqlc"), "core").unwrap();
+        assert_eq!(
+            composed(
+                &composer,
+                &dir,
+                "viewed.sqlc",
+                "SELECT * FROM (:compose(core.sqlc)) c"
+            ),
+            "SELECT * FROM (SELECT * FROM core) c"
+        );
+        assert_eq!(
+            composer
+                .compose(&file_template(&dir, "own_core.sqlc"))
+                .unwrap()
+                .sql,
+            "WITH core AS (SELECT 2 AS x)\nSELECT i.x FROM (SELECT 1 AS x) i"
+        );
+    }
+
+    #[test]
+    fn test_a_declared_name_is_said_alike_by_every_way_of_composing() {
+        let (dir, composer) = scope_fixture(Dialect::Postgres);
+        write_temp_file(
+            &dir,
+            "own.sqlc",
+            ":compose(decl.sqlc)\nWHERE 1 = :bind(one)",
+        );
+        let template = file_template(&dir, "own.sqlc");
+        let values: BTreeMap<String, Vec<i32>> = BTreeMap::from([("one".into(), vec![1])]);
+        let with_values = composer.compose_with_values(&template, &values).unwrap();
+        assert_eq!(with_values.sql, composer.compose(&template).unwrap().sql);
+        assert_eq!(with_values.sql, format!("{DECL}\nWHERE 1 = $1"));
+
+        let held = composer.tree(&template).unwrap();
+        let reader = &held.holds[0].holds[1];
+        assert_eq!(reader.template, Path::new("reader.sqlc"));
+        assert_eq!(reader.holds[0].name.as_deref(), Some("core"));
+        assert_eq!(held.copies()[Path::new("core.sqlc")], 1);
+
+        let (dir, composer) = scope_fixture(Dialect::Mysql);
+        assert_eq!(
+            composed(&composer, &dir, "own.sqlc", ":compose(decl.sqlc)"),
+            DECL
         );
     }
 

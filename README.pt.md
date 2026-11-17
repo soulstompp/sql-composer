@@ -49,7 +49,7 @@ Para compor a partir de Rust, basta juntar a biblioteca:
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
+sql-composer = "0.1.1"
 ```
 
 Em C ou em Python, há pacotes que compõem dentro do programa que os usa (*C e Python*, mais
@@ -429,6 +429,11 @@ WITH theme_closure AS (
 
 A fonte da contagem também compõe `shared/theme_closure.sqlc` e, aí, lê-o como
 `SELECT * FROM theme_closure`.
+
+O nome vale onde a base de dados o encontraria, ou seja, no resto da consulta que contém o `WITH`,
+seja qual for o sítio onde o modelo que o escreve é, ele próprio, composto; já onde um `WITH` mais
+interior dá esse nome a outra coisa, o nome fica escondido, e aí o corpo volta a ser escrito por
+extenso.
 
 Um modelo feito de instruções `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` é um registo de
 vistas. Carregado com `cargo sqlc compose --views <registry>` ou com
@@ -912,7 +917,7 @@ de um modelo e o escrevem nas grafias escolhidas, como o `cargo sqlc spellings` 
 `cargo sqlc spell`.
 
 ```toml
-sql-composer = { version = "0.1.0", features = ["serde"] }
+sql-composer = { version = "0.1.1", features = ["serde"] }
 ```
 
 ### Controladores
@@ -927,8 +932,8 @@ mesmos para todos os dialetos, e só os marcadores mudam.
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-rusqlite = "0.1.0"
+sql-composer = "0.1.1"
+sql-composer-rusqlite = "0.1.1"
 ```
 
 ```rust,ignore
@@ -958,8 +963,8 @@ let _rows = stmt.query(refs.as_slice()).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-duckdb = "0.1.0"
+sql-composer = "0.1.1"
+sql-composer-duckdb = "0.1.1"
 ```
 
 ```rust,ignore
@@ -983,9 +988,9 @@ let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-postgres = "0.1.0"  # síncrono e assíncrono, ambos ligados por omissão
-# sql-composer-postgres = { version = "0.1.0", default-features = false, features = ["async"] }
+sql-composer = "0.1.1"
+sql-composer-postgres = "0.1.1"  # síncrono e assíncrono, ambos ligados por omissão
+# sql-composer-postgres = { version = "0.1.1", default-features = false, features = ["async"] }
 ```
 
 A funcionalidade `sync` traz o pacote `postgres` e, com ele, o tipo síncrono; a `async` liga o tipo
@@ -1022,9 +1027,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-mysql = "0.1.0"  # síncrono e assíncrono, ambos ligados por omissão
-# sql-composer-mysql = { version = "0.1.0", default-features = false, features = ["async"] }
+sql-composer = "0.1.1"
+sql-composer-mysql = "0.1.1"  # síncrono e assíncrono, ambos ligados por omissão
+# sql-composer-mysql = { version = "0.1.1", default-features = false, features = ["async"] }
 ```
 
 A funcionalidade `sync` traz o pacote `mysql` e, com ele, o tipo síncrono; a `async` liga o tipo
@@ -1062,8 +1067,8 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.1.0"                                        # confere no PostgreSQL (por omissão)
-# sql-composer-sqlx = { version = "0.1.0", features = ["validate"] } # junta a verificação da sintaxe sem ligação
+sql-composer-sqlx = "0.1.1"                                        # confere no PostgreSQL (por omissão)
+# sql-composer-sqlx = { version = "0.1.1", features = ["validate"] } # junta a verificação da sintaxe sem ligação
 ```
 
 O `verify_postgres`, da funcionalidade `postgres`, ligada por omissão, prepara cada instrução num

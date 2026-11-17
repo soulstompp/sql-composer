@@ -362,16 +362,17 @@ pub(crate) fn model(
                     .is_some_and(|on| on.conjuncts.iter().any(|(a, b)| (*a..=*b).contains(&t)))
             })
     };
-    for t in at.relation.0..=at.last() {
-        if matches!(
-            statement.tokens[t].token,
+    let span = at.relation.0..=at.last();
+    let stray_comment = span.clone().zip(&statement.tokens[span]).any(|(t, token)| {
+        matches!(
+            token.token,
             Token::Whitespace(
                 Whitespace::SingleLineComment { .. } | Whitespace::MultiLineComment(_)
             )
         ) && !between_relations(t)
-        {
-            return Err("a comment stands among its joins".into());
-        }
+    });
+    if stray_comment {
+        return Err("a comment stands among its joins".into());
     }
     Ok(Model {
         rels,

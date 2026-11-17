@@ -51,6 +51,7 @@ mod reserved;
 #[cfg(feature = "respell")]
 pub mod respell;
 mod scan;
+mod scope;
 pub mod source;
 #[cfg(feature = "spellings")]
 pub mod spellings;

@@ -46,7 +46,7 @@ To compose from Rust instead, add the library:
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
+sql-composer = "0.1.1"
 ```
 
 From C or Python, the bindings compose inside your own program (*C and Python*, below). A project
@@ -418,6 +418,10 @@ WITH theme_closure AS (
 
 The count's source composes `shared/theme_closure.sqlc` too, and reads it there as
 `SELECT * FROM theme_closure`.
+
+The name stands wherever the database would find it: in the rest of the query that holds the
+`WITH`, wherever the template that writes it is itself composed. A `WITH` further in that gives the
+name to something else hides it, and there the body is written out again.
 
 A template of `CREATE [OR REPLACE] VIEW <name> AS :define(<path>)` statements is a view registry.
 Loaded with `cargo sqlc compose --views <registry>` or `Composer::load_view_registry()`, it makes
@@ -877,7 +881,7 @@ which respells a composed file as `--respell` does. `spellings` brings in sqlpar
 the picks, as `cargo sqlc spellings` and `cargo sqlc spell` do.
 
 ```toml
-sql-composer = { version = "0.1.0", features = ["serde"] }
+sql-composer = { version = "0.1.1", features = ["serde"] }
 ```
 
 ### Driver crates
@@ -892,8 +896,8 @@ dialect; only the placeholders change.
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-rusqlite = "0.1.0"
+sql-composer = "0.1.1"
+sql-composer-rusqlite = "0.1.1"
 ```
 
 ```rust,ignore
@@ -923,8 +927,8 @@ let _rows = stmt.query(refs.as_slice()).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-duckdb = "0.1.0"
+sql-composer = "0.1.1"
+sql-composer-duckdb = "0.1.1"
 ```
 
 ```rust,ignore
@@ -948,9 +952,9 @@ let (sql, params) = conn.compose(&composer, &template, values).unwrap();
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-postgres = "0.1.0"  # sync and async, both on by default
-# sql-composer-postgres = { version = "0.1.0", default-features = false, features = ["async"] }
+sql-composer = "0.1.1"
+sql-composer-postgres = "0.1.1"  # sync and async, both on by default
+# sql-composer-postgres = { version = "0.1.1", default-features = false, features = ["async"] }
 ```
 
 The feature `sync` brings in the `postgres` crate and the sync type. `async` turns on the async
@@ -987,9 +991,9 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer = "0.1.0"
-sql-composer-mysql = "0.1.0"  # sync and async, both on by default
-# sql-composer-mysql = { version = "0.1.0", default-features = false, features = ["async"] }
+sql-composer = "0.1.1"
+sql-composer-mysql = "0.1.1"  # sync and async, both on by default
+# sql-composer-mysql = { version = "0.1.1", default-features = false, features = ["async"] }
 ```
 
 The feature `sync` brings in the `mysql` crate and the sync type. `async` turns on the async type,
@@ -1027,8 +1031,8 @@ let (sql, params) = conn.compose(&composer, &template, values)?;
 
 ```toml
 [dependencies]
-sql-composer-sqlx = "0.1.0"                                        # checks against PostgreSQL (the default)
-# sql-composer-sqlx = { version = "0.1.0", features = ["validate"] } # adds an offline syntax check
+sql-composer-sqlx = "0.1.1"                                        # checks against PostgreSQL (the default)
+# sql-composer-sqlx = { version = "0.1.1", features = ["validate"] } # adds an offline syntax check
 ```
 
 `verify_postgres`, under the feature `postgres` (on by default), prepares each statement on a live

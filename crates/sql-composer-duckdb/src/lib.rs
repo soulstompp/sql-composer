@@ -276,14 +276,25 @@ mod tests {
             keywords.len()
         );
 
+        // The list holds what 1.5 or 2.0 refuses. A DuckDB before 2.0 accepts these as a name.
+        const FROM_2_0: &[&str] = &["recursive"];
+        let version: String = conn
+            .prepare("SELECT version()")
+            .unwrap()
+            .query_row([], |row| row.get(0))
+            .unwrap();
+        let before_2_0 = version.trim_start_matches('v').starts_with("1.");
+        let listed =
+            |word: &str| reserved.contains(&word) && !(before_2_0 && FROM_2_0.contains(&word));
+
         let mut wrong: Vec<String> = keywords
             .into_iter()
-            .filter(|word| refuses(word) != reserved.contains(&word.as_str()))
+            .filter(|word| refuses(word) != listed(word))
             .collect();
         wrong.extend(
             reserved
                 .iter()
-                .filter(|w| !refuses(w))
+                .filter(|w| listed(w) && !refuses(w))
                 .map(|w| w.to_string()),
         );
         assert!(wrong.is_empty(), "listed wrongly for DuckDB: {wrong:?}");

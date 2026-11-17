@@ -11,21 +11,43 @@ use std::process::Command;
 mod common;
 use common::{brick, committed_brick, differences, files_under};
 
+/// The directory holding this library's `cdylib`, `library`, as cargo built it for this test.
+///
+/// Older cargo leaves the test and the `cdylib` side by side in `target/<profile>/deps`. Cargo
+/// 1.100 builds each in its own `target/<profile>/build/sql-composer-ffi/<hash>/out`, so the
+/// `cdylib` is in a sibling of the test's directory, and of several the newest is this build's.
+fn cdylib_dir(library: &str) -> PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let beside = exe.parent().unwrap();
+    if beside.join(library).is_file() {
+        return beside.to_path_buf();
+    }
+    let siblings = beside.parent().and_then(Path::parent).unwrap();
+    std::fs::read_dir(siblings)
+        .unwrap()
+        .filter_map(|entry| {
+            let dir = entry.ok()?.path().join("out");
+            let modified = dir.join(library).metadata().ok()?.modified().ok()?;
+            Some((modified, dir))
+        })
+        .max()
+        .map(|(_, dir)| dir)
+        .unwrap_or_else(|| {
+            panic!(
+                "{library} is neither beside the test nor in a sibling of {}",
+                beside.display()
+            )
+        })
+}
+
 /// The C program, built into `dir`.
 fn compose_tree(dir: &Path) -> PathBuf {
-    // The test runs from `target/<profile>/deps`, where cargo leaves this library's `cdylib`.
-    let exe = std::env::current_exe().unwrap();
-    let libraries = exe.parent().unwrap();
     let library = format!(
         "{}sql_composer_ffi{}",
         std::env::consts::DLL_PREFIX,
         std::env::consts::DLL_SUFFIX
     );
-    assert!(
-        libraries.join(&library).is_file(),
-        "{library} is beside the test in {}",
-        libraries.display()
-    );
+    let libraries = cdylib_dir(&library);
 
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let program = dir.join("compose_tree");
@@ -37,7 +59,7 @@ fn compose_tree(dir: &Path) -> PathBuf {
         .arg("-o")
         .arg(&program)
         .arg("-L")
-        .arg(libraries)
+        .arg(&libraries)
         .arg("-lsql_composer_ffi")
         .arg(format!("-Wl,-rpath,{}", libraries.display()))
         .output()

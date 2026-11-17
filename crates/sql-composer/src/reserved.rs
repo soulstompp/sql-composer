@@ -694,7 +694,7 @@ pub(crate) const MARIADB: &[&str] = &[
     "zerofill",
 ];
 
-/// The keywords DuckDB refuses as a name (1.5).
+/// The keywords DuckDB refuses as a name, in 1.5 or in 2.0: `recursive` from 2.0 alone.
 pub(crate) const DUCKDB: &[&str] = &[
     "all",
     "analyse",
@@ -774,6 +774,7 @@ pub(crate) const DUCKDB: &[&str] = &[
     "positional",
     "primary",
     "qualify",
+    "recursive",
     "references",
     "returning",
     "right",
